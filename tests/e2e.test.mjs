@@ -11466,22 +11466,15 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   /* a fresh start: the name over a short menu, the first row inverted, RANDOM dashed and closed */
   const title = await f.evaluate(() => {
     const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
-    const art = [...document.querySelectorAll("#title-art .cell")];
-    const artBox = document.getElementById("title-art").getBoundingClientRect();
+    const artEl = document.getElementById("title-art"), artBox = artEl.getBoundingClientRect();
     return {
-      name: document.getElementById("cover-text").textContent,
+      nameHidden: document.getElementById("cover-text").hidden,
       rows: rows.map((li) => li.textContent),
       sel: rows.map((li) => li.classList.contains("sel")),
       locked: rows.map((li) => li.classList.contains("locked")),
       dashed: rows[2] ? getComputedStyle(rows[2]).borderTopStyle : "",
       icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
-      art: {
-        cells: art.length,
-        filled: art.filter((c) => c.classList.contains("on")).length,
-        word: art.filter((c) => c.classList.contains("on")).map((c) => c.textContent).join(""),
-        open: art.filter((c) => c.classList.contains("pending")).map((c) => c.textContent).join(""),
-        w: Math.round(artBox.width), h: Math.round(artBox.height),
-      },
+      art: { tag: artEl.tagName, painted: artEl.width >= 156, w: artBox.width, h: artBox.height },
       progress: [...document.querySelectorAll("#cover-list .prog")].map((el) => el.textContent),
       size: [root.clientWidth, root.clientHeight],
       gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
@@ -11493,17 +11486,14 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
     };
   });
   assert.deepEqual(title.size, [331, 359]);
-  assert.equal(title.name, "拼字格");
+  assert.equal(title.nameHidden, true, "the picture carries the name, so no line repeats it");
   assert.deepEqual(title.rows, ["继续 · 第 1 关", "选关", "随机关通关 30 关后开放", "玩法"]);
   assert.deepEqual(title.sel, [true, false, false, false], "the title opens on CONTINUE");
   assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 30");
   assert.equal(title.dashed, "dashed", "the locked row has a dashed border");
   assert.deepEqual(title.icons, [true, true, true, true], "every title row has its pixel icon");
-  assert.deepEqual(title.art.cells, 10, "the art is W, CROSSING and N");
-  assert.equal(title.art.filled, 8, "the eight CROSSING cells use the filled-cell look");
-  assert.equal(title.art.word, "CROSSING", "the across word is CROSSING");
-  assert.equal(title.art.open, "WN", "W and N wait to be found");
-  assert.deepEqual([title.art.w, title.art.h], [167, 62], "20 px cells with the board's 1 px gaps");
+  assert.equal(title.art.tag, "CANVAS", "the title picture is a canvas");
+  assert.ok(title.art.painted && title.art.w >= 60 && title.art.w === title.art.h, "the square picture is painted and shown: " + title.art.w);
   assert.deepEqual(title.progress, [], "a fresh start has no progress on the ROUNDS row");
   assert.ok(title.gaps.length === 3 && title.gaps.every((g) => g >= 8), "the menu rows keep 8 px apart: " + title.gaps);
   assert.equal(title.fit, true, "the title and its art stay inside 331x359");
@@ -11999,15 +11989,11 @@ test("crossing: in English the line under the grid is an English definition", { 
     return f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false);
   }, "the title screen");
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
-  /* the art spells CROSSING itself, so no separate English word sits under it */
-  const enTitleName = await f.evaluate(() => {
-    const text = document.getElementById("cover-text");
-    const art = [...document.querySelectorAll("#title-art .cell.on")].map((c) => c.textContent).join("");
-    return { text: text.textContent, hidden: text.hidden, art, cells: document.querySelectorAll("#title-art .cell").length };
-  });
-  assert.equal(enTitleName.art, "CROSSING", "the English title art says CROSSING");
-  assert.equal(enTitleName.cells, 10, "the English art has the same ten cells");
-  assert.equal(enTitleName.hidden, true, "no English word repeats the art");
+  await p.waitForTimeout(200);
+  /* the picture spells CROSSING itself, so no separate English word sits under it */
+  const enTitleName = await f.evaluate(() => ({ hidden: document.getElementById("cover-text").hidden, tag: document.getElementById("title-art").tagName }));
+  assert.equal(enTitleName.tag, "CANVAS", "the English title has the picture too");
+  assert.equal(enTitleName.hidden, true, "no English word repeats the picture");
   /* the English locked row is the longest label: it, the rows' 8 px gaps and the footer still fit 331x359 */
   const enTitle = await f.evaluate(() => {
     const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");

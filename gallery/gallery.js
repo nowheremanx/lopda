@@ -146,10 +146,10 @@ window.LOPDA_GALLERY = [
     },
     uses: ["wordbook", "touch", "buttons", "save"],
     scene: {
-      /* round 1 (past the first-time demo): two words before the film, three during it; the grid one word short is the cover */
-      setup: [["wait", 1200], ["still"], ["key", "x", 80], ["wait", 1500], ["tapIn", "#wheel", 0.5, 0.5], ["wait", 800], ["key", "x", 80], ["wait", 1200],
+      /* the title screen is the cover; then round 1 (past the first-time demo): two words before the film, three during it */
+      setup: [["wait", 1200], ["cover"], ["key", "x", 80], ["wait", 1500], ["tapIn", "#wheel", 0.5, 0.5], ["wait", 800], ["key", "x", 80], ["wait", 1200],
         ["swipe", "#wheel .key", "sea"], ["wait", 900], ["swipe", "#wheel .key", "lace"], ["wait", 1100]],
-      clip: [["swipe", "#wheel .key", "case"], ["wait", 1000], ["still"], ["swipe", "#wheel .key", "sale"], ["wait", 1000], ["cover"], ["swipe", "#wheel .key", "scale"], ["wait", 900]]
+      clip: [["swipe", "#wheel .key", "case"], ["wait", 1000], ["still"], ["swipe", "#wheel .key", "sale"], ["wait", 1000], ["still"], ["swipe", "#wheel .key", "scale"], ["wait", 900]]
     }
   },
   {

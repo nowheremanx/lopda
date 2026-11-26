@@ -69,13 +69,10 @@
   /* The title and the round picker use the results card's own cover column, so every screen speaks the same
      language: paper, ink, one inverted cursor. The title rows are taller than the results rows because a
      finger picks them. */
-  /* The title is a centred column: the little crossword, then (in Chinese) the name, the menu and the keys.
-     The art uses the board's own .cell look, so it reads as a puzzle the player has already met. */
+  /* The title is a centred column: the picture (the name is written in it), the menu and the keys. */
   #cover.title { gap: 8px; padding: 10px 12px; justify-content: center; }
   #title-art { display: none; }
-  #cover.title #title-art { display: grid; grid-template-columns: repeat(8, 20px); grid-auto-rows: 20px; gap: 1px; }
-  #cover.title #title-art .cell { font-size: 13px; }
-  #cover.title #title-art .cell.pending { color: #4a5a32; }
+  #cover.title #title-art { display: block; flex: none; image-rendering: pixelated; }
   #cover.title #cover-text { font-size: 22px; font-weight: bold; letter-spacing: 4px; line-height: 1.2; margin: 0; }
   #cover.title #cover-list { display: flex; flex-direction: column; gap: 8px; max-width: 240px; font-size: 15px; }
   #cover.title #cover-list li { box-sizing: border-box; height: 44px; line-height: 1; padding: 0 8px 0 14px; border-bottom: 0;
@@ -174,13 +171,56 @@
 </main>
 <footer id="goal"></footer>
 <div id="cover">
-  <div id="title-art" aria-hidden="true"></div>
+  <canvas id="title-art" aria-hidden="true"></canvas>
   <p id="cover-text"></p>
   <ul id="cover-list" hidden></ul>
   <div id="cover-detail"></div>
   <div id="cover-actions"><button id="cover-btn" type="button"></button><button id="cover-btn2" type="button" hidden></button></div>
   <div id="cover-foot" hidden></div>
 </div>
+<script>
+/* the title picture: a 156 x 156 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
+   A finger drags a word across the letter wheel under a desk lamp, the crossword waiting behind it; the name is
+   written on the dark wall above. Stored packed, 2 bits a pixel; the letters are lopix12 glyphs (sdk/fonts, OFL). */
+var ART = (function () {
+  var W = 156, H = 156;
+  var PIC = "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq+qr76qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6qv66qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr6qvm+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq///qvrr6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/pav//vm/qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqv5Vqqv/+Va+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr6Vaqqq//lWv6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvlVqqqq/76Vq/6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqquVVqqqq/6/qV/+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq9VWqqqq/6r6pq/qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr1VWqqqq/+qvpbqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqvVVaqqqr/+qr9uVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqv/+qqqqr//qqvtWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq+qqvqqqv//qqv9XqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqtABa+qqv//qqr9XqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpeQAAa+q///qqr/rqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQHkAAAf6///qqq//qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpAB9QAAAv///qqq2+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAALlAAACv//qqq2+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpAAABuUAAAL//qqq2+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAK5AAABv/qqr2+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlAAAAAArVAAAb/qqrm+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAGrVQAC+qqra6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpAAAAAAAACr6VV+qqra6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkAAAAAAAAABa//6qqra6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpQAAAAAAAAAAWqqqqqta2qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkAAAAAAAAAAAVqqqqqtrmqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAAAAAAVqqqqqsrmqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlAAAAAAAAAAABVWqqqq8rqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAAAAAABVVqqqq8rmqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlAAAAAAAAAAAABVVqqqr1vqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgAAAAAAAAAAAABVVqqv7yv/qqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAAAAAAAAAAAABVVar6jmurqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAAAAAAAAFVVV+qm/+rqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAAAAAAAAAAAAAFVVa2q6v+vqqqqqqqqqqqqqqqqqqqqqqqqqqqVAAAAAAAAAAAAAAFVVbWquqr/qqqqqqqqqqqqqqqqqqqqqqqqqqpVVQAAAAAAAAAAAAFVVfWqr///qqqqqqqqqqqqqqqqqqqqqqqqqqlVVVUAAAAAAAAAAAVVVeRqqv/6qqqqqqqqqqqqqqqqqqqqqqqqqpVVVVVVAAAAAAAAAAVVVepFqqqlqqqqqqqqqqqqqqqqqqqqqqqqqlVVVVVVVQAAAAAAAAVaquqlVVWqqqqqqqqqqqqqqqqqqqqqqqqqpVVVVVVVVVVAAAAFVWqqqvqqaqr/qqqqqqqqqqqqqqqqqqqqqqqqlVVVVVVVVVVVVapqqpblVbqqq///qqqqqqqqqqqqqqqqqqqqqqqqVVVVVVVVVWqqq1WlVVVpVW6qq///qqqqqqqqqqqqqqqqqqqqqqqpVVVVVVVqqqVVVVVVVVVeVVv6q///qqqqqqqqqqqqqqqqqqqqqqqVVVVVWv/lQFVVVVWqpWVX1Vb/////qqqqqqqqqqqqqqqqqqqqqqpVVar6qlUBBVVWqqlVVVVV5VWq////qqqqqqqq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hWqqq///6pavqqqqpVVVVVaqlVVWlaqqqVq/qVqqqqqqqrgC/+AH2qqqqr/6qlr/qqqlVVVVVVVVVVVWqqqpVVav6paqqqqqqr1BqqAb6qqqqqqqqWr+qqpVVVVVVVVVVVVWlVVVVVWr+qRqqqqqqr/AAAC/6qqqqqqqkav6qpVVVVVqqqpVVVVWlVVVVVVq/6pGqqqqqq/8AAv/qqqqqqqqGq/qqVVVVVVVVVaqqqqqqqqpVVZar+qkWqqqqqv////+qqqqqqqQqv+qqVqqqqVVVVVVWqlWqlVVqqqqq/6qlaqqqqr////6qqqqqqVar/6qmqqqqqVVVVVVVVVWlVVVqqqqqv/q5VWqqqqv//6qqqqqqVWqv/qlWqqVVVVVWpVVVVVWlVVVVVVVar///lVWqqqr//qqqqqqVVr7/+pVVVVVZVVVVVqqVWqqlVVVVVVVVqv///qWVaqqqqqqqqlVVv7//qlVVVVaqmqqqpVVVWqqlVVVWlpVZar////+VWqqqqqqqqlVv///+qVVVZVVVWqqqpVVVVWqlVWqqqqVWVqr/////0AKqqqqgAP/////qpVqqqpVVVVVVVVVVVVWlaqlVVVVZVWqr//////0AAAAf//////6qVVVVVVqqqVVVVaqqqlWlVVVVVVVqVVaqq////////////////qqlVqlVVVVVVVVVVVVVVamlVVVqpVVqpVaqqv//////////////6qqVVaqpVVVVVqlVVVVVVVWlVVVqpVVVVVVaqqr////////////qqqlVVValVVVVVqlVWqqVVVWlVVVVVVVVVVVVWqqqv////////+qqqlVVVVVVVVVVVVVVWqqVVVWqqqqqqqqqqqqqqqqqqqv////6qqqqqqqqqqqqqqqqqqqqqqqqqqq";
+  var GLYPH = {" ":"6:AAAAAAAAAAAAAA==","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","L":"6:AAgggggggg+AAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","字":"12:AABA/+gCv6AQAgBA/+BABAHAAAA=","拼":"12:AARCQk7+QkQkYkz+QkQkREyEAAA=","格":"12:AAIgI89EKoIQYobGt8JEJEJ8AAA=","盘":"12:AABAP8JEIk/+JEQsAAf8Sk/+AAA=","词":"12:AAj+QCD6ACz6SKSKSKT6YCQOAAA=","转":"12:AAIQ98QQoQr+8gJ8ME4oIQIIAAA="};
+  function glyph(ch) {
+    var s = GLYPH[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [];
+    for (var y = 0; y < 14; y++) { var r = []; for (var x = 0; x < w; x++) { var i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
+    /* drop the empty columns on both sides: the title is set tight */
+    var l = 0, rr = w - 1, col = function (x) { for (var y = 0; y < 14; y++) if (rows[y][x]) return true; return false; };
+    while (l < rr && !col(l)) l++; while (rr > l && !col(rr)) rr--;
+    return { w: rr - l + 1, rows: rows.map(function (r) { return r.slice(l, rr + 1); }) };
+  }
+  /* a line of glyphs at scale s, tone t, with a shadow of tone sh one pixel down and right */
+  function text(px, str, x, y, s, gap, t, sh) {
+    var gs = str.split("").map(function (ch) { return ch === " " ? { w: 3, rows: [] } : glyph(ch); });
+    [[1, sh], [0, t]].forEach(function (pass) {
+      var cx = x + pass[0];
+      gs.forEach(function (g) {
+        for (var j = 0; j < g.rows.length; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i])
+          for (var a = 0; a < s; a++) for (var b = 0; b < s; b++) {
+            var X = cx + i * s + a, Y = y + pass[0] + j * s + b;
+            if (X >= 0 && Y >= 0 && X < W && Y < H) px[Y * W + X] = pass[1];
+          }
+        cx += g.w * s + gap;
+      });
+    });
+  }
+  function draw(lang) {
+    var px = new Uint8Array(W * H), b = atob(PIC);
+    for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
+    var en = lang === "en";
+    text(px, en ? "CROSSING" : "拼字格", 4, en ? 3 : 4, 2, en ? 1 : 4, 0, 3);
+    text(px, en ? "WORD WHEEL" : "转盘拼词", 5, 33, 1, en ? 1 : 3, 0, 3);
+    return px;
+  }
+  return { W: W, H: H, draw: draw };
+})();
+</script>
 <script>
 (function () {
   "use strict";
@@ -784,10 +824,9 @@
     phase = "title";
     coverEl.classList.remove("done", "help", "pick", "confirm");
     coverEl.classList.add("title");
-    /* the art already spells CROSSING, so the English title needs no word under it */
-    coverText.textContent = LANG === "zh" ? TXT.appName : "";
-    coverText.hidden = LANG !== "zh";
-    buildTitleArt();
+    /* the picture already carries the name in both languages */
+    coverText.textContent = "";
+    coverText.hidden = true;
     var firstRandom = state.cleared >= 100 && mainRound > 100;
     titleRows = [];
     if (firstRandom) titleRows.push({ kind: "random" });
@@ -828,22 +867,36 @@
     footEl.textContent = TXT.titleKeys;
     footEl.hidden = false;
     coverEl.hidden = false;
+    paintTitleArt();
     renderTitle();
   }
-  /* W over the I of CROSSING and N under it: a tiny board that already says the game's name. */
-  function buildTitleArt() {
-    titleArt.innerHTML = "";
-    function artCell(ch, on, r, c) {
-      var el = document.createElement("div");
-      el.className = "cell" + (on ? " on" : " pending");
-      el.textContent = ch;
-      el.style.gridRow = String(r);
-      el.style.gridColumn = String(c);
-      titleArt.appendChild(el);
+  /* The title picture as large as the room above the menu and the keys allows (at most 3x); on a screen too
+     short for 1x it shrinks rather than push the menu off. Written with putImageData only. */
+  var titlePx = null, TITLE_TONES = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
+  function paintTitleArt() {
+    if (phase !== "title") return;
+    var W = ART.W, H = ART.H;
+    /* measure what the rest of the column takes with the picture folded away, top-aligned for the moment */
+    titleArt.style.height = "0px";
+    coverEl.style.justifyContent = "flex-start";
+    var top = coverEl.getBoundingClientRect().top, used = footEl.getBoundingClientRect().bottom - top + 10;
+    coverEl.style.justifyContent = "";
+    var room = coverEl.clientHeight - used;
+    /* k whole device pixels per picture pixel, so every pixel stays a sharp square at any scale */
+    var d = window.devicePixelRatio || 1;
+    var fit = Math.max(0.25, Math.min((window.innerWidth - 24) / W, room / H, 3)) * d, k = Math.max(1, Math.floor(fit));
+    titleArt.style.width = (W * (fit < 1 ? fit : k) / d) + "px";
+    titleArt.style.height = (H * (fit < 1 ? fit : k) / d) + "px";
+    if (titleArt.width === W * k && titleArt.height === H * k && titlePx) return;
+    if (!titlePx) titlePx = ART.draw(LANG);
+    titleArt.width = W * k;
+    titleArt.height = H * k;
+    var cx = titleArt.getContext("2d"), img = cx.createImageData(W * k, H * k), o = img.data;
+    for (var y = 0; y < H * k; y++) for (var x = 0; x < W * k; x++) {
+      var t = TITLE_TONES[titlePx[((y / k) | 0) * W + ((x / k) | 0)]], i = (y * W * k + x) * 4;
+      o[i] = t[0]; o[i + 1] = t[1]; o[i + 2] = t[2]; o[i + 3] = 255;
     }
-    artCell("W", false, 1, 6);
-    "CROSSING".split("").forEach(function (ch, i) { artCell(ch, true, 2, i + 1); });
-    artCell("N", false, 3, 6);
+    cx.putImageData(img, 0, 0);
   }
   function renderTitle() {
     var rows = coverList.querySelectorAll("li"), i;
@@ -1202,7 +1255,7 @@
     boardEl.style.gridAutoRows = cell + "px";
     boardEl.style.fontSize = Math.max(12, Math.min(17, cell - 5)) + "px";
   }
-  window.addEventListener("resize", function () { layoutSizes(); renderBoard(); });
+  window.addEventListener("resize", function () { layoutSizes(); renderBoard(); paintTitleArt(); });
 
   /* ---------- play ---------- */
 
