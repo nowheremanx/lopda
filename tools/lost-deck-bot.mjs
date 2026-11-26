@@ -32,7 +32,7 @@ export function playDeck(deckIdx, seed, verbose) {
   function passable(x, y, cards) {
     const c = w.cell(x, y);
     if (c === 0 || c === 10) return true;
-    if (c >= 11 && c <= 13) return w.cards[c - 10];
+    if (c >= 11 && c <= 14) return w.cards[c - 10];
     return false;
   }
   function solidThing(x, y) { return w.things.some(o => o.solid && !o.dead && !o.gone && (o.x | 0) === x && (o.y | 0) === y); }
@@ -60,19 +60,22 @@ export function playDeck(deckIdx, seed, verbose) {
     for (const o of w.things) {
       if (o.kind === 'item' && !o.gone) {
         const it = o.it;
-        if (it.kind === 'card' || it.kind === 'gun') cands.push({ x: o.x | 0, y: o.y | 0, pri: 0 });
-        if (it.kind === 'med' && P.hp < 70) cands.push({ x: o.x | 0, y: o.y | 0, pri: 0.5 });
-        if (it.kind === 'ammo' && P.ammo < 30) cands.push({ x: o.x | 0, y: o.y | 0, pri: 0.5 });
+        if (it.kind === 'card' || it.kind === 'gun') cands.push({ x: o.x | 0, y: o.y | 0, pri: 0, fx: o.x, fy: o.y });
+        if (it.kind === 'med' && P.hp < 70) cands.push({ x: o.x | 0, y: o.y | 0, pri: 0.5, fx: o.x, fy: o.y });
+        if (it.kind === 'ammo' && P.ammo < 30) cands.push({ x: o.x | 0, y: o.y | 0, pri: 0.5, fx: o.x, fy: o.y });
       }
       if (o.kind === 'foe' && !o.dead && (o.type === 'node' || o.type === 'core')) cands.push({ x: o.x | 0, y: o.y | 0, pri: o.type === 'core' ? 1.5 : 1, near: true });
     }
-    for (let y = 0; y < M.h; y++) for (let x = 0; x < M.w; x++) if (w.cell(x, y) === 14) cands.push({ x, y, pri: 2, wall: true });
+    for (let y = 0; y < M.h; y++) for (let x = 0; x < M.w; x++) {
+      if (w.cell(x, y) === 19) cands.push({ x, y, pri: 2, wall: true });
+      if (w.cell(x, y) === 8 && !w.cards[4]) cands.push({ x, y, pri: 0.8, wall: true, sw: true });
+    }
     let best = null, bp = null;
     for (const c of cands) {
       const p = path(c.x, c.y, c.wall || c.near);
       if (!p) continue;
       const score = c.pri * 1000 + p.length;
-      if (!best || score < best.score) { best = { score, c }; bp = p; }
+      if (!best || score < best.score) { best = { score, c }; bp = p; bp.sw = c.sw; bp.fx = c.fx; bp.fy = c.fy; }
     }
     return bp;
   }
@@ -100,7 +103,12 @@ export function playDeck(deckIdx, seed, verbose) {
       if (P.gun !== want) input.swap = true;
     } else {
       if (--replan <= 0) { route = goal(); replan = 20; }
-      if (route && route.length > 1) {
+      if (route && route.length === 1 && route.fx != null) {
+        /* the thing is in this very cell: walk onto it */
+        const a = Math.atan2(route.fy - P.y, route.fx - P.x), da = w.angDiff(a, P.a);
+        if (da > 0.08) input.right = true; else if (da < -0.08) input.left = true;
+        if (Math.abs(da) < 0.5) input.up = true;
+      } else if (route && route.length > 1) {
         let i = 1; while (i < route.length - 1 && (P.x | 0) === route[i - 1][0] && false) i++;
         const cx = P.x | 0, cy = P.y | 0;
         let idx = route.findIndex(r => r[0] === cx && r[1] === cy);
@@ -108,6 +116,7 @@ export function playDeck(deckIdx, seed, verbose) {
         const a = Math.atan2(nx[1] + 0.5 - P.y, nx[0] + 0.5 - P.x), da = w.angDiff(a, P.a);
         if (da > 0.08) input.right = true; else if (da < -0.08) input.left = true;
         if (Math.abs(da) < 0.6) input.up = true;
+        if (route.sw && route.length - idx <= 2 && Math.abs(da) < 0.3) { input.use = true; input.up = false; replan = 0; }
       }
     }
     if (input.swap && w._swapT > w.time) input.swap = false; else if (input.swap) w._swapT = w.time + 0.3;

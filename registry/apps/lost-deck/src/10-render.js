@@ -56,8 +56,9 @@
     hit.d = 60; hit.tex = 1; return hit;
   }
 
-  function texOf(id, time) {
+  function texOf(id, time, M) {
     var t = LD.TEX[id];
+    if (id === 8) return t[M.lit ? 1 : 0];   /* the switch shows which way it was thrown */
     if (Array.isArray(t)) t = t[Math.floor(time * 2) % t.length];
     return t;
   }
@@ -104,7 +105,7 @@
       var h = cast(M, px, py, rdx, rdy, M.seen);
       var d = h.d < 0.05 ? 0.05 : h.d;
       zbuf[x2] = d;
-      var tex = texOf(h.tex, time), tw = tex.w, tp = tex.px;
+      var tex = texOf(h.tex, time, M), tw = tex.w, tp = tex.px;
       var lh = PROJ / d, top = hz - lh / 2;
       var y0 = top < 0 ? 0 : Math.ceil(top), y1 = Math.min(VH, Math.ceil(hz + lh / 2));
       var u = (h.u * tw) | 0; if (u >= tw) u = tw - 1;

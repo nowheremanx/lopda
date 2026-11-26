@@ -9,7 +9,7 @@ import { boot } from "./app-vm.mjs";
 import { load, playDeck } from "../tools/lost-deck-bot.mjs";
 
 const LD = load();
-const WALLS = "#PCWMKTES", DOORS = "D123";
+const WALLS = "#PCWMKTXES", DOORS = "D123=";
 
 test("lost-deck: every deck map is closed, its doors sit between walls, and every thing is on it", () => {
   for (const D of LD.DECKS) {
@@ -20,7 +20,7 @@ test("lost-deck: every deck map is closed, its doors sit between walls, and ever
     assert.equal(m.join("").split("@").length - 1, 1, `deck ${D.id}: one start`);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const c = at(x, y);
-      assert.ok("#PCWMKTDE123S.~@cfsgnBzaAhHuovGxiklb".includes(c), `deck ${D.id}: unknown "${c}" at ${x},${y}`);
+      assert.ok("#PCWMKTXDE123=S.~@cfsgnBzaAhHuovGxiklb".includes(c), `deck ${D.id}: unknown "${c}" at ${x},${y}`);
       if (!DOORS.includes(c)) continue;
       const wall = (q) => WALLS.includes(q), lr = wall(at(x - 1, y)) && wall(at(x + 1, y)), ud = wall(at(x, y - 1)) && wall(at(x, y + 1));
       assert.ok(lr !== ud, `deck ${D.id}: door at ${x},${y} must have walls on exactly one axis`);
@@ -42,10 +42,11 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
           const nx = x + dx, ny = y + dy, c = at(nx, ny), k = nx + "," + ny;
           if (seen.has(k)) continue;
           if (c === "E") { exit = true; continue; }
-          if ("123".includes(c) && !cards.has(c)) continue;
+          if (c === "X") { got.add("="); continue; }   /* a switch, thrown from the cell beside it */
+          if ("123=".includes(c) && !cards.has(c)) continue;
           if ("#PCWMKT".includes(c) || (c === "S" && !secrets)) continue;
           seen.add(k);
-          if ("ikx".includes(c)) continue;   /* columns, crates and canisters block the way */
+          if ("ikxl".includes(c)) continue;   /* columns, crates, canisters and lamps block the way */
           q.push([nx, ny]);
           if (c === "u") got.add("1"); if (c === "o") got.add("2"); if (c === "v") got.add("3");
         }

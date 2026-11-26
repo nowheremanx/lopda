@@ -6,10 +6,11 @@
   "use strict";
   var LD = window.LD;
 
-  /* map characters -> cell codes. 1-7 walls, 10 door, 11-13 doors that need a card, 14 lift (the exit),
-     15 a wall that slides away when you press B on it (a secret) */
-  var CELL = { "#": 1, "P": 2, "C": 3, "W": 4, "M": 5, "T": 6, "K": 7, "D": 10, "1": 11, "2": 12, "3": 13, "E": 14, "S": 15 };
-  var SOLID_WALL = function (c) { return (c >= 1 && c <= 7) || c === 14 || c === 15; };
+  /* map characters -> cell codes. 1-7 walls, 8 a switch (B throws it and opens every shutter), 10 door,
+     11-13 doors that need a card, 14 a shutter (a door whose "card" is the switch), 18 a wall that slides away
+     when you press B on it (a secret), 19 the lift (the way out) */
+  var CELL = { "#": 1, "P": 2, "C": 3, "W": 4, "M": 5, "T": 6, "K": 7, "X": 8, "D": 10, "1": 11, "2": 12, "3": 13, "=": 14, "S": 18, "E": 19 };
+  var SOLID_WALL = function (c) { return (c >= 1 && c <= 8) || c === 18 || c === 19; };
 
   var FOES = {
     crawler: { hp: 2, spd: 2.1, r: 0.28, h: 0.5, sight: 10, melee: { dmg: 7, range: 0.78, cd: 0.8 } },
@@ -42,7 +43,7 @@
     var M = this.M = { w: w, h: h, cells: new Uint8Array(w * h), open: new Float32Array(w * h), axis: new Uint8Array(w * h),
       timer: new Float32Array(w * h), seen: new Uint8Array(w * h), slime: null, dist: new Int16Array(w * h) };
     this.things = []; this.time = 0; this.kills = 0; this.foes = 0; this.secrets = 0; this.secretsFound = 0;
-    this.cards = [false, false, false, false]; this.logs = []; this.fx = [];
+    this.cards = [false, false, false, false, false];   /* 1-3 the cards, 4 the switch */ this.logs = []; this.fx = [];
     var P = this.P = { x: 1.5, y: 1.5, a: (deck.face || 0) * Math.PI / 180, hp: 100, ammo: deck.ammo != null ? deck.ammo : 30,
       guns: { wrench: true, rivet: true, scatter: !!deck.scatter }, gun: "rivet", cd: 0, kick: 0, hurt: 0, hurtDir: 0,
       bob: 0, moving: 0, gas: 0, pick: 0, dead: false, turnV: 0 };
@@ -72,7 +73,7 @@
     }
     /* door orientation: a door between two walls on the left and right blocks travel north-south */
     for (var j = 0; j < w * h; j++) {
-      var c = M.cells[j]; if (c < 10 || c > 14) continue;
+      var c = M.cells[j]; if (c < 10 || c > 14) continue;   /* doors and shutters */
       var jx = j % w, jy = (j / w) | 0;
       M.axis[j] = this.wallAt(jx - 1, jy) && this.wallAt(jx + 1, jy) ? 1 : 0;
     }
@@ -100,7 +101,7 @@
   W.blockedCell = function (x, y) {
     var c = this.cell(x, y);
     if (c === 0) return false;
-    if (c >= 10 && c <= 13) return this.M.open[y * this.M.w + x] < 0.85;
+    if (c >= 10 && c <= 14) return this.M.open[y * this.M.w + x] < 0.85;
     return true;
   };
   W.blocked = function (x, y, r) {
@@ -111,7 +112,7 @@
   W.opaque = function (x, y) {
     var c = this.cell(x, y);
     if (c === 0) return false;
-    if (c >= 10 && c <= 13) return this.M.open[y * this.M.w + x] < 0.95;   /* the same leaf a rivet stops at */
+    if (c >= 10 && c <= 14) return this.M.open[y * this.M.w + x] < 0.95;   /* the same leaf a rivet stops at */
     return true;
   };
   W.sightLine = function (x0, y0, x1, y1) {
@@ -136,7 +137,7 @@
         if (nx < 0 || ny < 0 || nx >= w || ny >= M.h) continue;
         var j = ny * w + nx, c = M.cells[j];
         if (dist[j] >= 0) continue;
-        if (c !== 0 && c !== 10 && !(c >= 11 && c <= 13 && M.open[j] > 0.5)) continue;
+        if (c !== 0 && c !== 10 && !(c >= 11 && c <= 14 && M.open[j] > 0.5)) continue;
         dist[j] = nd; q[qt++] = j;
       }
     }
@@ -145,14 +146,22 @@
   /* ---------------- doors ---------------- */
   W.tryDoor = function (x, y, byPlayer) {
     var M = this.M, i = y * M.w + x, c = this.cell(x, y);
-    if (c === 14) { if (byPlayer && !this.done) this.hooks.exit && this.hooks.exit(); return true; }
-    if (c === 15 && byPlayer) {
+    if (c === 19) { if (byPlayer && !this.done) this.hooks.exit && this.hooks.exit(); return true; }
+    if (c === 8 && byPlayer) {
+      if (!this.cards[4]) {
+        this.cards[4] = true; this.pcell = -1;
+        for (var g = 0; g < M.w * M.h; g++) if (M.cells[g] === 14) M.timer[g] = 0.01;
+        this.hooks.flip && this.hooks.flip();
+      }
+      return true;
+    }
+    if (c === 18 && byPlayer) {
       M.cells[i] = 0; this.secretsFound++; this.pcell = -1;
       this.hooks.secret && this.hooks.secret(this.secretsFound, this.secrets);
       return true;
     }
     if (c === 6 && byPlayer) { this.hooks.terminal && this.hooks.terminal(this.logs[i]); return true; }
-    if (c < 10 || c > 13) return false;
+    if (c < 10 || c > 14) return false;
     if (c > 10 && !this.cards[c - 10]) {
       if (byPlayer) this.hooks.locked && this.hooks.locked(c - 10);
       return true;
@@ -164,11 +173,11 @@
   W.updateDoors = function (dt) {
     var M = this.M, n = M.w * M.h, P = this.P;
     for (var i = 0; i < n; i++) {
-      var c = M.cells[i]; if (c < 10 || c > 13) continue;
+      var c = M.cells[i]; if (c < 10 || c > 14) continue;
       if (M.timer[i] > 0) {
         if (M.open[i] < 1) { M.open[i] = Math.min(1, M.open[i] + dt * 2.2); if (M.open[i] >= 1) M.timer[i] = 0.01; }
         else {
-          M.timer[i] += dt;
+          if (c !== 14) M.timer[i] += dt;   /* shutters stay up once the switch is thrown */
           if (M.timer[i] > 3.5) {
             var x = i % M.w, y = (i / M.w) | 0;
             if (!this.doorBusy(x, y)) { M.timer[i] = -1; this.hooks.door && this.hooks.door(x + 0.5, y + 0.5); } else M.timer[i] = 2.5;
@@ -260,7 +269,7 @@
         var tries = [[P.x + ca * 0.6, P.y + sa * 0.6], [P.x + ca * 0.6, P.y], [P.x, P.y + sa * 0.6]];
         for (var q = 0; q < 3; q++) {
           var fx = tries[q][0] | 0, fy = tries[q][1] | 0, c = this.cell(fx, fy);
-          if (c >= 10 && c <= 14) { this.tryDoor(fx, fy, true); break; }
+          if ((c >= 10 && c <= 14) || c === 19) { this.tryDoor(fx, fy, true); break; }
         }
       }
     } else P.moving = Math.max(0, P.moving - dt * 4);
