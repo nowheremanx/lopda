@@ -45,6 +45,46 @@
     },
     {
       "spec": "lopda/1",
+      "id": "lost-deck",
+      "name": "失联站",
+      "glyph": "站",
+      "category": "game",
+      "buttons": true,
+      "icon": [
+        "1111111111111111",
+        "0111111111111110",
+        "0011111111111100",
+        "0001000000001000",
+        "0001033333301000",
+        "0001030000301000",
+        "0001030220301000",
+        "0001030220301000",
+        "0001030000301000",
+        "0001033333301000",
+        "0001000000001000",
+        "0012222222222100",
+        "0122222222222210",
+        "1222222003222221",
+        "2222220333022222",
+        "2222220333022222"
+      ],
+      "version": "1.0.0",
+      "released": "2026-11-26",
+      "description": "第一人称迷宫射击：空间站失联了，带着铆钉枪一层层往下，找门卡、躲光弹、关掉核心。",
+      "i18n": {
+        "en": {
+          "name": "LostDeck",
+          "description": "First-person maze shooter on a silent station: eight decks down to the core."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/lost-deck/index.html",
+      "sha256": "91636c08f0fbce63b5c0938b84cf883a45a2c0d885000f852b56fa4c9234c903",
+      "bytes": 151824
+    },
+    {
+      "spec": "lopda/1",
       "id": "whack-a-mole",
       "name": "打地鼠",
       "glyph": "鼠",
