@@ -237,7 +237,7 @@ test("the Pages workflow publishes the repo without tests, dependencies or CI fi
   assert.equal(pats.length, 3, "one pattern for runtime/, one for the sdk files every app link runs on, one for the landing page");
   const [runtimeRe, allAppsRe, landingRe] = pats;
   /* the landing page at the site root and the pictures it shows get a link to the preview's root */
-  for (const p of ["index.html", "docs/images/screens.png", "docs/images/stocks/1-portrait.jpg", "docs/video/lopda-en.mp4", "events/index.html", "events/events.js", "gallery/index.html", "gallery/media/lost-deck/en.mp4"]) assert.ok(landingRe.test(p), p);
+  for (const p of ["index.html", "docs/images/screens.png", "docs/images/stocks/1-portrait.jpg", "docs/video/lopda-en.mp4", "events/index.html", "events/events.js", "gallery/index.html", "gallery/media/lost-deck/en.mp4", "site/site.js"]) assert.ok(landingRe.test(p), p);
   for (const p of ["runtime/index.html", "registry/apps/a/index.html", "docs/x.md", "sdk/template/index.html"]) assert.ok(!landingRe.test(p), p);
   assert.ok(y.includes("$SITE/pr/$PR/\""), "landing link");
   /* runtime/ gets the runtime link only: the app links open sdk/dev.html, which loads nothing from runtime/ but chip.js */

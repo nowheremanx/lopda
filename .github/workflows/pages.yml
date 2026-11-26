@@ -60,9 +60,9 @@ jobs:
           # The sdk scripts, the dev harness and the sound chip it shares with the runtime are what every app link
           # runs on, so a change there lists all apps. sdk/*.md and the templates are docs: they do not.
           if printf '%s\n' "$CHANGED" | grep -qE '^(sdk/(.*\.js|dev\.html)|runtime/chip\.js)$'; then APPS=$(ls registry/apps); fi
-          # The landing page at the site root (index.html, the pictures it shows, its events page and its gallery).
+          # The landing page at the site root (index.html, the pictures it shows, its events page, its gallery and the top bar they share in site/).
           LANDING=false
-          if printf '%s\n' "$CHANGED" | grep -qE '^(index\.html|docs/images/|docs/video/|events/|gallery/)'; then LANDING=true; fi
+          if printf '%s\n' "$CHANGED" | grep -qE '^(index\.html|docs/images/|docs/video/|events/|gallery/|site/)'; then LANDING=true; fi
           # Docs, tests, CI only: nothing a preview could show, so no deploy and no comment.
           if [ -z "$APPS" ] && [ "$RUNTIME" = false ] && [ "$LANDING" = false ]; then
             echo "deploy=false" >> "$GITHUB_OUTPUT"
