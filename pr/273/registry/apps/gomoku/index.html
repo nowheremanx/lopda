@@ -48,172 +48,44 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 </div>
 <div id="ov"><div id="panel"><canvas id="art" aria-hidden="true"></canvas><h1 id="ot">五子棋</h1><p id="op">你执黑先手，横竖斜连成五子即胜。</p><div id="btns"><button id="st">开始</button><button id="lk" class="hide">对战（电波）</button></div></div></div>
 <script>
-/* the title picture: a 160 x 160 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
-   A room at night: the title on the wall, a round window with the moon, and a hand about to set down the fifth black
-   stone. The letters are lopix12 glyphs (sdk/fonts, OFL), drawn at 2x. Dither only in the window's sky (UI.md 11.2). */
+/* the title picture: a 156 x 156 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
+   A hand sets a black stone on the board in the traditional grip; the name is written on the dark wall above the
+   board. The picture is stored packed, 2 bits a pixel; the letters are lopix12 glyphs (sdk/fonts, OFL) at 2x. */
 var ART = (function () {
-  var W = 160, H = 160;
-  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-  var GLYPH = {"五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","G":"7:AADiKBAgRoSI8AAA","O":"8:AAA4RIKCgoKCRDgAAA==","M":"8:AACCgsbGqqqSkpIAAA==","K":"7:AAIUSRQwUJESEAAA","U":"7:AAIUKFChQoUJ4AAA","F":"7:AAP0CBA+QIECAAAA","I":"4:AORERETgAA==","V":"8:AACCgkRERCgoEBAAAA==","E":"7:AAP0CBA+QIED8AAA"," ":"6:AAAAAAAAAAAAAA==","N":"7:AAIWKlSlSo0aEAAA","A":"8:AAAQECgoRHxEgoIAAA==","R":"7:AAPkKFC+SIkSEAAA","W":"10:AAAIiiKIlUVRVCIIgiAAAAA="};
+  var W = 156, H = 156;
+  var PIC = "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/pVVVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqUAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/gAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/RAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqquqAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9AAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/QAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/VAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqv8AAAAAAAAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/lUAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/9AAAAAAAAAAAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/9VUAAAAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAAAAAAAAAAAAAAAGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9AAAAAAAAAAAAAAAAAAWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr4AAAAAAAAAAAAAAAAAABWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq+UAAAAAAAAAAAAAAAAAAFWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5AAAAAAAAAAAAAAAAAAAVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrgAAAAAAAAAAAAAAAAAABVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrgAAAAAAAAAAAAAAAAAAFVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqquAAAAAAAAAAAAAAAAAAAVVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpAAAAAAAAAAAAAAAAAABVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAAAAAAAAAAAAAFVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAAAAAAAAAAAAAFVVpqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAGVVVUAAAAAAAFVV5qqqqqqqqqqqqqqqqqqqqqqqqqqqqr0AAABVVWlVVUAAAAAAAVVW5qqqqqqqqqqqqqqqqqqqqqqqqqqqqrAAAAFVVWlVVUAAAAAAAVVXmqqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAABVVVWlVWQAAAAAABVVXmqqqqqqqqqqqqqqqqqqqqqqqqqqqq4AAAFVVVW5VaQAAAAAAFVVuVqqqqqqqqqqqqqqqqqqqqqqqqqqqrkAAAFaVVV5VuAAAAAAAFVVtqqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAAFammppVtAAAAAAAFVVu/qqqqqqqqqqqqqqqqqqqqqqqqqqqtAAAAVX////lsAAAAAABVVW/6qqqqqqqqqqqqqqqqqqqqqqqqqqq4AAABVX6qqr5sAAAAAAFVVb6qqqqqqqqqqqqqqqqqqqqqqqqqqqrkAAAFVb6qqq+oAAAAABVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqvQAAAFWvqqqqvwAAAAABVVW+qqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAAAVW+qqqqrgAAAAAFVVW6qqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAABVW6qqqqvgAAAAFVVVbqqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAAFVuqqqqq9AAAAAVVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqvAAAAVa+qqqqr4AAAAEVVVW+qqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAABVb6qqqqvQAAAAVVVVb6qqqqqqqqqqqqqqqqqqqqqqqqqqqq4AAAFVbqqqqquAAAABVVVVbqqqqqqqqqqqqqqqqqqqqqqqqqqqqrkAABVX/qqqqq4AAAAVVVVV+qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAABVrv6qqqrgAAABVVVVa6qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAVVvb6qqqvQAAAFVVVav6qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAZW9W6qqq9AAAAVVVVv+qqqqqqqq//////////////////////QAAa/1W////0AAABVVVv///////qqr6qqqqqqqqqqqqqqqqqqqqrQAAW+lW1VVXgAAAFVVW/qqqqqqqqq+hVUBVVAFUAAVBBVUVVVQVHQAAV5VWpVVbAAAAVVVrpEVVQBVRqr5VVVVVVVVVVVVVVVVVVVVVbQAAV5VVeVVuAAABVVr/VVVVVVVWquVWqqqqqqqqqqqqqqqqqqqqrQAAV5VVala4AAABVa+qqqqqqqqqq9VpVVVlVVVZVVVWVVVVZVVVXQAAV5VVW1XgAAAFVb9VVVZVVVVlr1VlVVWVVVVlVVVVVVVVlVVVXQABV5VVW1eAAAAVV+VVVVVVVVVV/VVVVVZVVVVlVVVYVVVVlVVVHQACW5VVW69AAABVrqRVVVWVVVVG9VaVVVpVVVWlVVVZVVVVpVVVbQABb6VVWv0AAAVV/mlVVVaVVVVa1VqqqqmqqqqaqqqmqqqqqqqqrQABbvlVVuQAABVX5pqqqqqqqqqqVWVVVVlVVVZVVVVlVVVSVVVVbAABbblVVsAAAFVXlVlVVVVlVVVVVZVVVWVVVVlVVVVlVVVWVVVVbAAFbW5VWgAAAVVuVVlVVVVZVVVVVlVVVZVVVVlVVVWVVVVZVVVVuAAVuVuVbgAABVW9VVZVVVVZVVVVVVVVVlVVVWVVVVWVVVVZVVVUoABVtVbmuAAAVVblVVZVVVVWVVVVqVVVWlVVVWVVVVaVVVVaVVVV4ABa9Vb65AAAVVvlVVaVVVVWVVVWqqqqqqqqqqqqqqqqqqqqqqqp4ABa+qq+wAABVW6qqqqqqqqqqqqqlVVVVVVVVZVVVVVVVVUVVVVVtAAVtVVfQAAVVb1VVVVVVVVVlVVVVVVVZVVVVlVVVVlVVVVVVVVVtAAVtVVcAAAVVvlVVVVlVVVVlVVVVVVVVVVVVlVVVVVVVVVlVVVVdAAVtFW8AKpVW5lVVVVZVVVVaVVVVVVWVVVVWVVVVWRVVVVVVVVVdAAVuaS0AZqVb1lVVVUaVVVVWVVVlVVaVVVVaVVVVrlVVVWlVVVVdAAa//3gBkGlvVlVVVVvlVVVaVVVqqqqqqqqqqqqq/6qqqqqqqqqtAAv///gKQBp+qqqqqqv6qqqqqqqVVVlVVVVlVVVVflVVVWVVVVVdAD////gJABr1VZVVVVXlVVVVlVVVVWVVVVWVVVVVZVVVVVVVVVWdAL////hgAFvVVZVVVVVVVVVVZVVVVZVVVVWVVVVVlVVVVaVVVVWdAv5f//hgBV9VVWVVVVVlVVVVZVVVVVVVVVVVVVVVlVVVVZVVVVVdA+Qv//hgBWkVVWVVVVVlVVVVWValVlVVVVaVVVVVlVVVVpVVVVWtB+S///hgBblVVWVVVVVlVVVVWmqqqqqqqqqqqqqqqqqqqqqqqqqqH/b///kUWuqqqqqqqqqqqqqqqqqVWVVVVVlVVVVWVVVVVVVVVVWXn/////4KX9VVVVlVVVVVVVVWqqqVZVVVVWVVVVVZVVVVVpVVVVZV///////lblVVVVlVVVVZVVqqqqqVlVVVVWVVVVVZVVVVVlVVVVZVa/////+/+lVVVVVVVVVWqqqqqqqWVVVVVWVVVVVZVVVVWlVVVVZVV/////9q5VVVVVZVVaqqqqqqqqqWFVVVVZVVVVVlVVVVVVVVVVZVVf////5VBlVVVVZVaqqqqqqqqqqqqqqqpqqqqqqqqqqqqqqqqqqaqr////pqmqqqqaqqqqqqqqqqqqqlVVVVVlVVVVWVVVVVWVVVVVZVVV///+VVVpVVVqqqqqqqqqqqqqqlVVVVVVVVVVWVVVVVWVVVVVZVVVb+/lVVVUVVqqqqqqqqqqqqqqqVVVVVaVVVVVWVVVVVVVVVVVZVVVVVlVVVVZqqqqqqqqqqqqqqqqqVVVVVZVVVVVWVVVVVVVVVVVZVVVVVlVVWqqqqqqqqqqqqqqqqqqqVVVVVZVVVVVZVVVVVb//RVVZVVVVVlVVqqqqqqqqqqqqqqqqqqqqRVVVVVVVVVVZVVVVW4VVuVVUVVVVVlVqqqqqqqqqqqqqqqqqqqlVlVaqWmaqpVZplqlVeUAAWlZqmpVaur6qqqqqqqqqqqqqqq6qqqVWlVVVaVVVVVWlVVVV5AAAB5VZVVarqqqqqqqqqqqqqqqqpVpVVVVVRVVVVVVVVVVRVVVV0AAABoVZVVaqqqqqqqqqqqqqqqpVVVZVVVVVVVVVlVVVVVaVVVVV0AAAFpVVVVqqqqqqqqqqqqqqmVVVVVWVVVVVVVVVVVVVVX/+VVVV9QAFW9VlVVqqqqqqqqqqqqqVWVVVVVWVVVVVVVVWVVVVX4VR9VVVv9VZ/5VlVVaqqqqqqVWlVVVVWVVVVVVlVVVVVVVWVVVVpUAAWlVVb////pVlVVVqqqqqVVVlVVVVVVVVVVVlVVVVVVVVVVVVoAAAC1VVWr//qVVlVVVVVpVVVVWlVVVVVlVVVVVZVVVVlVVpVVVXgAAAAtVVWqqqpVVlVVVVVVVVVVW5VVVVVlVVVVVZVVVVqqqqqqqrgAAABuqqqqqqqqqqqqqqqqqqqqq/qqqqqqqqqqqqqqqqVVWlVVVXwAAAG9VVVVqlVVVlVVVVVZVVVVVpVVVVVZVVVVVWVVVVVVWVVVVW8EBVr5VVpVVVVVVlVVVVVZVVVVVZVVVVVZVVVVVWVVVVVVVVVVVV+lVW/pVVv/5VVVVlVVVVVZVVVVVZVVVVVZVVVVVWVVVVVVlVVVVVr///+lVv///0VVWVVVVVVZVVVVVlVVVVVWVVVVVVlVVVVVlVVVVVav//qlX////+VVWVVVVVVZVVVVVZVVVVVWVVVVVVlVVVVWVVVVVVarqupVb6b///VVWVVVVVVZVVVVVZVVVVVVlVVVVVZVVVVVVVVVVVVmqpVVv0b///1VWVVVVVVZVVVVVZVVVVVVlVVVVVKVVVlZVVVVVVpVVVVV/6////1VWVVVVVVpVVVVVZVVVVVVlVVVVVaVVVqqqqqqqqqqqqqq//////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqVVVVVVVWVVVVVVv/////1VWf/5VVVZVVVVVaVVVVVVZVVVVVVlVVVlVVVVVWVVVVVVv/////lVL0AH9VVZVVVVVWVVVVVVZVVVVVVlVVWVVVVVVZVVVVVVv////+lV1QABXRVZVVVVVWVVVVVVWVVVVVVZVVWVVVVVVZVVVVVVb////6lWgAAAClVZVVVVVWVVVVVVWVVVVVVZVVlVVVVVVVVVVVVVWv//+qVaAAAAAtVZVVVVVVVVVVVVWlVVVVVZVVlVVVVVVlVVVVVVVq//6pVaAAAABtVZVVVVVVlVVVVV//0VVVVWVVlVVVVVVlVVVVVVVWqqpVVaAAAAFtVZVVVVVVlVVVUfVVb0VVVWVVVVVVVVWVVVVVVVWlVVVVVbQAAFW9VZVVVVVVlVVVWqAAGmVVVWlVlVVVVVWVVVVVX//9VVVVVbwAAVn5VpVVVVVVlVVVXgAAALlVVVlVqqqqqqqqqqqq////qqqqqr+VVVvqqqqqqqqqqqqqsAAAAB+qqqqqlVVVVVZVVVVf////5VVVVWv6qr+pVZVVVVVVZVVVsAAAAB5VVVZVVVVVVVZVVVVvqv//+FVVVWu///6lVZVVVVVVZVVVsAAAAF5VVVZVVVVVVVpVVVW/Qv//+VVVVVqv/+qVVZVVVVVVZVVVsAAAAV9VVVVVVVVVS//RVVX/q////lVVVVaqqqlVVZVVVVVVVVVVuAAAVX5VVVWVVVVRr//6VVb//////lVVVVZaqpVVVZVVVVVVWVVVbqABW/pVVVWVVVVb////lVb//////1VVVVZVVVVVVZVVVVVVVVVVb/qqr+pVVVVVVVVf7///5Vb//////lVVVVZVVVVVVZVVVVVVaVVVWv///+lVVVVlVVR/Rv///VW/////+pVVVVlVVVVVVZVVVVVVZVVVWq//+qVVVVVlVVW+m////VVv////+lVVVVlVVVVVVaVVVVVVZVVVVaqqqpVVVVVWlVb//////lWr////qlVVVVlVVVVVVvlVVVVValVVVVqqqVVVVVVaqqv//////6qqv//+qqqqqqqqqqqqr/+qqqqqqqqqqqqqqqqqqqqrVVb//////lVWqqqqlVVVVVlVVVVVW/lVVVVVWVVVVVVVpVVVVVVWVVb/////+lWr/qqpVVVVVVlVVVVVVaVVVVVVWVVVVVVVZVVVVVVVVVW/////+lqqqulVVVVVVVlVVVVVVZVVVVVVWVVVVVVVVVVVVVVVVVWv////6mtAAelVVVVVVVlVVVVVVZVVVVVVWVVVVVVVZVVVVVVVVVVr////qeAAAAuVVVVVVWVVVVVVVZVVVVVVVlVVVVVVVVVVVVVVVVVav//6lwAAAALVVVVVVWVVVVVVVZVVVVVVVlVVVVVVVlVVVVVVVVVWqqqqaQAAAAG1VVVVVWVVVVVVVZVVVVVVVlVVVVVVWVVVVVVVVVVVmqqlbAAAAAG1VVVVVWVVVVVVVZVVVVVVVlVVVVVVVlVVVVVVVVVVlVVVbAAAAAW1VVVVVWVVVVVVVZVVVVVVVlVVVVVVVpVVVVVVVVVVlVVVbQAAABW5VVVVVWVVVVVVVZVVVVVVVpVVVVVVVZVVVVVVlVVWVVVVb0AABVb5VVVVVWVVVVVVVZVVVVVVVpVVVVVVVZVVVVVVqqqqqqqqr5VVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlVVWVVVVW/1VVv/pVVVVVpVVVVVVVaVVVVVVVaVVVVVVVWVVVVVVVVVZVVVVWv6qqv6lVVVVVZVVVVVVVZVVVVVVVZVVVVVVVWVVVVVVVVVZVVVVWr////qlVVVVVZVVVVVVVZVVVVVVVaVVVVVVVWVVVVVVVVVVVVVVVav//6qVVVVVVZVVVVVVVZVVVVVVVaVVVVVVVVlVVVVVVVVVVVVVVWqqqqlVVVVVVZVVVVVVVZVVVVVVVVVVVVVVVVlVVVVVVVWlVVVVVVaqqlVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVpVVVVVVVVVVVVVVVWqqVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVZVVVVVVVVWVVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVVVVVVVVVVZVVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVZVVVVVVVVZVVVVVVVVVlVVVVVVVZVVVVVVVVlVVVVVVVWVVVVVRVpVVVVVVVVZVVVVVVVVSRVVVVVVVZVVVVVVVVpVVVVVVVWVVVVRlVpVVVVVVVVpVVVVVVVVWlVVVVVVVaVVVVVVVVpVVVVVVVaVVVVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqRWVVVVVVVVVlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVlVVVVVWVVVVVVVVVlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVlVVVVVZVVVVVVVVWlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVVVVVVVZVVVVVVVVVVVVVVVVVVVVVVVVVVVZVVVVVVVVVVVVVVVVVZVVVVlZVVVVVVVVaVVVVVVVVVZVVVVVVVVaVVVVVVVVWVVVVVVVVZVVVV";
+  var GLYPH = {"5":"6:AA+ggg8CCicAAA==","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","G":"7:AADiKBAgRoSI8AAA","O":"8:AAA4RIKCgoKCRDgAAA==","M":"8:AACCgsbGqqqSkpIAAA==","K":"7:AAIUSRQwUJESEAAA","U":"7:AAIUKFChQoUJ4AAA","F":"7:AAP0CBA+QIECAAAA","I":"4:AORERETgAA==","V":"8:AACCgkRERCgoEBAAAA==","E":"7:AAP0CBA+QIED8AAA"," ":"6:AAAAAAAAAAAAAA==","N":"7:AAIWKlSlSo0aEAAA","A":"8:AAAQECgoRHxEgoIAAA==","R":"7:AAPkKFC+SIkSEAAA","W":"10:AAAIiiKIlUVRVCIIgiAAAAA="};
   function glyph(ch) {
     var s = GLYPH[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [];
     for (var y = 0; y < 14; y++) { var r = []; for (var x = 0; x < w; x++) { var i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
-    return { w: w, rows: rows };
+    /* drop the empty columns on both sides: the title is set tight */
+    var l = 0, rr = w - 1, col = function (x) { for (var y = 0; y < 14; y++) if (rows[y][x]) return true; return false; };
+    while (l < rr && !col(l)) l++; while (rr > l && !col(rr)) rr--;
+    return { w: rr - l + 1, rows: rows.map(function (r) { return r.slice(l, rr + 1); }) };
   }
-  function make() {
-    var px = new Uint8Array(W * H);
-    function set(x, y, t) { x |= 0; y |= 0; if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = t; }
-    function get(x, y) { return px[y * W + x]; }
-    function rect(x, y, w, h, t) { for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) set(x + i, y + j, t); }
-    function dith(x, y, lv, a, b) { return (BAYER[(y & 3) * 4 + (x & 3)] < lv * 16) ? b : a; }
-    function ell(cx, cy, rx, ry, t) {
-      for (var y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (var x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
-        var dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry; if (dx * dx + dy * dy <= 1) set(x, y, typeof t === "function" ? t(x, y, dx, dy) : t);
-      }
-    }
-    function line(x0, y0, x1, y1, t) {
-      var n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) | 0; if (!n) { set(Math.round(x0), Math.round(y0), t); return; }
-      for (var i = 0; i <= n; i++) set(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), t);
-    }
-    return { px: px, set: set, get: get, rect: rect, dith: dith, ell: ell, line: line };
-  }
-
-  function text(c, str, x, y, s, t, gap) {
-    str.split("").forEach(function (ch) {
-      var g = glyph(ch);
-      for (var j = 0; j < 14; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i]) c.rect(x + i * s, y + j * s, s, s, t);
-      x += g.w * s + gap;
+  /* a line of glyphs at scale s, tone t, with a shadow of tone sh one pixel down and right */
+  function text(px, str, x, y, s, gap, t, sh) {
+    var gs = str.split("").map(function (ch) { return ch === " " ? { w: 3, rows: [] } : glyph(ch); });
+    [[1, sh], [0, t]].forEach(function (pass) {
+      var cx = x + pass[0];
+      gs.forEach(function (g) {
+        for (var j = 0; j < g.rows.length; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i])
+          for (var a = 0; a < s; a++) for (var b = 0; b < s; b++) {
+            var X = cx + i * s + a, Y = y + pass[0] + j * s + b;
+            if (X >= 0 && Y >= 0 && X < W && Y < H) px[Y * W + X] = pass[1];
+          }
+        cx += g.w * s + gap;
+      });
     });
-    return x;
   }
-  function width(str, s, gap) { var w = 0; str.split("").forEach(function (ch) { w += glyph(ch).w * s + gap; }); return w - gap; }
-
   function draw(lang) {
-    var c = make();
-    /* the wall: flat paper */
-    c.rect(0, 0, W, 64, 0);
-    /* a round window: a night sky, ink above and dark low down; the full moon; two ridges of hills in ink */
-    var wx = 138, wy = 30, wr = 17;
-    c.ell(wx, wy, wr, wr, function (x, y) { var lv = (y - (wy - wr)) / (2 * wr); return c.dith(x, y, Math.min(1, Math.max(0, lv * 1.8 - 0.3)), 3, 2); });
-    [[wx - 10, wy - 7], [wx - 2, wy - 12], [wx + 11, wy + 1], [wx - 12, wy + 1]].forEach(function (s) { c.set(s[0], s[1], 0); });
-    c.ell(wx + 4, wy - 5, 5.5, 5.5, 0);
-    c.ell(wx + 3, wy - 6, 1.3, 1.1, 1); c.set(wx + 6, wy - 3, 1);
-    for (var x = wx - wr; x <= wx + wr; x++) {
-      var r1 = wy + 6 - Math.round(4 * Math.sin((x - wx) * 0.22 + 1) + 2 * Math.sin((x - wx) * 0.55)), r2 = wy + 10 - Math.round(3 * Math.sin((x - wx) * 0.3 - 2));
-      for (var y = r1; y < wy + wr; y++) c.set(x, y, 2 + (y >= r2 ? 1 : (y === r1 ? 1 : 0)));
-      for (var y = Math.max(r1, r2); y < wy + wr; y++) c.set(x, y, 3);
-    }
-    for (var y = 0; y < 64; y++) for (var x = wx - wr - 6; x < W; x++) {
-      var d = Math.hypot(x + 0.5 - wx, y + 0.5 - wy);
-      if (d > wr + 3.2) c.set(x, y, 0); else if (d > wr + 1.4) c.set(x, y, 3); else if (d > wr) c.set(x, y, 2);
-    }
-    /* the floor behind the board */
-    c.rect(0, 60, W, H - 60, 2);
-    c.rect(0, 60, W, 1, 3);
-
-    /* the board, close and low: its far edge across the room, its near edge out of the frame */
-    var f = 260, Hc = 1.5, z0 = 1.9, z1 = 3.9, hz = 66 - Hc * f / z1;
-    function P(u, v) { var z = z0 + (1 - v) * (z1 - z0); return [80 + u * f / z, hz + Hc * f / z]; }
-    var tl = P(-1, 0), tr = P(1, 0), bl = P(-1, 1), br = P(1, 1);
-    for (var y = Math.ceil(tl[1]); y < H; y++) {
-      var t = (y - tl[1]) / (bl[1] - tl[1]), xl = tl[0] + (bl[0] - tl[0]) * t, xr = tr[0] + (br[0] - tr[0]) * t;
-      for (var x = Math.ceil(xl); x <= Math.floor(xr); x++) c.set(x, y, 1);
-      c.set(Math.floor(xl), y, 3); c.set(Math.ceil(xr), y, 3);
-      /* the board's side thickness, dark, outside the left and right edges */
-      for (var k = 1; k <= 3; k++) { c.set(Math.floor(xl) - k, y + 1, 2); }
-    }
-    c.line(tl[0], tl[1], tr[0], tr[1], 3);
-    var m = 0.045, N = 15;
-    function G(i, j) { return P(-1 + m + i * (2 - 2 * m) / (N - 1), m + j * (1 - 2 * m) / (N - 1)); }
-    for (var i = 0; i < N; i++) { var a = G(i, 0), b = G(i, N - 1); c.line(a[0], a[1], b[0], b[1], 2); a = G(0, i); b = G(N - 1, i); c.line(a[0], a[1], b[0], b[1], 2); }
-    [[3, 3], [11, 3], [7, 7], [3, 11], [11, 11]].forEach(function (s) { var p = G(s[0], s[1]); c.ell(p[0] + 0.5, p[1] + 0.5, 1.5, 1, 3); });
-
-    /* stones: 1 black, 2 white. Four black run from the near left toward the far right; white tried to block */
-    var stones = [
-      [4, 12, 1], [5, 11, 1], [6, 10, 1], [7, 9, 1],
-      [5, 12, 2], [7, 10, 2], [6, 8, 2], [3, 13, 2], [10, 11, 2], [5, 9, 2], [11, 10, 2]
-    ];
-    stones.sort(function (a, b) { return a[1] - b[1]; });
-    stones.forEach(function (s) {
-      var p = G(s[0], s[1]), q = G(s[0] + 1, s[1]), r = G(s[0], s[1] + 1);
-      var rx = (q[0] - p[0]) * 0.47, ry = (r[1] - p[1]) * 0.47, h = rx * 0.4;
-      var cx = p[0], cy = p[1] - h * 0.5;
-      c.ell(cx + rx * 0.25, p[1] + ry * 0.35, rx, ry, 2);                    /* shadow, down and right */
-      c.ell(cx, cy + h * 0.5, rx, ry, 3);                                   /* the stone's lower rim */
-      if (s[2] === 1) {
-        c.ell(cx, cy, rx, ry, 3);
-        c.ell(cx - rx * 0.3, cy - ry * 0.3, rx * 0.42, ry * 0.36, function (x, y, dx, dy) { return dx + dy < -0.2 ? 2 : 3; });
-        if (rx > 3) c.set(Math.round(cx - rx * 0.45), Math.round(cy - ry * 0.45), 1);
-      } else {
-        c.ell(cx, cy, rx, ry, 3);
-        c.ell(cx, cy, rx - 1, ry - 1, function (x, y, dx, dy) { return dx * 0.6 + dy > 0.55 ? 1 : 0; });
-      }
-    });
-    /* the hand: small and cropped, in the traditional grip, three-quarter side view. The stone sits between the index
-       finger (above) and the middle finger (below), two slender fingers with a joint each and a gap between them; a
-       short thumb, a little of the palm, a narrow wrist and the sleeve to the upper right. Every part has its own
-       outline so the fingers stay apart. The stone is a few rows above its point (8, 8); "s" is its shadow on the
-       board (it turns the board's mid tone dark and leaves everything else) */
-    var g5 = G(8, 8), hx = Math.round(g5[0]) - 10, hy = Math.round(g5[1]) - 8 - 31;
-    var HAND = [
-      "...........................................................222222222222222222222",
-      "..........................................................3222222222222222222222",
-      "........................................................332222222222222222222222",
-      "......................................................33222222222222222222222222",
-      "....................................................3322222222222222222222222222",
-      "...................................................3222222222222222222222222333.",
-      ".................................................332222222222222222222222233....",
-      "...............................................332222222222222222222222233......",
-      ".............................................332222222222222222222222233........",
-      "............................................33333332222222222222222233..........",
-      "...........................................3311111132222222222222233............",
-      ".....................................33...311331111132222222222333..............",
-      "..................................33300333333003311132222222233.................",
-      "................................33100000030000003111322222233...................",
-      "..............................33003100000000000003113222233.....................",
-      "............................33000003000000000000031132233.......................",
-      ".........................333000000300000000000003111333.........................",
-      ".......................330000001113000000000000311133...........................",
-      "......................30000001133310000000000331133.............................",
-      "....................33002001133313310000000033333...............................",
-      "...................3000001133...300311111003....................................",
-      "..................300001133...33000033333103....................................",
-      ".................30000133....30000013000033.....................................",
-      "...............33000113.....30000113000003......................................",
-      "..............30000133.....300001330000003......................................",
-      ".............1100113.....33000013.30000013......................................",
-      ".............301133.....30000113.30000013.......................................",
-      ".......3333333133......30020133030000013........................................",
-      ".....2212333333......33000113.300000013.........................................",
-      "....322222333333....30000133.300000113..........................................",
-      "...33332333333333.33000113....3111133...........................................",
-      "...3333333333333.30000133.....33333.............................................",
-      "....3333333333333000113.........................................................",
-      ".....3333333333.311133..........................................................",
-      ".......333333...3333............................................................",
-      "................................................................................",
-      ".........ssss...................................................................",
-      "......ssssssssss................................................................",
-      "......ssssssssss................................................................",
-      "......ssssssssss................................................................",
-      "......ssssssssss................................................................",
-      ".........ssss...................................................................",
-      "................................................................................",
-      "................................................................................"
-    ];
-    HAND.forEach(function (row, j) { for (var i = 0; i < row.length; i++) {
-      var ch = row[i], x = hx + i, y = hy + j;
-      if (ch === "s") { if (x >= 0 && y >= 0 && x < W && y < H && c.get(x, y) === 1) c.set(x, y, 2); }
-      else if (ch !== ".") c.set(x, y, +ch);
-    } });
-    /* the title on the wall: 2x pixels, ink, with a mid drop shadow; the line under it at 1x */
-    var word = lang === "en" ? "GOMOKU" : "五子棋", sub = lang === "en" ? "FIVE IN A ROW" : "黑白连珠";
-    var gap = lang === "en" ? 2 : 3;
-    text(c, word, 11, 10, 2, 1, gap); text(c, word, 10, 9, 2, 3, gap);
-    var tw = width(word, 2, gap);
-    c.rect(10, 39, tw, 1, 3);
-    text(c, sub, 10, 43, 1, 2, lang === "en" ? 1 : 2);
-    return c.px;
+    var px = new Uint8Array(W * H), b = atob(PIC);
+    for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
+    var en = lang === "en";
+    text(px, en ? "GOMOKU" : "五子棋", en ? 3 : 4, en ? 1 : 4, 2, en ? 1 : 4, 0, 3);
+    text(px, en ? "5 IN A ROW" : "黑白连珠", en ? 4 : 5, en ? 29 : 33, 1, en ? 1 : 3, 0, 3);
+    return px;
   }
   return { W: W, H: H, draw: draw };
 })();

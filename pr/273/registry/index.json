@@ -491,8 +491,8 @@
         "link"
       ],
       "path": "apps/gomoku/index.html",
-      "sha256": "8d7c4ea0ec5f5f4f6c6201bd3685bc02c9c8f6a229f9075616b09ee728bbc19d",
-      "bytes": 46353
+      "sha256": "34107be699161727662688356e657e4f4a4768aed0b4c96ed150a2adba1a9a0c",
+      "bytes": 45189
     },
     {
       "spec": "lopda/1",
