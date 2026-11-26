@@ -1,5 +1,5 @@
-/* Lost Deck: the six decks. Each map is drawn in characters:
-   walls  # panel  P pipes  C computers  W window  M mould  T terminal (B reads it)  S loose panel (a secret)
+/* Lost Deck: the decks. Each map is drawn in characters:
+   walls  # panel  P pipes  C computers  W window  M mould  K crates  T terminal (B reads it)  S loose panel (a secret)
    doors  D door  1 2 3 doors that need the square, circle or triangle card  E the lift (the way out)
    floor  .  ~ mould on the floor
    things @ you  c crawler  f spore  s sentry  g guard  n power node  B the core  z vent
@@ -12,7 +12,7 @@
   var LD = window.LD;
   LD.DECKS = [
     {
-      id: 1, par: 80, face: 0, fog: 0.42, ammo: 30,
+      id: 1, par: 75, face: 0, fog: 0.42, ammo: 30,
       name: { zh: "对接环", en: "Docking Ring" },
       brief: { zh: "曙光七号三天没有回话。你的飞船刚接上对接环。先找到方块门卡，再坐电梯下去。",
                en: "Dawn-7 has been silent for three days. Your ship just docked. Find the square card, then take the lift down." },
@@ -37,7 +37,7 @@
       ]
     },
     {
-      id: 2, par: 150, face: 0, fog: 0.42, ammo: 30,
+      id: 2, par: 120, face: 0, fog: 0.42, ammo: 30,
       name: { zh: "居住区", en: "Habitat" },
       brief: { zh: "宿舍和食堂。墙上长了怪东西，空气里飘着孢子。食堂里应该还有一把散钉枪。",
                en: "Cabins and the mess. Something grows on the walls; spores drift in the air. The mess should still have a scatter gun." },
@@ -63,7 +63,40 @@
       ]
     },
     {
-      id: 3, par: 160, face: 0, fog: 0.5, ammo: 30, scatter: true, slime: true,
+      id: 3, par: 200, face: 0, fog: 0.45, ammo: 30, scatter: true,
+      name: { zh: "货仓", en: "Cargo Bay" },
+      brief: { zh: "货仓里的箱子堆成了迷宫。吊车控制台在方块门后面，圆形门卡锁在货主的办公室里。",
+               en: "The crates in the cargo bay stand like a maze. The crane desk is behind the square door; the circle card is locked in the office." },
+      goal: { zh: "方块门卡 → 圆形门卡 → 电梯", en: "Square card, circle card, lift" },
+      logs: [
+        { zh: "吊车日志：所有补给已经卸下。警卫机守在这里，别跟它对枪，绕箱子走。", en: "Crane log: all supplies unloaded. A guard watches the bay; don't trade shots with it, use the crates." },
+        { zh: "货单：铆钉二十箱，医疗包十箱。收货人：曙光七号全体。", en: "Manifest: rivets, 20 boxes; med kits, 10 boxes. For: all of Dawn-7." }
+      ],
+      map: [
+        "##############################",
+        "#@..#KKKKKKKKKKKKKKKKKKKK#...#",
+        "#...D....................D.a.#",
+        "#...#.KK.KK..KK.KK..KK.K.#...#",
+        "##D##.KK.KK..KK.KK..KK.K.##D##",
+        "#...#....s.........f.....#...#",
+        "#.h.#.KKKK.KKK.K.KKKKK.K.#.c.#",
+        "#...#.K....K...K.....K.K.#...#",
+        "#####.K.c..K.x.KKK.c.K...#####",
+        "#...D.K....K...K.....K.g.D...#",
+        "#.u.#.KKK..KKKKK..KKKK.KK#.x.#",
+        "#...#.................s..#...#",
+        "#####KKKKKKKKK1KKKKKKKKKK#####",
+        "#.....c..............x...#...#",
+        "#.x..........TCT.........D.o.#",
+        "#.....g......CCC....f....#...#",
+        "#####2#####################2##",
+        "#.........................c..#",
+        "#.a....x.......c......k...h.E#",
+        "##############################"
+      ]
+    },
+    {
+      id: 4, par: 110, face: 0, fog: 0.5, ammo: 30, scatter: true, slime: true,
       name: { zh: "温室", en: "Greenhouse" },
       brief: { zh: "温室的霉长疯了，地上是一层菌毯。三角门卡在育苗室，那里有个会开枪的东西。",
                en: "The greenhouse mould ran wild; the floor is one soft mat. The triangle card is in the nursery, and something there shoots." },
@@ -92,7 +125,7 @@
       ]
     },
     {
-      id: 4, par: 170, face: 0, fog: 0.5, dark: 1.1, ammo: 35, scatter: true,
+      id: 5, par: 150, face: 0, fog: 0.5, dark: 1.1, ammo: 35, scatter: true,
       name: { zh: "主控室", en: "Control" },
       brief: { zh: "主控层断电了，只剩你的手电。终端上也许有人留了话。哨兵在黑暗里等着。",
                en: "Control has no power; you have only your torch. Someone may have left word on the terminals. Sentries wait in the dark." },
@@ -123,7 +156,7 @@
       ]
     },
     {
-      id: 5, par: 210, face: 0, fog: 0.45, ammo: 40, scatter: true,
+      id: 6, par: 150, face: 0, fog: 0.45, ammo: 40, scatter: true,
       name: { zh: "反应堆", en: "Reactor" },
       brief: { zh: "反应堆层，到处是燃料罐，一枪就炸。警卫机在这里巡逻。三张门卡都要拿到。",
                en: "The reactor deck is full of fuel canisters; one shot and they burst. Guards patrol here. You need all three cards." },
@@ -151,7 +184,7 @@
       ]
     },
     {
-      id: 6, par: 150, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
+      id: 7, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
       name: { zh: "核心", en: "The Core" },
       brief: { zh: "核心就在下面。四个电源节点给它供护盾，通风口里还会爬出东西。先断电，再关掉它。",
                en: "The core is below. Four power nodes feed its shield, and things crawl out of the vents. Cut the power, then shut it down." },

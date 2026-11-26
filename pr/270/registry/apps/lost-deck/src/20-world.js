@@ -6,10 +6,10 @@
   "use strict";
   var LD = window.LD;
 
-  /* map characters -> cell codes. 1-6 walls, 10 door, 11-13 doors that need a card, 14 lift (the exit),
+  /* map characters -> cell codes. 1-7 walls, 10 door, 11-13 doors that need a card, 14 lift (the exit),
      15 a wall that slides away when you press B on it (a secret) */
-  var CELL = { "#": 1, "P": 2, "C": 3, "W": 4, "M": 5, "T": 6, "D": 10, "1": 11, "2": 12, "3": 13, "E": 14, "S": 15 };
-  var SOLID_WALL = function (c) { return (c >= 1 && c <= 6) || c === 14 || c === 15; };
+  var CELL = { "#": 1, "P": 2, "C": 3, "W": 4, "M": 5, "T": 6, "K": 7, "D": 10, "1": 11, "2": 12, "3": 13, "E": 14, "S": 15 };
+  var SOLID_WALL = function (c) { return (c >= 1 && c <= 7) || c === 14 || c === 15; };
 
   var FOES = {
     crawler: { hp: 2, spd: 2.1, r: 0.28, h: 0.5, sight: 10, melee: { dmg: 7, range: 0.78, cd: 0.8 } },
@@ -170,18 +170,28 @@
         else {
           M.timer[i] += dt;
           if (M.timer[i] > 3.5) {
-            var x = i % M.w, y = (i / M.w) | 0, busy = ((P.x | 0) === x && (P.y | 0) === y);
-            for (var k = 0; k < this.things.length && !busy; k++) { var o = this.things[k]; if ((o.kind === "foe" && !o.dead) || o.kind === "item") busy = (o.x | 0) === x && (o.y | 0) === y; }
-            if (!busy) { M.timer[i] = -1; this.hooks.door && this.hooks.door(x + 0.5, y + 0.5); } else M.timer[i] = 2.5;
+            var x = i % M.w, y = (i / M.w) | 0;
+            if (!this.doorBusy(x, y)) { M.timer[i] = -1; this.hooks.door && this.hooks.door(x + 0.5, y + 0.5); } else M.timer[i] = 2.5;
           }
         }
       } else if (M.timer[i] < 0) {
         M.open[i] = Math.max(0, M.open[i] - dt * 2.2);
         if (M.open[i] <= 0) M.timer[i] = 0;
-        var cx = i % M.w, cy = (i / M.w) | 0;
-        if ((P.x | 0) === cx && (P.y | 0) === cy) M.timer[i] = 0.01;
+        if (this.doorBusy(i % M.w, (i / M.w) | 0)) M.timer[i] = 0.01;   /* never close on anyone: open again */
       }
     }
+  };
+
+  /* is anything (you, a robot, a pickup) even partly inside this door's cell? */
+  W.doorBusy = function (x, y) {
+    var P = this.P;
+    function over(o, r) { return o.x + r > x && o.x - r < x + 1 && o.y + r > y && o.y - r < y + 1; }
+    if (!P.dead && over(P, 0.3)) return true;
+    for (var k = 0; k < this.things.length; k++) {
+      var o = this.things[k];
+      if (((o.kind === "foe" && !o.dead) || o.kind === "item") && over(o, (o.r || 0.2) + 0.05)) return true;
+    }
+    return false;
   };
 
   /* ---------------- moving round things against the grid ---------------- */
