@@ -116,6 +116,11 @@
     for (var i = 0; i < b.px.length; i += 2) g.rect(x0 + b.px[i] * k, y + b.px[i + 1] * k, k, k, tone);
   }
 
+  /* the menus share one song: moving between them must not start it again */
+  var curSong = null;
+  function music(song, o) { if (curSong === song) return; curSong = song; game.music(song, o); }
+  function musicStop() { curSong = null; game.musicStop(); }
+
   var ICON = {};
   Object.keys(LD.ICON).forEach(function (k) { ICON[k] = LoGame.sprite(LD.ICON[k]); });
 
@@ -137,7 +142,7 @@
   /* ---------------- title ---------------- */
   var titleSel = 0;
   game.scene("title", {
-    enter: function () { game.music(LD.MUSIC.title); game.ambience(null); },
+    enter: function () { music(LD.MUSIC.title); game.ambience(null); },
     update: function () {
       var items = titleItems();
       var d = game.dir();
@@ -154,11 +159,11 @@
       bigCacheFor(t("失联站", "LOST DECK"));   /* measured before the stars clear the screen */
       drawStars(1 / 60, 0.25);
       /* the station: a ring and a spine, drawn in dark */
-      var cx = 80, cy = 58;
+      var cx = 80, cy = 62;
       for (var a = 0; a < 64; a++) { var ang = a / 64 * Math.PI * 2; g.pixel(cx + Math.cos(ang) * 34, cy + Math.sin(ang) * 10, 1); g.pixel(cx + Math.cos(ang) * 33, cy + Math.sin(ang) * 9.5, 1); }
       g.rect(cx - 2, cy - 24, 4, 48, 1); g.rect(cx - 8, cy - 4, 16, 8, 1); g.rect(cx - 6, cy - 2, 12, 4, 2);
       if (Math.floor(game.time * 1.5) & 1) g.pixel(cx, cy - 25, 3);
-      bigText(t("失联站", "LOST DECK"), 80, 14, game.lang === "zh" ? 3 : 2, 3);
+      bigText(t("失联站", "LOST DECK"), 80, 7, 2, 3);
       var items = titleItems(), y0 = 92;
       for (var i = 0; i < items.length; i++) {
         var sel = i === titleSel, y = y0 + i * 16;
@@ -176,7 +181,7 @@
 
   /* ---------------- controls ---------------- */
   game.scene("help", {
-    update: function () { if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pointer.pressed) { sfx("tap"); game.go("title"); } },
+    update: function () { if (game.pressed("b") || game.pointer.pressed) { sfx("tap"); game.go("title"); } },
     draw: function () {
       g.clear(3);
       g.text(t("操作", "Controls"), 80, 6, { align: "center" });
@@ -188,21 +193,22 @@
         [t("B", "B"), t("按开关 读终端", "use, read")],
         [t("B+左右", "B+L/R"), t("横移", "sidestep")],
         [t("SELECT", "SELECT"), t("换武器", "weapon")],
-        [t("START", "START"), t("暂停 地图", "pause, map")]
+        [t("START", "START"), t("暂停 地图", "pause, map")],
+        [t("拖动/点画面", "drag/tap view"), t("转身/开火", "turn/fire")]
       ];
       for (var i = 0; i < rows.length; i++) {
-        g.text(rows[i][0], 10, 28 + i * 15);
-        g.text(rows[i][1], 150, 28 + i * 15, { align: "right", color: 0 });
+        g.text(rows[i][0], 10, 26 + i * 13);
+        g.text(rows[i][1], 150, 26 + i * 13, { align: "right", color: 0 });
       }
       g.text(t("走向门就会开。", "Doors open as you walk in."), 80, 132, { align: "center", color: 0 });
-      g.text(t("A 返回", "A back"), 80, 146, { align: "center", color: 0 });
+      g.text(t("B 返回", "B back"), 80, 146, { align: "center", color: 0 });
     }
   });
 
   /* ---------------- deck list ---------------- */
   var deckSel = 0;
   game.scene("decks", {
-    enter: function () { deckSel = Math.min(save.unlocked, LD.DECKS.length) - 1; game.music(LD.MUSIC.title); game.ambience(null); },
+    enter: function () { deckSel = Math.min(save.unlocked, LD.DECKS.length) - 1; music(LD.MUSIC.title); game.ambience(null); },
     update: function () {
       var d = game.dir(), n = LD.DECKS.length;
       if (d.y) { deckSel = (deckSel + d.y + n) % n; sfx("tick"); }
@@ -243,7 +249,7 @@
   var deckIdx = 0;
   function startDeck(i) { deckIdx = i; game.go("brief", null, { to: 0 }); }
   game.scene("brief", {
-    enter: function () { this.t = 0; game.musicStop(); game.ambience("wind", 0.25); },
+    enter: function () { this.t = 0; musicStop(); game.ambience("wind", 0.25); },
     update: function (dt) {
       this.t += dt;
       if (game.pressed("b")) { sfx("tap"); game.go("decks"); return; }
@@ -272,7 +278,7 @@
   var world = null, toast = null, toastT = 0, bigMsg = null, bigT = 0, bHeld = 0, bMoved = false, pending = null, endT = 0;
   var bArmed = false, aLock = false;
   /* a dialog or menu is about to take the keys: forget the B press that opened it, hold A until it is released */
-  function overlay() { bArmed = false; aLock = true; }
+  function overlay() { bArmed = false; aLock = true; touch = null; }
   function say(msg, sec) { toast = msg; toastT = sec || 2.2; }
   function tip(id, msg) { if (save.tips[id]) return; save.tips[id] = 1; say(msg, 3.2); writeSave(); }
   var GUN_NAME = { wrench: { zh: "扳手", en: "Wrench" }, rivet: { zh: "铆钉枪", en: "Rivet gun" }, scatter: { zh: "散钉枪", en: "Scatter" } };
@@ -284,6 +290,7 @@
     guard: { zh: "警卫机：三连发，绕着打。", en: "Guard: bursts of three. Use cover." },
     node: { zh: "节点：全打掉，盾就没了。", en: "Nodes: break all four to drop the shield." }
   };
+  var touch = null;   /* a finger on the view: {x0, last, t, moved} */
   var hooks = {
     door: function () { sfx("door"); },
     locked: function (k) {
@@ -315,7 +322,7 @@
     ping: function () { sfx("ping"); tip("shield", t("核心有盾，先打节点。", "Shielded. Break the nodes first.")); },
     boom: function (x, y, gas) { sfx(gas ? "puff" : "boom"); if (!gas) game.shake(2, 0.25); },
     hurt: function (d) { sfx("hurt"); if (d >= 12) game.shake(2, 0.2); },
-    dead: function () { if (pending) return; pending = "dead"; endT = 0; game.musicStop(); },
+    dead: function () { if (pending) return; pending = "dead"; endT = 0; musicStop(); },
     pickup: function (it) {
       if (it.kind === "card") { sfx("card"); say(t("拿到{c}门卡", "Got the {c} card", { c: T(CARD_NAME[it.n]) }), 2.4); }
       else if (it.kind === "gun") { sfx("card"); say(t("散钉枪！SELECT 换枪", "Scatter gun! SELECT swaps"), 3); }
@@ -326,16 +333,16 @@
     wake: function (e) { sfx("wake"); if (FOE_TIP[e.type]) tip("foe-" + e.type, T(FOE_TIP[e.type])); },
     zap: function () { sfx("zap"); },
     spawn: function () { sfx("puff"); },
-    coreDown: function () { pending = "core"; endT = 0; world.safe = true; game.musicStop(); }
+    coreDown: function () { pending = "core"; endT = 0; world.safe = true; musicStop(); }
   };
 
   game.scene("play", {
     enter: function () {
       var D = LD.DECKS[deckIdx];
       world = new LD.World(D, hooks);
-      toast = null; toastT = 0; pending = null; endT = 0; bHeld = 0; bMoved = false; bArmed = false; aLock = true;
+      toast = null; toastT = 0; pending = null; endT = 0; bHeld = 0; bMoved = false; bArmed = false; aLock = true; touch = null;
       bigMsg = t("第{n}层 {name}", "DECK {n} {name}", { n: deckIdx + 1, name: dname(D) }); bigT = 2.2;
-      game.music(D.boss ? LD.MUSIC.boss : LD.MUSIC.deck);
+      music(D.boss ? LD.MUSIC.boss : LD.MUSIC.deck);
       game.ambience("wind", D.dark ? 0.35 : 0.18);
       if (deckIdx === 0) game.after(2.4, function () { tip("move", t("上下走，左右转，A开火。", "UP/DOWN walk, LEFT/RIGHT turn, A fires.")); });
       if (D.dark) game.after(2.4, function () { if (!world.M.lit) tip("dark", t("停电了，只有手电。找电闸。", "Power is out. Find the switch.")); });
@@ -353,7 +360,21 @@
       if (!game.btn("b")) bArmed = false;
       /* after a dialog or the pause menu, A fires only once it has been let go */
       if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
-      input.fire = !aLock && (game.btn("a") || (game.pointer.down && game.pointer.y < VH));
+      var pt = game.pointer, touchFire = false;
+      if (pt.pressed && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
+      if (touch) {
+        if (pt.down) {
+          touch.t += dt;
+          if (Math.abs(pt.x - touch.x0) > 4) touch.moved = true;
+          if (touch.moved) input.turnBy = (pt.x - touch.last) * 0.012;   /* the width of the view is about a right angle */
+          touch.last = pt.x;
+          if (!touch.moved && touch.t > 0.25) touchFire = true;
+        } else {
+          if (!touch.moved && touch.t <= 0.25) touchFire = true;
+          touch = null;
+        }
+      }
+      input.fire = !aLock && (game.btn("a") || touchFire);
       input.swap = game.pressed("select");
       world.update(dt, input);
       var P = world.P;
@@ -532,7 +553,7 @@
     game.go(D.boss ? "ending" : "results", null, { to: 0 });
   }
   game.scene("results", {
-    enter: function () { this.t = 0; game.music(LD.MUSIC.clear, { loop: false }); game.ambience(null); },
+    enter: function () { this.t = 0; music(LD.MUSIC.clear, { loop: false }); game.ambience(null); },
     update: function (dt) {
       this.t += dt;
       if (this.t < 0.6) return;
@@ -580,7 +601,7 @@
     }
   });
   game.scene("ending", {
-    enter: function () { this.t = 0; game.music(LD.MUSIC.title); game.ambience(null); },
+    enter: function () { this.t = 0; music(LD.MUSIC.title); game.ambience(null); },
     update: function (dt) {
       this.t += dt;
       if (this.t > 2 && (game.pressed("a") || game.pressed("start") || game.pressed("b"))) { sfx("ok"); game.go("title"); }
