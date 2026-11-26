@@ -936,6 +936,43 @@ var Solver = (function () {
     }
     return out;
   }
+  /* the main screen is the title: a dark plate across the top of the self-solving picture, the name on it in
+     lopix12 (sdk/fonts, OFL) at twice its size, paper with an ink shadow. Only the glyphs of the two names are kept. */
+  var TITLE_GLYPHS = {"拍": "12:AAIIIQ9+JCJCNC5+JCJCJC5+AAA=", "照": "12:AA9+kSki9GkAl+lC9+AAUkiSAAA=", "拼": "12:AARCQk7+QkQkYkz+QkQkREyEAAA=", "图": "12:AA/+iCjysSji8ejCgymChi/+AAA=", "S": "7:AAHkKAgMBAUJ4AAA", "N": "7:AAIWKlSlSo0aEAAA", "A": "8:AAAQECgoRHxEgoIAAA==", "P": "7:AAPkKFC+QIECAAAA", "T": "8:AAD+EBAQEBAQEBAAAA==", "I": "4:AORERETgAA==", "L": "6:AAgggggggg+AAA==", "E": "7:AAP0CBA+QIED8AAA"};
+  var titleGlyphs = null;
+  function titleName() {
+    if (titleGlyphs) return titleGlyphs;
+    var str = LANG === "en" ? "SNAPTILE" : "拍照拼图";
+    titleGlyphs = str.split("").map(function (ch) {
+      var s = TITLE_GLYPHS[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [], x, y, i;
+      for (y = 0; y < 14; y++) { var r = []; for (x = 0; x < w; x++) { i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
+      /* drop the empty columns on both sides: the name is set tight */
+      var l = 0, rr = w - 1, col = function (c) { for (var k = 0; k < 14; k++) if (rows[k][c]) return true; return false; };
+      while (l < rr && !col(l)) l++;
+      while (rr > l && !col(rr)) rr--;
+      return { w: rr - l + 1, rows: rows.map(function (q) { return q.slice(l, rr + 1); }) };
+    });
+    return titleGlyphs;
+  }
+  var PLATE_H = 27, NAME_GAP = LANG === "en" ? 2 : 3;
+  function titlePlate(src) {
+    var out = new Uint8Array(src), gs = titleName(), w = 0, x, y, k;
+    for (k = 0; k < gs.length; k++) w += gs[k].w * 2 + (k ? NAME_GAP : 0);
+    for (y = 0; y < PLATE_H; y++) for (x = 0; x < W; x++) out[y * W + x] = 1;
+    for (x = 0; x < W; x++) out[PLATE_H * W + x] = 0;
+    [[1, 0], [0, 3]].forEach(function (pass) {
+      var cx = Math.floor((W - w) / 2) + pass[0];
+      gs.forEach(function (g) {
+        for (var j = 0; j < 14; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i])
+          for (var a = 0; a < 2; a++) for (var b = 0; b < 2; b++) {
+            var X = cx + i * 2 + a, Y = pass[0] + j * 2 + b - 1;
+            if (X >= 0 && X < W && Y >= 0 && Y < PLATE_H) out[Y * W + X] = pass[1];
+          }
+        cx += g.w * 2 + NAME_GAP;
+      });
+    });
+    return out;
+  }
   function attractFrame() {
     var A = S.attract;
     if (!A) return S.pic.px;
@@ -953,7 +990,7 @@ var Solver = (function () {
   }
   function frame() {
     var sc = S.screen;
-    if (sc === "main") return attractFrame();
+    if (sc === "main") return titlePlate(attractFrame());
     if (sc === "gallery") return BUILTINS[S.galleryIndex].pic.px;
     if (sc === "cut") return cutFrame();
     var pic = sc === "preview" ? S.shot : S.pic;

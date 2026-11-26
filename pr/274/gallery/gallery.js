@@ -229,6 +229,38 @@ window.LOPDA_GALLERY = [
       setup: [["wait", 1500], ["cover"], ["key", "x", 80], ["wait", 2000], ["key", "x", 80], ["wait", 600]],
       clip: [["wait", 1800], ["key", "x", 80], ["wait", 2000], ["still"], ["key", "x", 80], ["wait", 2000], ["key", "x", 80], ["wait", 2000]]
     }
+  },
+  {
+    id: "klotski",
+    title: { en: "Slide Cao Cao out of Huarong Pass", zh: "让曹操从华容道脱身" },
+    note: {
+      en: "The old sliding-block puzzle: the big block has to reach the gap at the bottom. Every level is open, steps are recorded, and eight short lessons teach the moves the masters use. Stuck? One hint, or a whole demo that hands the board back when it ends.",
+      zh: "老的滑块谜题：大块要挪到底下的出口。所有关卡都开着，记录步数，还有八节小课讲高手的走法。卡住了，可以看一步提示，或者看整段演示，演完把棋盘还给你。"
+    },
+    uses: ["lo-game", "touch", "save", "buttons"],
+    scene: {
+      /* the title picture is the cover; then 横刀立马 (k27, four up from the top of the list, wrapping), played by the
+         game's own demo (START, 演示) */
+      setup: [["wait", 1200], ["cover"], ["key", "x", 80], ["wait", 700],
+        ["key", "ArrowUp", 80], ["wait", 120], ["key", "ArrowUp", 80], ["wait", 120], ["key", "ArrowUp", 80], ["wait", 120], ["key", "ArrowUp", 80], ["wait", 300],
+        ["key", "x", 80], ["wait", 1200],
+        ["key", "Enter", 80], ["wait", 300], ["key", "ArrowDown", 80], ["key", "ArrowDown", 80], ["key", "ArrowDown", 80], ["key", "x", 80], ["wait", 600]],
+      clip: [["wait", 2500], ["still"], ["wait", 2500]]
+    }
+  },
+  {
+    id: "photo-puzzle",
+    title: { en: "Take a photo, slide it back together", zh: "拍一张照片，再一块块拼回来" },
+    note: {
+      en: "The handheld's camera takes a four-tone photo and cuts it into tiles. Or pick one of six built-in pictures. Normal mode for a quiet puzzle, arcade mode against the clock, and a solver that shows you how.",
+      zh: "用掌机的相机拍一张四色照片，切成滑块。也可以从六张内置图片里挑。普通模式慢慢拼，街机模式和时间赛跑，还有一个会演示解法的帮手。"
+    },
+    uses: ["camera", "buttons", "save"],
+    scene: {
+      /* the main screen is the title: the name over a built-in picture that solves itself (the film never uses a camera) */
+      setup: [["wait", 1200], ["cover"], ["wait", 300]],
+      clip: [["wait", 2400], ["still"], ["wait", 2400]]
+    }
   }
 ];
 
@@ -248,21 +280,6 @@ window.LOPDA_GALLERY_NEXT = [
       setup: [["wait", 1500], ["key", "x", 80], ["wait", 1200]],
       clip: [["wait", 1500], ["still"], ["wait", 2600]],
       after: [["key", "x", 80], ["wait", 1500], ["still"], ["key", "x", 80], ["wait", 1500], ["still"], ["key", "z", 80], ["wait", 800], ["still"]]
-    }
-  },
-  {
-    id: "photo-puzzle",
-    title: { en: "Take a photo, slide it back together", zh: "拍一张照片，再一块块拼回来" },
-    note: {
-      en: "The handheld's camera takes a four-tone photo and cuts it into tiles. Or pick one of six built-in pictures. Normal mode for a quiet puzzle, arcade mode against the clock, and a solver that shows you how.",
-      zh: "用掌机的相机拍一张四色照片，切成滑块。也可以从六张内置图片里挑。普通模式慢慢拼，街机模式和时间赛跑，还有一个会演示解法的帮手。"
-    },
-    uses: ["camera", "buttons", "save"],
-    scene: {
-      /* a built-in picture (the film never uses a camera): the picker is the cover, then the tiles slide */
-      setup: [["wait", 1200], ["still"], ["key", "ArrowRight", 80], ["wait", 300], ["key", "x", 80], ["wait", 1000], ["cover"], ["key", "x", 80], ["wait", 1400]],
-      clip: [["key", "ArrowRight", 80], ["wait", 300], ["key", "ArrowUp", 80], ["wait", 300], ["key", "ArrowLeft", 80], ["wait", 300], ["key", "ArrowDown", 80], ["wait", 300], ["still"],
-        ["key", "ArrowRight", 80], ["wait", 300], ["key", "ArrowUp", 80], ["wait", 300], ["key", "ArrowLeft", 80], ["wait", 300], ["key", "ArrowDown", 80], ["wait", 300], ["key", "ArrowRight", 80], ["wait", 400]]
     }
   },
   {

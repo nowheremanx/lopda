@@ -29,7 +29,7 @@
       ],
       "version": "1.4.0",
       "released": "2026-10-28",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
       "i18n": {
         "en": {
@@ -383,9 +383,9 @@
         "................",
         "................"
       ],
-      "version": "1.0.7",
+      "version": "1.1.0",
       "released": "2026-10-28",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
       "i18n": {
         "zh": {
@@ -400,8 +400,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/klotski/index.html",
-      "sha256": "d6ca96704891856c5df0f788afbf8d9fd114164f20dec506b3b3cf5384b5ef4f",
-      "bytes": 154105
+      "sha256": "187af044c3e2c8885f4b5ac00fad58f6247314d7017153141d12dc25c2a1b51b",
+      "bytes": 160874
     },
     {
       "spec": "lopda/1",
@@ -428,9 +428,9 @@
         "................",
         "................"
       ],
-      "version": "1.5.1",
+      "version": "1.6.0",
       "released": "2026-10-17",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
       "i18n": {
         "zh": {
@@ -448,8 +448,8 @@
         "camera"
       ],
       "path": "apps/photo-puzzle/index.html",
-      "sha256": "3f7ff285909e7a3f30e6166b5b1290afbc9140906f9ee83c03f7e4270bf49c94",
-      "bytes": 75448
+      "sha256": "0585b474cae9ead4606700732eefa6d81863f7d08d035fb96f29a3c0652e4876",
+      "bytes": 77839
     },
     {
       "spec": "lopda/1",
