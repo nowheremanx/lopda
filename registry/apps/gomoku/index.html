@@ -26,14 +26,15 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 #rt{display:block;font-size:17px;font-weight:bold}
 #rn{display:block;font-size:14px;line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
 #res button{flex:none;margin:0}
-#ov{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#7d8a58}
-#panel{background:#a3ad7e;border:4px solid #1f2a14;box-shadow:6px 6px 0 #4a5a32;padding:22px 20px;text-align:center;max-width:300px;margin:10px}
-#panel h1{margin:0 0 12px;font-size:34px;letter-spacing:6px}
-#panel p{margin:0 0 18px;font-size:14px;line-height:1.6}
-#panel button{display:block;width:100%;margin:0 0 10px}
-#panel button:last-child{margin-bottom:0}
-/* the radio match is the second choice: its own caption and an outline, never the solid primary button */
-#lkcap{margin:16px 0 6px;text-align:left;font-size:14px;line-height:1.3;color:#4a5a32}
+/* the title screen: the picture (the gallery's cover too), one line, two buttons in a row; flat paper, no frame */
+#ov{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#a3ad7e;overflow:hidden}
+#panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:6px 4px}
+#art{display:block}
+#ot{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);margin:0}
+#op{margin:0;font-size:14px;line-height:1.5;text-align:center;box-sizing:border-box;padding:0 6px}
+#btns{display:flex;gap:10px;box-sizing:border-box;padding:0 4px}
+#btns button{flex:1;padding:8px 6px}
+/* the radio match is the second choice: an outline, never the solid primary button */
 #panel #lk{background:#a3ad7e;color:#1f2a14;border:2px solid #1f2a14;box-shadow:none}
 .hide{display:none!important}
 </style>
@@ -45,18 +46,60 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 <div id="bot"><div id="tip">点交叉点落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button> <button id="rc" class="hide">重新连接</button> <button id="ln" class="hide">离开</button></div></div>
 <div id="res" class="hide"><div id="resTxt"><span id="rt"></span><span id="rn"></span></div><button id="again">再来一局</button></div>
 </div>
-<div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。</p><button id="st">开始</button><div id="lkcap" class="hide">两台掌机：</div><button id="lk" class="hide">对战（电波）</button></div></div>
+<div id="ov"><div id="panel"><canvas id="art" aria-hidden="true"></canvas><h1 id="ot">五子棋</h1><p id="op">你执黑先手，横竖斜连成五子即胜。</p><div id="btns"><button id="st">开始</button><button id="lk" class="hide">对战（电波）</button></div></div></div>
+<script>
+/* the title picture: a 156 x 156 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
+   A hand sets a black stone on the board in the traditional grip; the name is written on the dark wall above the
+   board. The picture is stored packed, 2 bits a pixel; the letters are lopix12 glyphs (sdk/fonts, OFL) at 2x. */
+var ART = (function () {
+  var W = 156, H = 156;
+  var PIC = "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/pVVVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqUAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/gAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/RAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqquqAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9AAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/QAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/VAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqv8AAAAAAAAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/lUAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/9AAAAAAAAAAAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/9VUAAAAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAAAAAAAAAAAAAAAGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9AAAAAAAAAAAAAAAAAAWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr4AAAAAAAAAAAAAAAAAABWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq+UAAAAAAAAAAAAAAAAAAFWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5AAAAAAAAAAAAAAAAAAAVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrgAAAAAAAAAAAAAAAAAABVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrgAAAAAAAAAAAAAAAAAAFVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqquAAAAAAAAAAAAAAAAAAAVVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpAAAAAAAAAAAAAAAAAABVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAAAAAAAAAAAAAFVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAAAAAAAAAAAAAFVVpqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAGVVVUAAAAAAAFVV5qqqqqqqqqqqqqqqqqqqqqqqqqqqqr0AAABVVWlVVUAAAAAAAVVW5qqqqqqqqqqqqqqqqqqqqqqqqqqqqrAAAAFVVWlVVUAAAAAAAVVXmqqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAABVVVWlVWQAAAAAABVVXmqqqqqqqqqqqqqqqqqqqqqqqqqqqq4AAAFVVVW5VaQAAAAAAFVVuVqqqqqqqqqqqqqqqqqqqqqqqqqqqrkAAAFaVVV5VuAAAAAAAFVVtqqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAAFammppVtAAAAAAAFVVu/qqqqqqqqqqqqqqqqqqqqqqqqqqqtAAAAVX////lsAAAAAABVVW/6qqqqqqqqqqqqqqqqqqqqqqqqqqq4AAABVX6qqr5sAAAAAAFVVb6qqqqqqqqqqqqqqqqqqqqqqqqqqqrkAAAFVb6qqq+oAAAAABVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqvQAAAFWvqqqqvwAAAAABVVW+qqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAAAVW+qqqqrgAAAAAFVVW6qqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAABVW6qqqqvgAAAAFVVVbqqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAAFVuqqqqq9AAAAAVVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqvAAAAVa+qqqqr4AAAAEVVVW+qqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAABVb6qqqqvQAAAAVVVVb6qqqqqqqqqqqqqqqqqqqqqqqqqqqq4AAAFVbqqqqquAAAABVVVVbqqqqqqqqqqqqqqqqqqqqqqqqqqqqrkAABVX/qqqqq4AAAAVVVVV+qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAABVrv6qqqrgAAABVVVVa6qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAVVvb6qqqvQAAAFVVVav6qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAZW9W6qqq9AAAAVVVVv+qqqqqqqq//////////////////////QAAa/1W////0AAABVVVv///////qqr6qqqqqqqqqqqqqqqqqqqqrQAAW+lW1VVXgAAAFVVW/qqqqqqqqq+hVUBVVAFUAAVBBVUVVVQVHQAAV5VWpVVbAAAAVVVrpEVVQBVRqr5VVVVVVVVVVVVVVVVVVVVVbQAAV5VVeVVuAAABVVr/VVVVVVVWquVWqqqqqqqqqqqqqqqqqqqqrQAAV5VVala4AAABVa+qqqqqqqqqq9VpVVVlVVVZVVVWVVVVZVVVXQAAV5VVW1XgAAAFVb9VVVZVVVVlr1VlVVWVVVVlVVVVVVVVlVVVXQABV5VVW1eAAAAVV+VVVVVVVVVV/VVVVVZVVVVlVVVYVVVVlVVVHQACW5VVW69AAABVrqRVVVWVVVVG9VaVVVpVVVWlVVVZVVVVpVVVbQABb6VVWv0AAAVV/mlVVVaVVVVa1VqqqqmqqqqaqqqmqqqqqqqqrQABbvlVVuQAABVX5pqqqqqqqqqqVWVVVVlVVVZVVVVlVVVSVVVVbAABbblVVsAAAFVXlVlVVVVlVVVVVZVVVWVVVVlVVVVlVVVWVVVVbAAFbW5VWgAAAVVuVVlVVVVZVVVVVlVVVZVVVVlVVVWVVVVZVVVVuAAVuVuVbgAABVW9VVZVVVVZVVVVVVVVVlVVVWVVVVWVVVVZVVVUoABVtVbmuAAAVVblVVZVVVVWVVVVqVVVWlVVVWVVVVaVVVVaVVVV4ABa9Vb65AAAVVvlVVaVVVVWVVVWqqqqqqqqqqqqqqqqqqqqqqqp4ABa+qq+wAABVW6qqqqqqqqqqqqqlVVVVVVVVZVVVVVVVVUVVVVVtAAVtVVfQAAVVb1VVVVVVVVVlVVVVVVVZVVVVlVVVVlVVVVVVVVVtAAVtVVcAAAVVvlVVVVlVVVVlVVVVVVVVVVVVlVVVVVVVVVlVVVVdAAVtFW8AKpVW5lVVVVZVVVVaVVVVVVWVVVVWVVVVWRVVVVVVVVVdAAVuaS0AZqVb1lVVVUaVVVVWVVVlVVaVVVVaVVVVrlVVVWlVVVVdAAa//3gBkGlvVlVVVVvlVVVaVVVqqqqqqqqqqqqq/6qqqqqqqqqtAAv///gKQBp+qqqqqqv6qqqqqqqVVVlVVVVlVVVVflVVVWVVVVVdAD////gJABr1VZVVVVXlVVVVlVVVVWVVVVWVVVVVZVVVVVVVVVWdAL////hgAFvVVZVVVVVVVVVVZVVVVZVVVVWVVVVVlVVVVaVVVVWdAv5f//hgBV9VVWVVVVVlVVVVZVVVVVVVVVVVVVVVlVVVVZVVVVVdA+Qv//hgBWkVVWVVVVVlVVVVWValVlVVVVaVVVVVlVVVVpVVVVWtB+S///hgBblVVWVVVVVlVVVVWmqqqqqqqqqqqqqqqqqqqqqqqqqqH/b///kUWuqqqqqqqqqqqqqqqqqVWVVVVVlVVVVWVVVVVVVVVVWXn/////4KX9VVVVlVVVVVVVVWqqqVZVVVVWVVVVVZVVVVVpVVVVZV///////lblVVVVlVVVVZVVqqqqqVlVVVVWVVVVVZVVVVVlVVVVZVa/////+/+lVVVVVVVVVWqqqqqqqWVVVVVWVVVVVZVVVVWlVVVVZVV/////9q5VVVVVZVVaqqqqqqqqqWFVVVVZVVVVVlVVVVVVVVVVZVVf////5VBlVVVVZVaqqqqqqqqqqqqqqqpqqqqqqqqqqqqqqqqqqaqr////pqmqqqqaqqqqqqqqqqqqqlVVVVVlVVVVWVVVVVWVVVVVZVVV///+VVVpVVVqqqqqqqqqqqqqqlVVVVVVVVVVWVVVVVWVVVVVZVVVb+/lVVVUVVqqqqqqqqqqqqqqqVVVVVaVVVVVWVVVVVVVVVVVZVVVVVlVVVVZqqqqqqqqqqqqqqqqqVVVVVZVVVVVWVVVVVVVVVVVZVVVVVlVVWqqqqqqqqqqqqqqqqqqqVVVVVZVVVVVZVVVVVb//RVVZVVVVVlVVqqqqqqqqqqqqqqqqqqqqRVVVVVVVVVVZVVVVW4VVuVVUVVVVVlVqqqqqqqqqqqqqqqqqqqlVlVaqWmaqpVZplqlVeUAAWlZqmpVaur6qqqqqqqqqqqqqqq6qqqVWlVVVaVVVVVWlVVVV5AAAB5VZVVarqqqqqqqqqqqqqqqqpVpVVVVVRVVVVVVVVVVRVVVV0AAABoVZVVaqqqqqqqqqqqqqqqpVVVZVVVVVVVVVlVVVVVaVVVVV0AAAFpVVVVqqqqqqqqqqqqqqmVVVVVWVVVVVVVVVVVVVVX/+VVVV9QAFW9VlVVqqqqqqqqqqqqqVWVVVVVWVVVVVVVVWVVVVX4VR9VVVv9VZ/5VlVVaqqqqqqVWlVVVVWVVVVVVlVVVVVVVWVVVVpUAAWlVVb////pVlVVVqqqqqVVVlVVVVVVVVVVVlVVVVVVVVVVVVoAAAC1VVWr//qVVlVVVVVpVVVVWlVVVVVlVVVVVZVVVVlVVpVVVXgAAAAtVVWqqqpVVlVVVVVVVVVVW5VVVVVlVVVVVZVVVVqqqqqqqrgAAABuqqqqqqqqqqqqqqqqqqqqq/qqqqqqqqqqqqqqqqVVWlVVVXwAAAG9VVVVqlVVVlVVVVVZVVVVVpVVVVVZVVVVVWVVVVVVWVVVVW8EBVr5VVpVVVVVVlVVVVVZVVVVVZVVVVVZVVVVVWVVVVVVVVVVVV+lVW/pVVv/5VVVVlVVVVVZVVVVVZVVVVVZVVVVVWVVVVVVlVVVVVr///+lVv///0VVWVVVVVVZVVVVVlVVVVVWVVVVVVlVVVVVlVVVVVav//qlX////+VVWVVVVVVZVVVVVZVVVVVWVVVVVVlVVVVWVVVVVVarqupVb6b///VVWVVVVVVZVVVVVZVVVVVVlVVVVVZVVVVVVVVVVVVmqpVVv0b///1VWVVVVVVZVVVVVZVVVVVVlVVVVVKVVVlZVVVVVVpVVVVV/6////1VWVVVVVVpVVVVVZVVVVVVlVVVVVaVVVqqqqqqqqqqqqqq//////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqVVVVVVVWVVVVVVv/////1VWf/5VVVZVVVVVaVVVVVVZVVVVVVlVVVlVVVVVWVVVVVVv/////lVL0AH9VVZVVVVVWVVVVVVZVVVVVVlVVWVVVVVVZVVVVVVv////+lV1QABXRVZVVVVVWVVVVVVWVVVVVVZVVWVVVVVVZVVVVVVb////6lWgAAAClVZVVVVVWVVVVVVWVVVVVVZVVlVVVVVVVVVVVVVWv//+qVaAAAAAtVZVVVVVVVVVVVVWlVVVVVZVVlVVVVVVlVVVVVVVq//6pVaAAAABtVZVVVVVVlVVVVV//0VVVVWVVlVVVVVVlVVVVVVVWqqpVVaAAAAFtVZVVVVVVlVVVUfVVb0VVVWVVVVVVVVWVVVVVVVWlVVVVVbQAAFW9VZVVVVVVlVVVWqAAGmVVVWlVlVVVVVWVVVVVX//9VVVVVbwAAVn5VpVVVVVVlVVVXgAAALlVVVlVqqqqqqqqqqqq////qqqqqr+VVVvqqqqqqqqqqqqqsAAAAB+qqqqqlVVVVVZVVVVf////5VVVVWv6qr+pVZVVVVVVZVVVsAAAAB5VVVZVVVVVVVZVVVVvqv//+FVVVWu///6lVZVVVVVVZVVVsAAAAF5VVVZVVVVVVVpVVVW/Qv//+VVVVVqv/+qVVZVVVVVVZVVVsAAAAV9VVVVVVVVVS//RVVX/q////lVVVVaqqqlVVZVVVVVVVVVVuAAAVX5VVVWVVVVRr//6VVb//////lVVVVZaqpVVVZVVVVVVWVVVbqABW/pVVVWVVVVb////lVb//////1VVVVZVVVVVVZVVVVVVVVVVb/qqr+pVVVVVVVVf7///5Vb//////lVVVVZVVVVVVZVVVVVVaVVVWv///+lVVVVlVVR/Rv///VW/////+pVVVVlVVVVVVZVVVVVVZVVVWq//+qVVVVVlVVW+m////VVv////+lVVVVlVVVVVVaVVVVVVZVVVVaqqqpVVVVVWlVb//////lWr////qlVVVVlVVVVVVvlVVVVValVVVVqqqVVVVVVaqqv//////6qqv//+qqqqqqqqqqqqr/+qqqqqqqqqqqqqqqqqqqqrVVb//////lVWqqqqlVVVVVlVVVVVW/lVVVVVWVVVVVVVpVVVVVVWVVb/////+lWr/qqpVVVVVVlVVVVVVaVVVVVVWVVVVVVVZVVVVVVVVVW/////+lqqqulVVVVVVVlVVVVVVZVVVVVVWVVVVVVVVVVVVVVVVVWv////6mtAAelVVVVVVVlVVVVVVZVVVVVVWVVVVVVVZVVVVVVVVVVr////qeAAAAuVVVVVVWVVVVVVVZVVVVVVVlVVVVVVVVVVVVVVVVVav//6lwAAAALVVVVVVWVVVVVVVZVVVVVVVlVVVVVVVlVVVVVVVVVWqqqqaQAAAAG1VVVVVWVVVVVVVZVVVVVVVlVVVVVVWVVVVVVVVVVVmqqlbAAAAAG1VVVVVWVVVVVVVZVVVVVVVlVVVVVVVlVVVVVVVVVVlVVVbAAAAAW1VVVVVWVVVVVVVZVVVVVVVlVVVVVVVpVVVVVVVVVVlVVVbQAAABW5VVVVVWVVVVVVVZVVVVVVVpVVVVVVVZVVVVVVlVVWVVVVb0AABVb5VVVVVWVVVVVVVZVVVVVVVpVVVVVVVZVVVVVVqqqqqqqqr5VVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlVVWVVVVW/1VVv/pVVVVVpVVVVVVVaVVVVVVVaVVVVVVVWVVVVVVVVVZVVVVWv6qqv6lVVVVVZVVVVVVVZVVVVVVVZVVVVVVVWVVVVVVVVVZVVVVWr////qlVVVVVZVVVVVVVZVVVVVVVaVVVVVVVWVVVVVVVVVVVVVVVav//6qVVVVVVZVVVVVVVZVVVVVVVaVVVVVVVVlVVVVVVVVVVVVVVWqqqqlVVVVVVZVVVVVVVZVVVVVVVVVVVVVVVVlVVVVVVVWlVVVVVVaqqlVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVpVVVVVVVVVVVVVVVWqqVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVZVVVVVVVVWVVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVVVVVVVVVVZVVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVZVVVVVVVVZVVVVVVVVVlVVVVVVVZVVVVVVVVlVVVVVVVWVVVVVRVpVVVVVVVVZVVVVVVVVSRVVVVVVVZVVVVVVVVpVVVVVVVWVVVVRlVpVVVVVVVVpVVVVVVVVWlVVVVVVVaVVVVVVVVpVVVVVVVaVVVVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqRWVVVVVVVVVlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVlVVVVVWVVVVVVVVVlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVlVVVVVZVVVVVVVVWlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVVVVVVVZVVVVVVVVVVVVVVVVVVVVVVVVVVVZVVVVVVVVVVVVVVVVVZVVVVlZVVVVVVVVaVVVVVVVVVZVVVVVVVVaVVVVVVVVWVVVVVVVVZVVVV";
+  var GLYPH = {"5":"6:AA+ggg8CCicAAA==","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","G":"7:AADiKBAgRoSI8AAA","O":"8:AAA4RIKCgoKCRDgAAA==","M":"8:AACCgsbGqqqSkpIAAA==","K":"7:AAIUSRQwUJESEAAA","U":"7:AAIUKFChQoUJ4AAA","F":"7:AAP0CBA+QIECAAAA","I":"4:AORERETgAA==","V":"8:AACCgkRERCgoEBAAAA==","E":"7:AAP0CBA+QIED8AAA"," ":"6:AAAAAAAAAAAAAA==","N":"7:AAIWKlSlSo0aEAAA","A":"8:AAAQECgoRHxEgoIAAA==","R":"7:AAPkKFC+SIkSEAAA","W":"10:AAAIiiKIlUVRVCIIgiAAAAA="};
+  function glyph(ch) {
+    var s = GLYPH[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [];
+    for (var y = 0; y < 14; y++) { var r = []; for (var x = 0; x < w; x++) { var i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
+    /* drop the empty columns on both sides: the title is set tight */
+    var l = 0, rr = w - 1, col = function (x) { for (var y = 0; y < 14; y++) if (rows[y][x]) return true; return false; };
+    while (l < rr && !col(l)) l++; while (rr > l && !col(rr)) rr--;
+    return { w: rr - l + 1, rows: rows.map(function (r) { return r.slice(l, rr + 1); }) };
+  }
+  /* a line of glyphs at scale s, tone t, with a shadow of tone sh one pixel down and right */
+  function text(px, str, x, y, s, gap, t, sh) {
+    var gs = str.split("").map(function (ch) { return ch === " " ? { w: 3, rows: [] } : glyph(ch); });
+    [[1, sh], [0, t]].forEach(function (pass) {
+      var cx = x + pass[0];
+      gs.forEach(function (g) {
+        for (var j = 0; j < g.rows.length; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i])
+          for (var a = 0; a < s; a++) for (var b = 0; b < s; b++) {
+            var X = cx + i * s + a, Y = y + pass[0] + j * s + b;
+            if (X >= 0 && Y >= 0 && X < W && Y < H) px[Y * W + X] = pass[1];
+          }
+        cx += g.w * s + gap;
+      });
+    });
+  }
+  function draw(lang) {
+    var px = new Uint8Array(W * H), b = atob(PIC);
+    for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
+    var en = lang === "en";
+    text(px, en ? "GOMOKU" : "五子棋", en ? 3 : 4, en ? 1 : 4, 2, en ? 1 : 4, 0, 3);
+    text(px, en ? "5 IN A ROW" : "黑白连珠", en ? 4 : 5, en ? 29 : 33, 1, en ? 1 : 3, 0, 3);
+    return px;
+  }
+  return { W: W, H: H, draw: draw };
+})();
+</script>
 <script>
 (function(){
 var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d');
 var turnEl=document.getElementById('turn'),tipEl=document.getElementById('tip'),recEl=document.getElementById('rec');
 var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op');
 var botEl=document.getElementById('bot'),resEl=document.getElementById('res'),rtEl=document.getElementById('rt'),rnEl=document.getElementById('rn'),againEl=document.getElementById('again');
-var lkcapEl=document.getElementById('lkcap');
 /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
 var TXT={
-  zh:{title:'五子棋',intro:'你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',match:'对战（电波）',menu:'回到菜单',two:'两台掌机：',
+  zh:{title:'五子棋',intro:'你执黑先手，横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',match:'对战（电波）',menu:'回到菜单',
     yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点落子',tipsure:'点别处可换位置',tipover:'点重新开始再来一局',wins:'胜 ',
     win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。',
     myTurn:'你的回合',peerTurn:'对方的回合',waiting:'等对方…',sending:'发送中…',linked:'已连线',linking:'连接中…',offline:'断线了',notYet:'没连上',
@@ -64,7 +107,7 @@ var TXT={
     linkWin:'你赢了',linkLose:'对方赢了',linkWinnote:'五子连珠，漂亮。',linkLosenote:'对方连成五子。',linkDrawnote:'棋盘已满。',
     linkTip:'点交叉点落子',offlineTip:'点重新连接',
     why:{bye:'对方离开了',lost:'信号断了','other-app':'对方换了别的程序',timeout:'没有连上',home:'这边离开了',cancelled:'连线取消了',denied:'没有允许连线',none:'这台掌机不能连线',busy:'已经有别的连线',big:'消息太长',other:'连线出了错'}},
-  en:{title:'GOMOKU',intro:'You play black and go first. Tap a point and the stone goes down a second later; tap elsewhere before then to move it. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',two:'Two handhelds:',
+  en:{title:'GOMOKU',intro:'You play black and go first. Five in a row wins.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',
     yours:'Your move',thinking:'White thinking',tip:'Tap a point',tipsure:'Tap elsewhere to move',tipover:'Restart for another',wins:'Wins ',
     win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.',
     myTurn:'Your turn',peerTurn:'Their turn',waiting:'Waiting…',sending:'Sending…',linked:'Linked',linking:'Connecting…',offline:'Disconnected',notYet:'No link',
@@ -77,7 +120,6 @@ document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
 ot.textContent=TXT.title;op.textContent=TXT.intro;document.getElementById('st').textContent=TXT.start;
 document.getElementById('ud').textContent=TXT.undo;document.getElementById('rs').textContent=TXT.restart;recEl.textContent=TXT.wins+0;
 document.getElementById('lk').textContent=TXT.match;
-lkcapEl.textContent=TXT.two;
 document.getElementById('rc').textContent=TXT.reconnect;
 document.getElementById('ln').textContent=TXT.leave;
 var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
@@ -355,7 +397,6 @@ function updateButtons(){
   show(document.getElementById('rc'),mode==='link'&&!linkOpen&&!openingLink&&!over);
   var lkOn=!!LINK&&panelMode==='menu'&&mode!=='link';
   show(document.getElementById('lk'),lkOn);
-  show(lkcapEl,lkOn);
 }
 function updateLinkUI(){
   if(mode!=='link')return;
@@ -437,6 +478,7 @@ function showMenu(){
   document.getElementById('st').textContent=TXT.start;
   updateButtons();
   ov.classList.remove('hide');
+  drawArt();
 }
 /* the receiver of "sync" answers with the whole game (one message, or chunks of whole moves) */
 function sendAll(){
@@ -581,7 +623,28 @@ window.__gomoku.set=function(stones){
   }
   turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;hideResult();draw();
 };
-reset();resize();
+/* paint the title picture at the largest whole scale that leaves room for the line and the buttons below it */
+var artTone=[[163,173,126],[125,138,88],[74,90,50],[31,42,20]],artPx=null;
+function drawArt(){
+  if(ov.classList.contains('hide'))return;
+  var cvA=document.getElementById('art'),W=ART.W,H=ART.H;
+  var room=window.innerHeight-(document.getElementById('op').offsetHeight+44+12*2+24);
+  var s=Math.max(1,Math.min(Math.floor((window.innerWidth-8)/W),Math.floor(room/H)));
+  var d=window.devicePixelRatio||1,k=Math.max(1,Math.round(s*d));
+  cvA.style.width=(W*s)+'px';cvA.style.height=(H*s)+'px';
+  document.getElementById('op').style.maxWidth=(W*s)+'px';document.getElementById('btns').style.width=(W*s)+'px';
+  if(cvA.width===W*k&&cvA.height===H*k&&artPx)return;
+  if(!artPx)artPx=ART.draw(LANG);
+  cvA.width=W*k;cvA.height=H*k;
+  var cx=cvA.getContext('2d'),img=cx.createImageData(W*k,H*k),o=img.data;
+  for(var y=0;y<H*k;y++)for(var x=0;x<W*k;x++){
+    var t=artTone[artPx[((y/k)|0)*W+((x/k)|0)]],i=(y*W*k+x)*4;
+    o[i]=t[0];o[i+1]=t[1];o[i+2]=t[2];o[i+3]=255;
+  }
+  cx.putImageData(img,0,0);
+}
+window.addEventListener('resize',drawArt);
+reset();resize();drawArt();
 updateButtons();
 (async function(){
   try{
