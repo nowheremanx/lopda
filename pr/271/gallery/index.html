@@ -44,6 +44,14 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
 .glass img,.glass video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
 .glass video{opacity:0;transition:opacity .2s}
 .glass video.on{opacity:1}
+/* the app's page opens on the cover; the film plays only when asked (owner, 2026-11-26: a film always moving is too busy) */
+.glass.tap{cursor:pointer}
+.playb{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:10px;
+  padding:12px 20px 12px 16px;min-height:44px;border:0;border-radius:999px;background:rgba(31,42,20,.88);color:var(--lcd-paper);
+  font:600 16px/1 var(--f-body,system-ui);cursor:pointer;box-shadow:0 10px 30px -10px rgba(0,0,0,.7);transition:opacity .2s}
+.playb svg{width:18px;height:18px;fill:currentColor}
+.playb:hover{background:rgba(31,42,20,.96)}
+.glass.playing .playb{opacity:0;pointer-events:none}
 
 /* the overview: a grid of screens, as an examples page */
 .head{padding-block:clamp(40px,7vw,80px) clamp(28px,4vw,44px)}
@@ -103,7 +111,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
       "foot": "MIT · A fictional handheld, made for fun.",
       "head.e": "Gallery", "head.h": "Small apps, made with care.",
       "head.p": "The best of the store, chosen by hand. Each one is a single HTML file under 512 KB, with no network. Tap one for a closer look, or open it on your phone.",
-      "back": "All apps", "open": "Open on your phone", "source": "Source", "uses": "What it uses",
+      "back": "All apps", "play": "Watch it play", "open": "Open on your phone", "source": "Source", "uses": "What it uses",
       "cat.game": "Game", "cat.productivity": "Tool", "cat.education": "Learning", "cat.create": "Create", "cat.story": "Story", "cat.life": "Life", "cat.other": "Other",
       "missing": "No such app in the gallery.", "loading": "Loading..."
     },
@@ -111,7 +119,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
       "foot": "MIT · 一台虚构的掌机，做着玩的。",
       "head.e": "精选应用", "head.h": "小应用，用心做。",
       "head.p": "从商店里挑出来的精品。每一个都只是一个不到 512 KB 的 HTML 文件，不联网。点进去看详情，或者直接在手机上打开。",
-      "back": "全部应用", "open": "在手机上打开", "source": "源码", "uses": "用到了",
+      "back": "全部应用", "play": "看看动起来", "open": "在手机上打开", "source": "源码", "uses": "用到了",
       "cat.game": "游戏", "cat.productivity": "工具", "cat.education": "学习", "cat.create": "创作", "cat.story": "故事", "cat.life": "生活", "cat.other": "其他",
       "missing": "精选里没有这个应用。", "loading": "载入中..."
     }
@@ -154,10 +162,20 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px
     var v = el("video"); v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
     v.preload = "none"; v.setAttribute("aria-hidden", "true"); g.appendChild(v);
     v.addEventListener("playing", function () { v.classList.add("on"); });
-    s.play = function () { if (reduce) return; if (!v.src) v.src = m.film; var p = v.play(); if (p && p.catch) p.catch(function () {}); };
+    s.play = function (asked) { if (reduce && !asked) return; if (!v.src) v.src = m.film; var p = v.play(); if (p && p.catch) p.catch(function () {}); };
     /* back to the cover: the film hides and starts again from the top next time */
     s.stop = function () { if (!v.src) return; v.pause(); v.classList.remove("on"); try { v.currentTime = 0; } catch (e) {} };
-    if (autoplay) setTimeout(s.play, 0);
+    if (autoplay) {
+      /* a button on the cover; a tap on the screen plays and pauses, and a pause keeps the frame */
+      var b = el("button", "playb"); b.type = "button";
+      b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>';
+      b.appendChild(el("span", null, t("play")));
+      g.appendChild(b); g.classList.add("tap");
+      g.addEventListener("click", function () {
+        if (v.src && !v.paused) { v.pause(); g.classList.remove("playing"); }
+        else { s.play(true); g.classList.add("playing"); }
+      });
+    }
     return s;
   }
 
