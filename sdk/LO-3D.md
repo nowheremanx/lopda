@@ -1,6 +1,6 @@
 # lo-3d.js
 
-A small software 3D renderer for Lo-PDA apps. MIT License. Version 1.1.0.
+A small software 3D renderer for Lo-PDA apps. MIT License. Version 1.2.0.
 
 It draws low-poly scenes in the four tones: triangles with a z-buffer, flat sun
 shading, point lights computed per pixel, fog, depth of field, billboard sprites
@@ -17,7 +17,7 @@ Use it with lo-game.js (recommended) or on its own.
 `index.html` has an empty block, like the lo-game one:
 
 ```html
-<script data-lo-3d="1.1.0"></script>
+<script data-lo-3d="1.2.0"></script>
 <script data-lo-game="1.2.0"></script>
 <script>
 var game = LoGame.create({ width: 160, height: 144 });
@@ -46,6 +46,7 @@ copy inside your app; the checker rejects it. lo-3d is about 27 KB.
 Every released version stays valid: an app built with 1.0.0 keeps passing the checker.
 1.1.0 added `tone`, `alpha`, `Lo3D.builder` (with `tube` and `ribbon`), `Lo3D.shadow`,
 `R.lookAt` and the sprite option `snap`; everything else is unchanged.
+1.2.0 added `R.band` (flat tone bands with dither only at their edges); its default 1 draws exactly as 1.1.0.
 
 Without lo-game, paint the result into a canvas yourself:
 `ctx.putImageData(R.paint(ctx.createImageData(160, 144)), 0, 0)`.
@@ -133,6 +134,7 @@ R.sun = { dir, ambient, diffuse }   // dir points toward the sun; flat shading p
 R.lights = [{ x, y, z, radius, power }]   // point lights, per pixel, fade to 0 at radius
 R.fog = { near, far, lum }          // surfaces fade to luminance lum between two view depths
 R.focus = { near, far }             // outside these view depths the dither is twice as coarse
+R.band = 1                          // 1.2.0+: 0.25 shades surfaces in flat bands, dithered only at band edges; 0 no dither
 ```
 
 Every frame:

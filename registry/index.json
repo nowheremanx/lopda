@@ -143,8 +143,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "c7f113b2f1c0250ffe547f56e4041251aa9327d3ee8c92c3da01f472a023d1f8",
-      "bytes": 299676
+      "sha256": "79134c20f32ffdf172e68de36b3bbc90ff502be32768b7a6f0fa4a19910ea94d",
+      "bytes": 300203
     },
     {
       "spec": "lopda/1",
@@ -791,9 +791,9 @@
         "................",
         "................"
       ],
-      "version": "0.3.0",
+      "version": "0.4.1",
       "released": "2026-10-08",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
       "i18n": {
         "en": {
@@ -804,8 +804,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "c11d5a0949676d87d4b2747c62eb459a7050eafb65a3b2628051bf178ab13265",
-      "bytes": 44312
+      "sha256": "fa860ba9cdc13b03fc6d11a1cae61fc24fe655de1ab0c2aaba34bd3bd417fdd8",
+      "bytes": 45214
     },
     {
       "spec": "lopda/1",
