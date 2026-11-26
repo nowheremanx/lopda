@@ -5,6 +5,7 @@
 //
 // Writes gallery/media/<id>/<lang>.mp4 (the loop), <lang>-1.png, <lang>-2.png... (the stills, the first is the cover).
 // Both languages unless --lang says one: the apps draw their own text in the player's language.
+// Only the cover is kept unless --stills (the scenes' other stills, for a detail page that shows them).
 // --gif also writes <lang>.gif into the work folder (for a forum post; GIFs stay out of the repo, they are ten times larger).
 //
 // How it films: the app is started the way the store starts it (LP.runApp, as tools/launch-video.mjs), the scene's
@@ -31,6 +32,8 @@ const opt = (k, d) => { const a = args.find((x) => x.startsWith("--" + k + "="))
 const ONLY = opt("only", "").split(",").filter(Boolean);
 const LANGS = opt("lang", "") ? [opt("lang", "")] : ["en", "zh"];
 const GIF = args.includes("--gif");
+/* the stills after the cover are not shown for now (owner, 2026-11-26: not good enough yet); --stills keeps them */
+const STILLS = args.includes("--stills");
 /* a phone's screen; the app's frame comes out about 390 x 470 css px, filmed at 2x */
 const VW = 390, VH = 844, DPR = 2;
 
@@ -151,7 +154,7 @@ for (const lang of LANGS) {
     const fromClip = [];
     for (const m of marks) fromClip.push(await readFile(frames.reduce((b, x) => Math.abs(x.t - m) < Math.abs(b.t - m) ? x : b, frames[0]).f));
     const stills = [];
-    for (const buf of (cover ? [cover] : []).concat(fromClip, shots)) { const f = join(out, lang + "-" + (stills.length + 1) + ".png"); await writeFile(f, buf); stills.push(f); }
+    for (const buf of (cover ? [cover] : []).concat(fromClip, shots).slice(0, STILLS ? 99 : 1)) { const f = join(out, lang + "-" + (stills.length + 1) + ".png"); await writeFile(f, buf); stills.push(f); }
     /* old stills past the new count would linger: remove them */
     for (let n = stills.length + 1; n < 20; n++) await rm(join(out, lang + "-" + n + ".png"), { force: true });
     (MEDIA[e.id] = MEDIA[e.id] || {})[lang] = { stills: stills.length };

@@ -1,6 +1,6 @@
 /* Lo-PDA gallery: the data behind gallery/index.html and tools/gallery-shots.mjs.
  *
- * Only the best store apps, chosen by hand, in the order the gallery shows them. An app's name, icon, version and
+ * Only the best store apps, chosen by hand (by the owner), in the order the gallery shows them. An app's name, icon, version and
  * category come from registry/index.json; this file adds what the store does not say: a longer note on why it is
  * worth playing, what the platform does for it ("uses"), and the scene the capture tool films.
  *
@@ -106,20 +106,6 @@ window.LOPDA_GALLERY = [
     }
   },
   {
-    id: "sisyphus",
-    title: { en: "Push the stone up the hill", zh: "推石上山" },
-    note: {
-      en: "Hold A to push. The stone rolls back. Push again. A quiet game about doing it anyway, with sixteen lines from Camus waiting at the summit, saved to your notes as you reach them.",
-      zh: "按住 A 往上推。石头滚下去。再推。一个关于「还是要推」的安静小游戏，山顶有加缪的十六句话在等你，走到了就记进你的记事本。"
-    },
-    uses: ["lo-game", "notes", "music", "save", "buttons"],
-    scene: {
-      setup: [["wait", 1500], ["cover"], ["key", "x", 80], ["wait", 1200]],
-      clip: [["key", "x", 1900], ["still"], ["key", "x", 1900]],
-      after: []
-    }
-  },
-  {
     id: "lao-zhang",
     title: { en: "Sixty seconds a level, one hook", zh: "六十秒一关，一只钩子" },
     note: {
@@ -135,6 +121,69 @@ window.LOPDA_GALLERY = [
         ["key", "x", 80], ["wait", 900], ["eval", LZ_AIM], ["wait", 800]],
       clip: [["wait", 1600], ["cover"], ["wait", 2600]],
       after: [["wait", 2500], ["still"], ["eval", "clearInterval(window.__lzAim);GM.openShop(__lz);GM.ui.enter('shop')"], ["wait", 900], ["still"]]
+    }
+  },
+  {
+    id: "fake-yu",
+    title: { en: "Play along, and freeze when the king looks", zh: "跟着吹，国王一睁眼就停手" },
+    note: {
+      en: "The old tale of the man who could not play the yu and hid in the king's orchestra. A rhythm game in three acts: A blows the yu, B strikes the chime, and when the king opens his eyes you stop. Ten classical tunes, four endings.",
+      zh: "滥竽充数的老故事：不会吹竽的南郭先生混在国王的乐队里。三幕的节奏游戏：A 吹竽，B 敲磬，国王一睁眼就得停手。十首古典曲子，四种结局。"
+    },
+    uses: ["lo-game", "music", "save", "buttons"],
+    scene: {
+      /* the title is the cover; then into the first act (as tools/launch-video.mjs does) and a few notes */
+      setup: [["wait", 1800], ["cover"], ["key", "ArrowDown", 80], ["key", "x", 80], ["wait", 800], ["key", "x", 80], ["wait", 4000]],
+      clip: [["wait", 900], ["key", "x", 80], ["wait", 600], ["key", "z", 80], ["wait", 600], ["key", "x", 80], ["wait", 700], ["key", "x", 80], ["wait", 900]]
+    }
+  },
+  {
+    id: "crossing",
+    title: { en: "A crossword spelled on a letter wheel", zh: "在字母盘上拼出小字谜" },
+    note: {
+      en: "Draw words on the letter wheel to fill a small crossword. Each word you find shows its Chinese meaning under the grid and is read aloud. Words come from the handheld's built-in dictionary, and new ones can go into your word book.",
+      zh: "在字母盘上划出单词，填满小小的字谜格。拼对一个，中文意思就显示在格子下面，再读一遍英文。单词来自掌机内置的词典，生词可以收进你的生词本。"
+    },
+    uses: ["wordbook", "touch", "buttons", "save"],
+    scene: {
+      /* round 1 (past the first-time demo): two words before the film, three during it; the grid one word short is the cover */
+      setup: [["wait", 1200], ["still"], ["key", "x", 80], ["wait", 1500], ["tapIn", "#wheel", 0.5, 0.5], ["wait", 800], ["key", "x", 80], ["wait", 1200],
+        ["swipe", "#wheel .key", "sea"], ["wait", 900], ["swipe", "#wheel .key", "lace"], ["wait", 1100]],
+      clip: [["swipe", "#wheel .key", "case"], ["wait", 1000], ["still"], ["swipe", "#wheel .key", "sale"], ["wait", 1000], ["cover"], ["swipe", "#wheel .key", "scale"], ["wait", 900]]
+    }
+  },
+  {
+    id: "gomoku",
+    title: { en: "Five in a row, against the phone or a friend's phone", zh: "五子棋，和手机下，或者和朋友的手机下" },
+    note: {
+      en: "Play the computer, or put two phones side by side: they pair with sound, like an old modem, and every move crosses the table as a little chirp. No network, no account.",
+      zh: "可以和电脑下，也可以把两台手机放在一起：它们用声音配对，像老式调制解调器，每一步棋都是桌上的一声啾啾。不联网，不用账号。"
+    },
+    uses: ["link", "touch", "save"],
+    scene: {
+      /* its start page is a plain dialog: the cover is the board in play instead (before the computer wins) */
+      setup: [["wait", 800], ["still"], ["tapIn", "#st", 0.5, 0.5], ["wait", 800], ["tapIn", "#c", 7.5 / 15, 7.5 / 15], ["wait", 1100], ["tapIn", "#c", 7.5 / 15, 8.5 / 15], ["wait", 1100]],
+      /* two moves before the film, two in it: four black stones in all, so the computer cannot have five yet */
+      clip: [["tapIn", "#c", 6.5 / 15, 8.5 / 15], ["wait", 1200], ["tapIn", "#c", 8.5 / 15, 8.5 / 15], ["wait", 1300], ["cover"], ["wait", 900]]
+    }
+  }
+];
+
+/* Waiting for a later batch (owner, 2026-11-26: the first batch is five). Their text and scenes are ready: move an
+   entry up into LOPDA_GALLERY and film it. The page and the tool ignore this list. */
+window.LOPDA_GALLERY_NEXT = [
+  {
+    id: "sisyphus",
+    title: { en: "Push the stone up the hill", zh: "推石上山" },
+    note: {
+      en: "Hold A to push. The stone rolls back. Push again. A quiet game about doing it anyway, with sixteen lines from Camus waiting at the summit, saved to your notes as you reach them.",
+      zh: "按住 A 往上推。石头滚下去。再推。一个关于「还是要推」的安静小游戏，山顶有加缪的十六句话在等你，走到了就记进你的记事本。"
+    },
+    uses: ["lo-game", "notes", "music", "save", "buttons"],
+    scene: {
+      setup: [["wait", 1500], ["cover"], ["key", "x", 80], ["wait", 1200]],
+      clip: [["key", "x", 1900], ["still"], ["key", "x", 1900]],
+      after: []
     }
   },
   {
@@ -183,36 +232,6 @@ window.LOPDA_GALLERY = [
       setup: [["wait", 1200], ["still"], ["key", "ArrowRight", 80], ["wait", 300], ["key", "x", 80], ["wait", 1000], ["cover"], ["key", "x", 80], ["wait", 1400]],
       clip: [["key", "ArrowRight", 80], ["wait", 300], ["key", "ArrowUp", 80], ["wait", 300], ["key", "ArrowLeft", 80], ["wait", 300], ["key", "ArrowDown", 80], ["wait", 300], ["still"],
         ["key", "ArrowRight", 80], ["wait", 300], ["key", "ArrowUp", 80], ["wait", 300], ["key", "ArrowLeft", 80], ["wait", 300], ["key", "ArrowDown", 80], ["wait", 300], ["key", "ArrowRight", 80], ["wait", 400]]
-    }
-  },
-  {
-    id: "crossing",
-    title: { en: "A crossword spelled on a letter wheel", zh: "在字母盘上拼出小字谜" },
-    note: {
-      en: "Draw words on the letter wheel to fill a small crossword. Each word you find shows its Chinese meaning under the grid and is read aloud. Words come from the handheld's built-in dictionary, and new ones can go into your word book.",
-      zh: "在字母盘上划出单词，填满小小的字谜格。拼对一个，中文意思就显示在格子下面，再读一遍英文。单词来自掌机内置的词典，生词可以收进你的生词本。"
-    },
-    uses: ["wordbook", "touch", "buttons", "save"],
-    scene: {
-      /* round 1 (past the first-time demo): two words before the film, three during it; the grid one word short is the cover */
-      setup: [["wait", 1200], ["still"], ["key", "x", 80], ["wait", 1500], ["tapIn", "#wheel", 0.5, 0.5], ["wait", 800], ["key", "x", 80], ["wait", 1200],
-        ["swipe", "#wheel .key", "sea"], ["wait", 900], ["swipe", "#wheel .key", "lace"], ["wait", 1100]],
-      clip: [["swipe", "#wheel .key", "case"], ["wait", 1000], ["still"], ["swipe", "#wheel .key", "sale"], ["wait", 1000], ["cover"], ["swipe", "#wheel .key", "scale"], ["wait", 900]]
-    }
-  },
-  {
-    id: "gomoku",
-    title: { en: "Five in a row, against the phone or a friend's phone", zh: "五子棋，和手机下，或者和朋友的手机下" },
-    note: {
-      en: "Play the computer, or put two phones side by side: they pair with sound, like an old modem, and every move crosses the table as a little chirp. No network, no account.",
-      zh: "可以和电脑下，也可以把两台手机放在一起：它们用声音配对，像老式调制解调器，每一步棋都是桌上的一声啾啾。不联网，不用账号。"
-    },
-    uses: ["link", "touch", "save"],
-    scene: {
-      /* its start page is a plain dialog: the cover is the board in play instead (before the computer wins) */
-      setup: [["wait", 800], ["still"], ["tapIn", "#st", 0.5, 0.5], ["wait", 800], ["tapIn", "#c", 7.5 / 15, 7.5 / 15], ["wait", 1100], ["tapIn", "#c", 7.5 / 15, 8.5 / 15], ["wait", 1100]],
-      /* two moves before the film, two in it: four black stones in all, so the computer cannot have five yet */
-      clip: [["tapIn", "#c", 6.5 / 15, 8.5 / 15], ["wait", 1200], ["tapIn", "#c", 8.5 / 15, 8.5 / 15], ["wait", 1300], ["cover"], ["wait", 900]]
     }
   },
   {
