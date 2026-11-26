@@ -146,17 +146,19 @@ Contrast of the four tones against each other (WCAG contrast ratio):
 Four tones and big pixels are the charm, not an excuse. The models to copy are LostDeck (`lost-deck`), Paper Tower
 (`paper-tower`) and Foothill (`shanjiao-diner`): open them in `sdk/dev.html` before you draw.
 
-1. **One title screen per app**: a pixel illustration of the app's world plus its name, not a line of text over a menu.
-   It is also the app's cover in the store and the gallery, so draw it once and draw it well.
+1. **A title screen for every game and story**: a pixel illustration of the app's world plus its name, not a line of
+   text over a menu. The gallery (`gallery/`) uses it as the app's cover, so draw it once and draw it well. A tool
+   (a calculator, a dictionary card) opens straight on the tool instead (rule 6); its name and a small drawing can sit
+   in the header.
 2. **Dither only large gradients**: a sky, a shadow, a fade to dark, at most a third of the screen. Under text and
    buttons the tone is always flat. A whole screen of grain reads as noise on a phone, not as "retro".
 3. **Small text is ink on paper, or paper on ink**: never mid on anything, never dark on mid (section 4). If the scene
    behind a line is busy, put the line on a flat paper or ink band.
 4. **Show the game, not a list of buttons**: a game screen is sprites and a scene (the mole, the board, the crate), with
    text only for what a picture cannot say. A row of text buttons standing in for the play is a prototype, not an app.
-5. **A pixel font and two sizes**: games draw text in lopix12 (`sdk/lo-game.js` embeds the glyphs the app uses,
-   `LO-GAME.md`); plain HTML screens keep the one font of section 2's skeleton. Either way, at most two type sizes on
-   one screen.
+5. **A pixel font and few sizes**: games draw text in lopix12 (`sdk/lo-game.js` embeds the glyphs the app uses,
+   `LO-GAME.md`); plain HTML screens keep the one font of section 2's skeleton. Use the sizes of section 4 (body,
+   secondary, and a title if the screen has one) and no others: three sizes at most on one screen.
 6. **One thing per screen**: the first screen shows the game or the tool, not a page of instructions. Teach in one line
    at the moment it matters (a hint the first time, the key legend of section 6), and put the rest behind a help key.
 

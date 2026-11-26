@@ -1,9 +1,10 @@
 /*
- * Lo-PDA runtime: the order of the home screen's tiles (data/users/local/home, decisions.md section 71).
+ * Lo-PDA runtime: the order of the home screen's tiles (data/users/local/home-order, decisions.md section 71).
  * Pure functions only: core.js reads and writes the document and draws the tiles, the tests feed this file
  * old, damaged and partial orders without a browser.
  *
- * The document is {v:1, order:[key, ...]}. A key is "b:<id>" for a built-in and "a:<id>" for an installed app,
+ * The document is {v:1, order:[key, ...]}. It is not data/users/local/home: that path is the home tile API's draft
+ * (docs/design/home-api.md), kept free for it. A key is "b:<id>" for a built-in and "a:<id>" for an installed app,
  * so an app whose id matches a built-in's never takes its place. Once stored, the order only grows at the end:
  * a new built-in (a runtime update) and a new install go last, an uninstalled app takes only its own tile away,
  * and nothing moves on its own. A phone with no document yet (first start, or an update from before 1.5.0) gets
@@ -61,7 +62,10 @@ function arrange(stored, builtins, apps, appsKnown){
   var changed=!stored || stored.length!==order.length || stored.some(function(k,i){ return k!==order[i]; });
   return {keys:keys, order:order, changed:changed};
 }
+/* a document written by a newer runtime (a stale cache opened the phone, or a newer backup was restored into this
+   one): its order is still drawn, but this runtime never writes over it */
+function newer(doc){ return !!doc && typeof doc==="object" && typeof doc.v==="number" && doc.v>FORMAT; }
 function doc(order){ return {v:FORMAT, order:order.slice()}; }
 
-window.LopdaHomeOrder={FORMAT:FORMAT, DEFAULT:DEFAULT, bkey:bkey, akey:akey, read:read, arrange:arrange, doc:doc};
+window.LopdaHomeOrder={FORMAT:FORMAT, DEFAULT:DEFAULT, bkey:bkey, akey:akey, read:read, newer:newer, arrange:arrange, doc:doc};
 })();

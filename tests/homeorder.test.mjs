@@ -90,3 +90,9 @@ test("a damaged document reads as no order, and junk keys are dropped", () => {
   assert.deepEqual(plain(H.read({ v: 1, order: ["b:notes", 7, "x:y", "b:", "b:notes", "a:paint"] })), ["b:notes", "a:paint"]);
   assert.deepEqual(plain(H.doc(["b:notes"])), { v: 1, order: ["b:notes"] });
 });
+
+test("a document from a newer runtime is recognised, so it is drawn but never written over", () => {
+  assert.equal(H.newer({ v: 2, order: ["b:notes"] }), true);
+  assert.equal(H.newer({ v: 1, order: [] }), false);
+  assert.equal(H.newer(null), false);
+});

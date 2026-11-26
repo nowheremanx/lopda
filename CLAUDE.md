@@ -33,7 +33,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 develop.js (developing a frame: the stocks' looks, grain, halation, leaks, date stamp; pure functions on RGBA),
                 notetext.js (notes: tags, search and snippets, the diary title, the diaries by day, front matter, export names, the rules for app notes; pure functions),
                 appsaves.js (an app save document: legacy/new shape, size, schema, damage and newer-format checks, the app snapshot kept after removal; pure functions),
-                homeorder.js (the home screen's order: `data/users/local/home` {v:1, order}, a default once, then new built-ins and installs only at the end, decisions.md section 71; pure functions),
+                homeorder.js (the home screen's order: `data/users/local/home-order` {v:1, order}, a default once, then new built-ins and installs only at the end, decisions.md section 71; pure functions),
                 petsim.js (the built-in pet's rules: catch-up, sleep, hunger and joy, growth, the day's outing, souvenir checks; pure functions),
                 petstate.js (a souvenir's item state: grow on the shelf, match by night / weather / season / lunar day / grow stage; pure functions),
                 petsouv.js (the pet's souvenir catalogue: 16 x 16 grids, set, season and where, ids never reused; pure data),
@@ -119,8 +119,8 @@ README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSIN
   the permissions list, backup, the darkroom key (暗房钥匙: `data/users/local/darkroom-key`, `LP.darkroomKey` for built-ins only, never through PAD; keys are only ever added, in the backup and kept on restore; decisions.md section 40), the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 39).
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
-  `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in registration order
-  (the order of the script tags). Hooks are listed at the top of core.js. `LP.keepAwake(on)` holds the screen wake lock
+  `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in the stored order of
+  homeorder.js (a default once, later ones at the end; decisions.md section 71). Hooks are listed at the top of core.js. `LP.keepAwake(on)` holds the screen wake lock
   (the reader's book page, a game, the viewfinder, a running app; decisions.md section 3).
 
 ## Run and test
