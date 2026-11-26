@@ -18,7 +18,7 @@
 - 一行字替换默认的版本号；`text: ""` 隐藏这一行，`text: null` 恢复默认；`icon: null` 恢复默认；`icon` 是 16 × 16 的四色数组。
 - 存储有长度上限，去掉 emoji，显示用 CSS ellipsis；不改商店里的 manifest icon。
 - 只能改自己那一格；只有运行中的 app 能调用；限速（约 1 秒一次）；不需要新权限。
-- 持久化在 `data/users/local/home`：`{ <id>: {text, icon} }`，整机备份自动包含。
+- 持久化在 `data/users/local/home`：`{ <id>: {text, icon} }`，整机备份自动包含。主屏顺序另存在 `data/users/local/home-order`（decisions.md 第 71 节），不和这个文档混。
 - 卸载清掉；更新时清掉覆盖、回默认，等新版本第一次运行时再设。
 - 渲染优先级：API 覆盖 > 内置 `LP.builtin` 的 `icon` / `tag` hook > registry manifest icon / 默认 `v<version>`。
   万年历和宠物这一版可以先不迁移。

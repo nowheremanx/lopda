@@ -757,6 +757,8 @@ When a format change cannot be additive, migrate on the device, inside the app:
 6. Test the migration with a fixture of the old value. A release that breaks an old save is a
    broken release, not a fresh start.
 
+`sdk/examples/save-book` is a working example: it reads a schema 0 save as schema 1 this way.
+
 The runtime keeps the bytes of a save it cannot read until the player clears them, and it refuses
 new writes for that app until then. That is deliberate: the player's data outranks a clean start.
 
@@ -779,7 +781,9 @@ or public domain with the source named (section 6.3). The principle, as with the
 but carries, recommends and links to none that it may not share, and nothing in the store may either.
 
 To try an app with the chin buttons, serve the repo root and open
-`sdk/dev.html?app=registry/apps/<id>`. The harness skips the confirm dialog: an export downloads
+`sdk/dev.html?app=registry/apps/<id>`. Three small working examples, not in the store, open the same way
+(`sdk/dev.html?app=sdk/examples/<id>`, see `sdk/examples/README.md`): `save-book` (saves, schema and migration),
+`sound-board` (every sound, with its code, section 6.3) and `sensor-desk` (tilt and the microphone, section 6.4). The harness skips the confirm dialog: an export downloads
 straight away, and an import waits for the file input it shows next to the app. It plays music and
 custom sound effects with the runtime's own chip (`runtime/chip.js`) at the default volume, logs the named
 sounds without playing them, and logs a song that does not parse as an error. For tilt and the microphone it answers

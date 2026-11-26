@@ -247,7 +247,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.4.1";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.5.0";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -495,7 +495,38 @@ function dismissAddHomeTip(){
     if(button) button.disabled=false;
   });
 }
-/* built-ins first, in the order they registered, then the preinstalled apps in their list order, then installed apps by install time */
+/* ---------- the order of the tiles (runtime/homeorder.js, decisions.md section 71) ----------
+   data/users/local/home-order keeps the order once it has been written: new built-ins and new installs go last,
+   an uninstall takes away only its own tile. It is written only after both the document and the installed apps
+   have been read, so a slow read never stores half a home screen. */
+var HO=window.LopdaHomeOrder;
+var H={stored:null, loaded:false, appsKnown:false, restoring:false, newer:false};
+function homeBuiltins(){ return LP.builtins.filter(function(b){ return b.icon; }); }
+function homeArrange(){
+  return HO.arrange(H.stored, homeBuiltins().map(function(b){ return b.id; }), S.apps, H.appsKnown);
+}
+function syncHome(){
+  if(!H.loaded || !H.appsKnown || H.restoring || H.newer || !S.refs.home) return;
+  var r=homeArrange();
+  if(!r.changed) return;
+  H.stored=r.order;
+  put(S.refs.home,HO.doc(r.order));
+}
+function loadHome(){
+  S.refs.home.get().then(function(sn){
+    var d=sn.exists ? own(sn.data()) : null;
+    H.stored=HO.read(d); H.newer=HO.newer(d);
+    H.loaded=true;
+    syncHome();
+    if(!$("v-home").hidden) renderHome();
+  }).catch(function(e){ console.error("Lo-PDA home order read failed",e); });   /* the default order is drawn meanwhile, and nothing is written */
+}
+onData("apps",function(){ H.appsKnown=true; syncHome(); });
+LP.builtin({id:"home-order", ready:loadHome,
+  /* the restore is about to replace every document: the old order must not be written over the restored one.
+     A successful restore reloads at once; a failed one writes the old data back, so writes may resume. */
+  restore:function(){ H.restoring=true; setTimeout(function(){ H.restoring=false; },60000); }});
+/* the tiles in the stored order; until it is read, the same order a new phone would get */
 function renderHome(){
   var h=$("home"); h.textContent="";
   if(showAddHomeTip()){
@@ -515,13 +546,14 @@ function renderHome(){
     b.onclick=onclick; h.appendChild(b);
     return b;
   }
-  LP.builtins.forEach(function(bi){
-    if(bi.icon) add("builtin",{},tr(bi.label),bi.tag?bi.tag():"",function(){ bi.open(); },bi.icon);
-  });
-  var pre=function(a){ return a.preinstalled>0 ? a.preinstalled : Infinity; };
-  var reveal=null;
-  S.apps.slice().sort(function(a,b){ return (pre(a)-pre(b)) || ((a.installed||0)-(b.installed||0)); }).forEach(function(a){
-    var b=add("",a,appName(a),"v"+(a.version||"?"),function(){ LP.runApp(a); });
+  syncHome();
+  var byKey={}, reveal=null;
+  homeBuiltins().forEach(function(bi){ byKey[HO.bkey(bi.id)]={bi:bi}; });
+  S.apps.forEach(function(a){ byKey[HO.akey(a.id)]={app:a}; });
+  homeArrange().keys.forEach(function(k){
+    var it=byKey[k];
+    if(it.bi){ var bi=it.bi; add("builtin",{},tr(bi.label),bi.tag?bi.tag():"",function(){ bi.open(); },bi.icon); return; }
+    var a=it.app, b=add("",a,appName(a),"v"+(a.version||"?"),function(){ LP.runApp(a); });
     if(a.id===S.revealApp) reveal=b;
   });
   /* a freshly installed or updated app sits at the end of the grid, often below the fold: bring its tile into
