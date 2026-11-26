@@ -26,14 +26,15 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 #rt{display:block;font-size:17px;font-weight:bold}
 #rn{display:block;font-size:14px;line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
 #res button{flex:none;margin:0}
-#ov{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#7d8a58}
-#panel{background:#a3ad7e;border:4px solid #1f2a14;box-shadow:6px 6px 0 #4a5a32;padding:22px 20px;text-align:center;max-width:300px;margin:10px}
-#panel h1{margin:0 0 12px;font-size:34px;letter-spacing:6px}
-#panel p{margin:0 0 18px;font-size:14px;line-height:1.6}
-#panel button{display:block;width:100%;margin:0 0 10px}
-#panel button:last-child{margin-bottom:0}
-/* the radio match is the second choice: its own caption and an outline, never the solid primary button */
-#lkcap{margin:16px 0 6px;text-align:left;font-size:14px;line-height:1.3;color:#4a5a32}
+/* the title screen: the picture (the gallery's cover too), one line, two buttons in a row; flat paper, no frame */
+#ov{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#a3ad7e;overflow:hidden}
+#panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:6px 4px}
+#art{display:block}
+#ot{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);margin:0}
+#op{margin:0;font-size:14px;line-height:1.5;text-align:center;box-sizing:border-box;padding:0 6px}
+#btns{display:flex;gap:10px;box-sizing:border-box;padding:0 4px}
+#btns button{flex:1;padding:8px 6px}
+/* the radio match is the second choice: an outline, never the solid primary button */
 #panel #lk{background:#a3ad7e;color:#1f2a14;border:2px solid #1f2a14;box-shadow:none}
 .hide{display:none!important}
 </style>
@@ -45,18 +46,190 @@ button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 <div id="bot"><div id="tip">点交叉点落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button> <button id="rc" class="hide">重新连接</button> <button id="ln" class="hide">离开</button></div></div>
 <div id="res" class="hide"><div id="resTxt"><span id="rt"></span><span id="rn"></span></div><button id="again">再来一局</button></div>
 </div>
-<div id="ov"><div id="panel"><h1 id="ot">五子棋</h1><p id="op">你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。</p><button id="st">开始</button><div id="lkcap" class="hide">两台掌机：</div><button id="lk" class="hide">对战（电波）</button></div></div>
+<div id="ov"><div id="panel"><canvas id="art" aria-hidden="true"></canvas><h1 id="ot">五子棋</h1><p id="op">你执黑先手，横竖斜连成五子即胜。</p><div id="btns"><button id="st">开始</button><button id="lk" class="hide">对战（电波）</button></div></div></div>
+<script>
+/* the title picture: a 160 x 160 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
+   A room at night: the title on the wall, a round window with the moon, and a hand about to set down the fifth black
+   stone. The letters are lopix12 glyphs (sdk/fonts, OFL), drawn at 2x. Dither only in the window's sky (UI.md 11.2). */
+var ART = (function () {
+  var W = 160, H = 160;
+  var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  var GLYPH = {"五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","G":"7:AADiKBAgRoSI8AAA","O":"8:AAA4RIKCgoKCRDgAAA==","M":"8:AACCgsbGqqqSkpIAAA==","K":"7:AAIUSRQwUJESEAAA","U":"7:AAIUKFChQoUJ4AAA","F":"7:AAP0CBA+QIECAAAA","I":"4:AORERETgAA==","V":"8:AACCgkRERCgoEBAAAA==","E":"7:AAP0CBA+QIED8AAA"," ":"6:AAAAAAAAAAAAAA==","N":"7:AAIWKlSlSo0aEAAA","A":"8:AAAQECgoRHxEgoIAAA==","R":"7:AAPkKFC+SIkSEAAA","W":"10:AAAIiiKIlUVRVCIIgiAAAAA="};
+  function glyph(ch) {
+    var s = GLYPH[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [];
+    for (var y = 0; y < 14; y++) { var r = []; for (var x = 0; x < w; x++) { var i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
+    return { w: w, rows: rows };
+  }
+  function make() {
+    var px = new Uint8Array(W * H);
+    function set(x, y, t) { x |= 0; y |= 0; if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = t; }
+    function get(x, y) { return px[y * W + x]; }
+    function rect(x, y, w, h, t) { for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) set(x + i, y + j, t); }
+    function dith(x, y, lv, a, b) { return (BAYER[(y & 3) * 4 + (x & 3)] < lv * 16) ? b : a; }
+    function ell(cx, cy, rx, ry, t) {
+      for (var y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (var x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+        var dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry; if (dx * dx + dy * dy <= 1) set(x, y, typeof t === "function" ? t(x, y, dx, dy) : t);
+      }
+    }
+    function line(x0, y0, x1, y1, t) {
+      var n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) | 0; if (!n) { set(Math.round(x0), Math.round(y0), t); return; }
+      for (var i = 0; i <= n; i++) set(Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n), t);
+    }
+    return { px: px, set: set, get: get, rect: rect, dith: dith, ell: ell, line: line };
+  }
+
+  function text(c, str, x, y, s, t, gap) {
+    str.split("").forEach(function (ch) {
+      var g = glyph(ch);
+      for (var j = 0; j < 14; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i]) c.rect(x + i * s, y + j * s, s, s, t);
+      x += g.w * s + gap;
+    });
+    return x;
+  }
+  function width(str, s, gap) { var w = 0; str.split("").forEach(function (ch) { w += glyph(ch).w * s + gap; }); return w - gap; }
+
+  function draw(lang) {
+    var c = make();
+    /* the wall: flat paper */
+    c.rect(0, 0, W, 64, 0);
+    /* a round window: a night sky, ink above and dark low down; the full moon; two ridges of hills in ink */
+    var wx = 138, wy = 30, wr = 17;
+    c.ell(wx, wy, wr, wr, function (x, y) { var lv = (y - (wy - wr)) / (2 * wr); return c.dith(x, y, Math.min(1, Math.max(0, lv * 1.8 - 0.3)), 3, 2); });
+    [[wx - 10, wy - 7], [wx - 2, wy - 12], [wx + 11, wy + 1], [wx - 12, wy + 1]].forEach(function (s) { c.set(s[0], s[1], 0); });
+    c.ell(wx + 4, wy - 5, 5.5, 5.5, 0);
+    c.ell(wx + 3, wy - 6, 1.3, 1.1, 1); c.set(wx + 6, wy - 3, 1);
+    for (var x = wx - wr; x <= wx + wr; x++) {
+      var r1 = wy + 6 - Math.round(4 * Math.sin((x - wx) * 0.22 + 1) + 2 * Math.sin((x - wx) * 0.55)), r2 = wy + 10 - Math.round(3 * Math.sin((x - wx) * 0.3 - 2));
+      for (var y = r1; y < wy + wr; y++) c.set(x, y, 2 + (y >= r2 ? 1 : (y === r1 ? 1 : 0)));
+      for (var y = Math.max(r1, r2); y < wy + wr; y++) c.set(x, y, 3);
+    }
+    for (var y = 0; y < 64; y++) for (var x = wx - wr - 6; x < W; x++) {
+      var d = Math.hypot(x + 0.5 - wx, y + 0.5 - wy);
+      if (d > wr + 3.2) c.set(x, y, 0); else if (d > wr + 1.4) c.set(x, y, 3); else if (d > wr) c.set(x, y, 2);
+    }
+    /* the floor behind the board */
+    c.rect(0, 60, W, H - 60, 2);
+    c.rect(0, 60, W, 1, 3);
+
+    /* the board, close and low: its far edge across the room, its near edge out of the frame */
+    var f = 260, Hc = 1.5, z0 = 1.9, z1 = 3.9, hz = 66 - Hc * f / z1;
+    function P(u, v) { var z = z0 + (1 - v) * (z1 - z0); return [80 + u * f / z, hz + Hc * f / z]; }
+    var tl = P(-1, 0), tr = P(1, 0), bl = P(-1, 1), br = P(1, 1);
+    for (var y = Math.ceil(tl[1]); y < H; y++) {
+      var t = (y - tl[1]) / (bl[1] - tl[1]), xl = tl[0] + (bl[0] - tl[0]) * t, xr = tr[0] + (br[0] - tr[0]) * t;
+      for (var x = Math.ceil(xl); x <= Math.floor(xr); x++) c.set(x, y, 1);
+      c.set(Math.floor(xl), y, 3); c.set(Math.ceil(xr), y, 3);
+      /* the board's side thickness, dark, outside the left and right edges */
+      for (var k = 1; k <= 3; k++) { c.set(Math.floor(xl) - k, y + 1, 2); }
+    }
+    c.line(tl[0], tl[1], tr[0], tr[1], 3);
+    var m = 0.045, N = 15;
+    function G(i, j) { return P(-1 + m + i * (2 - 2 * m) / (N - 1), m + j * (1 - 2 * m) / (N - 1)); }
+    for (var i = 0; i < N; i++) { var a = G(i, 0), b = G(i, N - 1); c.line(a[0], a[1], b[0], b[1], 2); a = G(0, i); b = G(N - 1, i); c.line(a[0], a[1], b[0], b[1], 2); }
+    [[3, 3], [11, 3], [7, 7], [3, 11], [11, 11]].forEach(function (s) { var p = G(s[0], s[1]); c.ell(p[0] + 0.5, p[1] + 0.5, 1.5, 1, 3); });
+
+    /* stones: 1 black, 2 white. Four black run from the near left toward the far right; white tried to block */
+    var stones = [
+      [4, 12, 1], [5, 11, 1], [6, 10, 1], [7, 9, 1],
+      [5, 12, 2], [7, 10, 2], [6, 8, 2], [9, 9, 2], [3, 13, 2], [10, 11, 2], [5, 9, 2], [10, 9, 2]
+    ];
+    stones.sort(function (a, b) { return a[1] - b[1]; });
+    stones.forEach(function (s) {
+      var p = G(s[0], s[1]), q = G(s[0] + 1, s[1]), r = G(s[0], s[1] + 1);
+      var rx = (q[0] - p[0]) * 0.47, ry = (r[1] - p[1]) * 0.47, h = rx * 0.4;
+      var cx = p[0], cy = p[1] - h * 0.5;
+      c.ell(cx + rx * 0.25, p[1] + ry * 0.35, rx, ry, 2);                    /* shadow, down and right */
+      c.ell(cx, cy + h * 0.5, rx, ry, 3);                                   /* the stone's lower rim */
+      if (s[2] === 1) {
+        c.ell(cx, cy, rx, ry, 3);
+        c.ell(cx - rx * 0.3, cy - ry * 0.3, rx * 0.42, ry * 0.36, function (x, y, dx, dy) { return dx + dy < -0.2 ? 2 : 3; });
+        if (rx > 3) c.set(Math.round(cx - rx * 0.45), Math.round(cy - ry * 0.45), 1);
+      } else {
+        c.ell(cx, cy, rx, ry, 3);
+        c.ell(cx, cy, rx - 1, ry - 1, function (x, y, dx, dy) { return dx * 0.6 + dy > 0.55 ? 1 : 0; });
+      }
+    });
+    /* the hand: from the right, a sleeve, the winning stone held between two fingers above its point */
+    function cap(x0, y0, x1, y1, r, t) {
+      var minx = Math.floor(Math.min(x0, x1) - r - 1), maxx = Math.ceil(Math.max(x0, x1) + r + 1), miny = Math.floor(Math.min(y0, y1) - r - 1), maxy = Math.ceil(Math.max(y0, y1) + r + 1);
+      var dx = x1 - x0, dy = y1 - y0, L = dx * dx + dy * dy || 1;
+      for (var y = miny; y <= maxy; y++) for (var x = minx; x <= maxx; x++) {
+        var px = x + 0.5, py = y + 0.5, k = Math.max(0, Math.min(1, ((px - x0) * dx + (py - y0) * dy) / L));
+        var ex = px - (x0 + dx * k), ey = py - (y0 + dy * k), d = Math.sqrt(ex * ex + ey * ey);
+        if (d <= r) c.set(x, y, typeof t === "function" ? t(x, y, ex / r, ey / r, k) : t);
+      }
+    }
+    function limb(x0, y0, x1, y1, r, body, shade) {
+      cap(x0, y0, x1, y1, r + 1, 3);
+      cap(x0, y0, x1, y1, r, function (x, y, ex, ey) { return ey > 0.35 ? shade : body; });
+    }
+    var g5 = G(8, 8), hx = Math.round(g5[0]), hy = Math.round(g5[1]);
+    /* the stone's shadow on its point, where it is about to go */
+    var q5 = G(9, 8), r5 = G(8, 9), srx = (q5[0] - g5[0]) * 0.47, sry = (r5[1] - g5[1]) * 0.47;
+    c.ell(g5[0] + 1, g5[1] + 1, srx * 0.9, sry * 0.8, 2);
+    var sx = hx - 1, sy = hy - 13;
+    function poly(pts, t) {
+      var ys = pts.map(function (p) { return p[1]; }), y0 = Math.floor(Math.min.apply(null, ys)), y1 = Math.ceil(Math.max.apply(null, ys));
+      for (var y = y0; y <= y1; y++) {
+        var py = y + 0.5, xs = [];
+        for (var i = 0; i < pts.length; i++) { var a = pts[i], b = pts[(i + 1) % pts.length]; if ((a[1] <= py) !== (b[1] <= py)) xs.push(a[0] + (py - a[1]) / (b[1] - a[1]) * (b[0] - a[0])); }
+        xs.sort(function (m, n) { return m - n; });
+        for (var k = 0; k + 1 < xs.length; k += 2) for (var x = Math.ceil(xs[k] - 0.5); x <= Math.floor(xs[k + 1] - 0.5); x++) c.set(x, y, typeof t === "function" ? t(x, y) : t);
+      }
+    }
+    function grow(pts, d) { var cx = 0, cy = 0; pts.forEach(function (p) { cx += p[0]; cy += p[1]; }); cx /= pts.length; cy /= pts.length;
+      return pts.map(function (p) { var dx = p[0] - cx, dy = p[1] - cy, l = Math.hypot(dx, dy) || 1; return [p[0] + dx / l * d, p[1] + dy / l * d]; }); }
+    function shape(pts, body, shade, edge) { poly(grow(pts, 1.2), 3); poly(pts, function (x, y) { return y > edge(x) ? shade : body; }); }
+    var o = function (x, y) { return [sx + x, sy + y]; };
+    /* sleeve: a wide robe sleeve from the top right, its mouth open toward us with a paper lining */
+    var sleeve = [o(30, -24), o(W - sx + 4, -44), o(W - sx + 4, -6), o(44, 2), o(36, 4)];
+    shape(sleeve, 2, 2, function () { return 999; });
+    /* two folds of cloth, and the sleeve's mouth: dark inside, a paper rim of lining on its near edge */
+    [[0, 0], [12, -6]].forEach(function (f) {
+      var pts = []; for (var t = 0; t <= 14; t++) pts.push([sx + 47 + f[0] + t * 1.4, sy - 3 + f[1] - t * 1.9 + Math.sin(t * 0.45) * 1.5]);
+      for (var i = 0; i + 1 < pts.length; i++) c.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], 3);
+    });
+    c.ell(sx + 34, sy - 10, 7.2, 14.5, 3); c.ell(sx + 34, sy - 10, 6.2, 13.5, 0); c.ell(sx + 35.4, sy - 10, 5.2, 12.6, 3);
+    /* the back of the hand, knuckles toward the stone */
+    var back = [o(13, -11), o(27, -16), o(34, -12), o(33, -2), o(17, 2)];
+    shape(back, 0, 1, function (x) { return sy - 1 + (x - sx) * 0.02; });
+    /* ring and little finger curled under */
+    limb(sx + 21, sy + 1, sx + 23, sy + 2, 2.6, 1, 2);
+    limb(sx + 26, sy, sx + 28, sy + 1, 2.3, 1, 2);
+    /* middle finger, under the stone */
+    limb(sx + 16, sy - 2, sx + 5, sy + 1.5, 2.8, 0, 1);
+    /* the stone */
+    c.ell(sx + 1, sy, srx + 0.5, sry + 0.5, 3);
+    c.ell(sx + 1, sy - 1, srx, sry, 3);
+    c.ell(sx + 1 - srx * 0.3, sy - 1 - sry * 0.3, srx * 0.42, sry * 0.36, function (x, y, dx, dy) { return dx + dy < -0.2 ? 2 : 3; });
+    c.set(Math.round(sx + 1 - srx * 0.45), Math.round(sy - 1 - sry * 0.45), 1);
+    /* index finger over the stone */
+    limb(sx + 15, sy - 8, sx + 3, sy - 4, 2.8, 0, 1);
+    c.line(sx + 4, sy - 6, sx + 6, sy - 6, 1);
+    /* knuckle creases */
+    c.set(sx + 15, sy - 6, 1); c.set(sx + 16, sy - 1, 1); c.set(sx + 20, sy - 9, 1); c.set(sx + 21, sy - 9, 1);
+    /* the title on the wall: 2x pixels, ink, with a mid drop shadow; the line under it at 1x */
+    var word = lang === "en" ? "GOMOKU" : "五子棋", sub = lang === "en" ? "FIVE IN A ROW" : "黑白连珠";
+    var gap = lang === "en" ? 2 : 3;
+    text(c, word, 11, 10, 2, 1, gap); text(c, word, 10, 9, 2, 3, gap);
+    var tw = width(word, 2, gap);
+    c.rect(10, 39, tw, 1, 3);
+    text(c, sub, 10, 43, 1, 2, lang === "en" ? 1 : 2);
+    return c.px;
+  }
+  return { W: W, H: H, draw: draw };
+})();
+</script>
 <script>
 (function(){
 var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d');
 var turnEl=document.getElementById('turn'),tipEl=document.getElementById('tip'),recEl=document.getElementById('rec');
 var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op');
 var botEl=document.getElementById('bot'),resEl=document.getElementById('res'),rtEl=document.getElementById('rt'),rnEl=document.getElementById('rn'),againEl=document.getElementById('again');
-var lkcapEl=document.getElementById('lkcap');
 /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
 var TXT={
-  zh:{title:'五子棋',intro:'你执黑先手。点交叉点，一秒后落子，其间可点别处换位置。横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',match:'对战（电波）',menu:'回到菜单',two:'两台掌机：',
+  zh:{title:'五子棋',intro:'你执黑先手，横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',match:'对战（电波）',menu:'回到菜单',
     yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点落子',tipsure:'点别处可换位置',tipover:'点重新开始再来一局',wins:'胜 ',
     win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。',
     myTurn:'你的回合',peerTurn:'对方的回合',waiting:'等对方…',sending:'发送中…',linked:'已连线',linking:'连接中…',offline:'断线了',notYet:'没连上',
@@ -64,7 +237,7 @@ var TXT={
     linkWin:'你赢了',linkLose:'对方赢了',linkWinnote:'五子连珠，漂亮。',linkLosenote:'对方连成五子。',linkDrawnote:'棋盘已满。',
     linkTip:'点交叉点落子',offlineTip:'点重新连接',
     why:{bye:'对方离开了',lost:'信号断了','other-app':'对方换了别的程序',timeout:'没有连上',home:'这边离开了',cancelled:'连线取消了',denied:'没有允许连线',none:'这台掌机不能连线',busy:'已经有别的连线',big:'消息太长',other:'连线出了错'}},
-  en:{title:'GOMOKU',intro:'You play black and go first. Tap a point and the stone goes down a second later; tap elsewhere before then to move it. Five in a row wins, any direction.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',two:'Two handhelds:',
+  en:{title:'GOMOKU',intro:'You play black and go first. Five in a row wins.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',
     yours:'Your move',thinking:'White thinking',tip:'Tap a point',tipsure:'Tap elsewhere to move',tipover:'Restart for another',wins:'Wins ',
     win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.',
     myTurn:'Your turn',peerTurn:'Their turn',waiting:'Waiting…',sending:'Sending…',linked:'Linked',linking:'Connecting…',offline:'Disconnected',notYet:'No link',
@@ -77,7 +250,6 @@ document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
 ot.textContent=TXT.title;op.textContent=TXT.intro;document.getElementById('st').textContent=TXT.start;
 document.getElementById('ud').textContent=TXT.undo;document.getElementById('rs').textContent=TXT.restart;recEl.textContent=TXT.wins+0;
 document.getElementById('lk').textContent=TXT.match;
-lkcapEl.textContent=TXT.two;
 document.getElementById('rc').textContent=TXT.reconnect;
 document.getElementById('ln').textContent=TXT.leave;
 var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
@@ -355,7 +527,6 @@ function updateButtons(){
   show(document.getElementById('rc'),mode==='link'&&!linkOpen&&!openingLink&&!over);
   var lkOn=!!LINK&&panelMode==='menu'&&mode!=='link';
   show(document.getElementById('lk'),lkOn);
-  show(lkcapEl,lkOn);
 }
 function updateLinkUI(){
   if(mode!=='link')return;
@@ -437,6 +608,7 @@ function showMenu(){
   document.getElementById('st').textContent=TXT.start;
   updateButtons();
   ov.classList.remove('hide');
+  drawArt();
 }
 /* the receiver of "sync" answers with the whole game (one message, or chunks of whole moves) */
 function sendAll(){
@@ -581,7 +753,28 @@ window.__gomoku.set=function(stones){
   }
   turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;hideResult();draw();
 };
-reset();resize();
+/* paint the title picture at the largest whole scale that leaves room for the line and the buttons below it */
+var artTone=[[163,173,126],[125,138,88],[74,90,50],[31,42,20]],artPx=null;
+function drawArt(){
+  if(ov.classList.contains('hide'))return;
+  var cvA=document.getElementById('art'),W=ART.W,H=ART.H;
+  var room=window.innerHeight-(document.getElementById('op').offsetHeight+44+12*2+24);
+  var s=Math.max(1,Math.min(Math.floor((window.innerWidth-8)/W),Math.floor(room/H)));
+  var d=window.devicePixelRatio||1,k=Math.max(1,Math.round(s*d));
+  cvA.style.width=(W*s)+'px';cvA.style.height=(H*s)+'px';
+  document.getElementById('op').style.maxWidth=(W*s)+'px';document.getElementById('btns').style.width=(W*s)+'px';
+  if(cvA.width===W*k&&cvA.height===H*k&&artPx)return;
+  if(!artPx)artPx=ART.draw(LANG);
+  cvA.width=W*k;cvA.height=H*k;
+  var cx=cvA.getContext('2d'),img=cx.createImageData(W*k,H*k),o=img.data;
+  for(var y=0;y<H*k;y++)for(var x=0;x<W*k;x++){
+    var t=artTone[artPx[((y/k)|0)*W+((x/k)|0)]],i=(y*W*k+x)*4;
+    o[i]=t[0];o[i+1]=t[1];o[i+2]=t[2];o[i+3]=255;
+  }
+  cx.putImageData(img,0,0);
+}
+window.addEventListener('resize',drawArt);
+reset();resize();drawArt();
 updateButtons();
 (async function(){
   try{

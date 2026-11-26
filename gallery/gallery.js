@@ -161,10 +161,10 @@ window.LOPDA_GALLERY = [
     },
     uses: ["link", "touch", "save"],
     scene: {
-      /* its start page is a plain dialog: the cover is the board in play instead (before the computer wins) */
-      setup: [["wait", 800], ["still"], ["tapIn", "#st", 0.5, 0.5], ["wait", 800], ["tapIn", "#c", 7.5 / 15, 7.5 / 15], ["wait", 1100], ["tapIn", "#c", 7.5 / 15, 8.5 / 15], ["wait", 1100]],
+      /* the cover is its title picture; then into a game */
+      setup: [["wait", 800], ["cover"], ["tapIn", "#st", 0.5, 0.5], ["wait", 800], ["tapIn", "#c", 7.5 / 15, 7.5 / 15], ["wait", 1100], ["tapIn", "#c", 7.5 / 15, 8.5 / 15], ["wait", 1100]],
       /* two moves before the film, two in it: four black stones in all, so the computer cannot have five yet */
-      clip: [["tapIn", "#c", 6.5 / 15, 8.5 / 15], ["wait", 1200], ["tapIn", "#c", 8.5 / 15, 8.5 / 15], ["wait", 1300], ["cover"], ["wait", 900]]
+      clip: [["tapIn", "#c", 6.5 / 15, 8.5 / 15], ["wait", 1200], ["tapIn", "#c", 8.5 / 15, 8.5 / 15], ["wait", 2200]]
     }
   }
 ];
