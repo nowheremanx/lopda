@@ -63,7 +63,7 @@ var T={
   versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
   projectFolder:"", templatePick:"", deletePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
-  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null, scoreText:"", scorePages:[], scorePagePick:-1,
+  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null, scoreText:"", scoreNote:"", scorePages:[], scorePagePick:-1,
   aiCard:"", aiStage:"", aiSig:null, aiMark:false, aiT0:0, aiLast:0, aiTick:0,
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
@@ -2425,6 +2425,9 @@ function scoreLostText(code){
   if((m=/^chord:(.*)>(.*)$/.exec(code))) return tr("studio.score.lost.chord",{from:m[1],to:m[2]});
   if((m=/^bars:(\d+)$/.exec(code))) return tr("studio.score.lost.bars",{n:Math.max(0,Number(m[1])-1)});
   if(code==="nochords") return tr("studio.score.lost.nochords");
+  if((m=/^note:capo:(\d+)$/.exec(code))) return tr("studio.score.note.capo",{n:m[1]});
+  if((m=/^note:shift:([+-]\d+)$/.exec(code))) return tr("studio.score.note.shift",{n:m[1]});
+  if(code==="note:arp") return tr("studio.score.note.arp");
   return "";
 }
 function renderAiSheet(sh){
@@ -2544,6 +2547,15 @@ function renderScoreSheet(sh){
   var body=el("div","st-score-content");
   body.appendChild(scorePreview());
   renderScoreTray(body);
+  /* the user's notes on this score (decisions.md section 73): typed, or said through the phone keyboard's own dictation;
+     kept while the program runs so a second reading has them, never stored */
+  var note=el("textarea","st-name st-ai-input st-score-note");
+  note.rows=2; note.maxLength=300; note.id="studio-score-note";
+  note.placeholder=tr("studio.score.note.placeholder");
+  note.setAttribute("aria-label",tr("studio.score.note"));
+  note.value=T.scoreNote||""; note.disabled=T.aiBusy;
+  note.oninput=function(){ T.scoreNote=note.value; };
+  body.appendChild(note);
   if(T.aiBusy){
     var prog=el("div","st-ai-progress");
     var cardLine=el("p","st-ai-card",""); cardLine.id="studio-ai-card";
@@ -2564,7 +2576,7 @@ function renderScoreSheet(sh){
   if(T.aiBusy) paintAiProgress();
   var row=el("div","st-sheet-row"), read=el("button","st-sheet-btn","");
   read.type="button"; read.id="studio-score-read"; read.textContent=tr("studio.score.read"); read.disabled=T.aiBusy||!T.scorePages.length;
-  read.onclick=function(){ askScore(""); };
+  read.onclick=function(){ askScore("",note.value); };
   if(T.aiBusy){
     var stop=el("button","st-sheet-btn",""); stop.type="button"; stop.textContent=tr("studio.ai.stop");
     stop.onclick=aiStopJob; row.appendChild(stop);
@@ -2674,8 +2686,9 @@ function askAi(text,mode){
     renderSheet();
   });
 }
-function askScore(text){
+function askScore(text,note){
   text=String(text==null?"":text).trim();
+  note=String(note==null?"":note).trim();
   if((!text && !T.scorePages.length) || T.aiBusy) return;
   var images=[];
   try{ if(T.scorePages.length) images=scoreJpegs(); }
@@ -2683,7 +2696,7 @@ function askScore(text){
   /* pictures need a line that can see; words can go down the studio line */
   var use=images.length ? "score" : "studio";
   if(!LP.ai || !LP.ai.on(use)){ toast(tr(use==="score" ? "ai.novision" : "studio.ai.nokey")); return; }
-  T.scoreText=text; T.aiBusy=true; T.aiPreview=null; T.aiCard=""; T.aiStage=""; T.aiSig=null; T.aiMark=false;
+  T.scoreText=text; T.scoreNote=note; T.aiBusy=true; T.aiPreview=null; T.aiCard=""; T.aiStage=""; T.aiSig=null; T.aiMark=false;
   T.aiTrouble=null; T.aiT0=T.aiLast=Date.now();
   renderSheet();
   function onSignal(s){ T.aiSig=s; T.aiLast=Date.now(); T.aiMark=!T.aiMark; paintAiProgress(); }
@@ -2699,7 +2712,7 @@ function askScore(text){
       else toast(tr("studio.ai.trouble.toast"));
     });
   }
-  var job=H.readScore({text:text,images:images,ask:ask,onStage:onStage,onTrouble:onTrouble,now:Date.now()});
+  var job=H.readScore({text:text,images:images,note:note,ask:ask,onStage:onStage,onTrouble:onTrouble,now:Date.now()});
   T.aiJob=job;
   if(T.aiTick) clearInterval(T.aiTick);
   T.aiTick=setInterval(paintAiProgress,1000); LP.keepAwake(true);
