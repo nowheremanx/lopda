@@ -19,6 +19,14 @@ var FALLBACKS={m7add11:"m7", add11:"maj", "m(add9)":"m", madd9:"m", maj9:"maj7",
    higher line (a female voice) is left where the score has it (design section 8.2). */
 var LIFT_BELOW=64;
 
+/* Broken chords from the user's notes ("follow the TAB, broken chords"): one character per eighth of the bar, the way a
+   guitarist's picking hand goes through the strings. R is the bass note (a slash chord's bass), 5 the fifth above the
+   root, 8 the root an octave up, 3 the third above that octave (where a guitar voices it), - lets the last note ring.
+   A bar with two chords plays the pattern's first half on the first and its second half on the second, each starting on
+   its bass note. The tones are the chord's, so the pattern sounds
+   like the TAB's picking without copying its frets (decisions.md section 73). */
+var PICK=/^[R358][R358-]{7}$/, DEFAULT_PICK="R5838583";
+
 function plain(x){ return !!x && Object.prototype.toString.call(x)==="[object Object]"; }
 function int(x){ return typeof x==="number" && isFinite(x) && Math.floor(x)===x; }
 function owns(o,k){ return Object.prototype.hasOwnProperty.call(o,k); }
@@ -75,9 +83,25 @@ function check(obj,opts){
   if(typeof obj.capo!=="undefined" && (!int(obj.capo)||obj.capo<0||obj.capo>11)) return {error:"capo"};
   if(typeof obj.bpm!=="undefined" && obj.bpm!==null && (typeof obj.bpm!=="number"||!isFinite(obj.bpm))) return {error:"bpm"};
   if(typeof obj.title!=="undefined" && typeof obj.title!=="string") return {error:"title"};
+  /* shift, accomp and pick come only from the user's notes (decisions.md section 73): read and checked only with
+     opts.notes, so a reading without notes is the same tape whatever a model adds. The last, lenient try drops a bad
+     one instead of losing the score. */
+  var notesOn=!!(opts&&opts.notes), shift=0, accomp="block", pick=DEFAULT_PICK;
+  if(notesOn){
+    if(typeof obj.shift!=="undefined" && obj.shift!==null){
+      if(int(obj.shift) && obj.shift>=-12 && obj.shift<=12) shift=obj.shift; else if(!lenient) return {error:"shift"};
+    }
+    if(typeof obj.accomp!=="undefined" && obj.accomp!==null){
+      if(obj.accomp==="block" || obj.accomp==="arpeggio") accomp=obj.accomp; else if(!lenient) return {error:"accomp"};
+    }
+    if(typeof obj.pick!=="undefined" && obj.pick!==null){
+      if(typeof obj.pick==="string" && PICK.test(obj.pick)) pick=obj.pick; else if(!lenient) return {error:"pick"};
+    }
+  }
   if(!Array.isArray(obj.bars)||obj.bars.length<1||obj.bars.length>400) return {error:"bars"};
   score={key:obj.key,meter:obj.meter,bars:[],lost:[],capo:typeof obj.capo==="undefined"?0:obj.capo,bpm:typeof obj.bpm==="undefined"?null:obj.bpm};
   if(typeof obj.title!=="undefined") score.title=obj.title;
+  if(notesOn){ score.shift=shift; score.accomp=accomp; score.pick=pick; }
   for(i=0;i<obj.bars.length;i++){
     b=obj.bars[i];
     if(!shapeKeys(b,["chords","beats"],[])) return {error:"bar",at:{bar:i}};
@@ -198,15 +222,43 @@ function midiForPc(pc,key,track){
   return best;
 }
 
+/* one chord's share of the picking pattern into the bass track: `from` eighths in, `count` eighths long */
+function pickNotes(list,cc,pc,mode,pattern,from,count){
+  var iv=LopdaSong.QUALITIES[cc.q]||LopdaSong.QUALITIES.maj, rootPc=mod(pc+SCALE[mode][cc.deg]+cc.acc,12),
+    root=midiForPc(rootPc,pc,"bass"), low=cc.bassPc===undefined?root:midiForPc(cc.bassPc,pc,"bass"),
+    third=first(iv,[4,3,2,5],7), fifth=first(iv,[7,6,8],7), i,ch,midi,pitch,note;
+  for(i=0;i<count;i++){
+    ch=pattern.charAt(from+i);
+    if(ch==="-" && i===0) ch="R";
+    if(ch==="-") continue;
+    midi=ch==="R"?low:ch==="5"?root+fifth:ch==="8"?root+12:root+12+third;
+    while(midi<=low && ch!=="R") midi+=12;
+    pitch=degreeFor({key:pc,scale:mode},"bass",midi);
+    if(!pitch) return false;
+    note={t:(from+i)*2*LopdaSong.STEP,len:1,deg:pitch.deg,vel:ch==="R"?0.8:0.6};
+    if(pitch.acc) note.acc=pitch.acc;
+    list.push(note);
+  }
+  return true;
+}
+function first(list,wanted,fallback){
+  for(var i=0;i<wanted.length;i++) if(list.indexOf(wanted[i])>=0) return wanted[i];
+  return fallback;
+}
+
 function toSong(input,now,opts){
   var checked=check(input,opts);
   if(checked.error) return checked;
-  var score=checked.score,pc=keyPc(score.key,score.capo), mode=keyMode(score.key), songKey, song, lost=[],patterns=[],lastChords=null,i,j,k,bar,active,previousMidi=null,priorBarMidi=null,melodyPitches=[],barPitches,barLost,barChords,decoded,firstBeat,tokens,cursor,token,midi,pitch,cc,rootPc,keyObj,src,styles,groove,step,drum,notes,barData,signature,patternAt,hasMelody,chain=[];
+  var score=checked.score,notesOn=!!(opts&&opts.notes),
+    /* a capo and a "transpose by n" from the notes are the same sum: the whole score sounds that many semitones up */
+    total=notesOn?mod(score.capo+score.shift,12):score.capo,
+    arp=notesOn&&score.accomp==="arpeggio",
+    pc=keyPc(score.key,total), mode=keyMode(score.key), songKey, song, lost=[],patterns=[],lastChords=null,i,j,k,bar,active,previousMidi=null,priorBarMidi=null,melodyPitches=[],barPitches,barLost,barChords,decoded,firstBeat,tokens,cursor,token,midi,pitch,cc,rootPc,keyObj,src,styles,groove,step,drum,notes,barData,signature,patternAt,hasMelody,chain=[];
   if(pc===null) return {error:"key"};
   for(i=0;i<score.lost.length;i++) dedupeLost(lost,score.lost[i]);
   var marked=false;
   for(i=0;i<score.bars.length && !marked;i++) for(j=0;j<4;j++) if(/[',]/.test(score.bars[i].beats[j])){ marked=true; break; }
-  songKey=pc; keyObj={pc:pc,name:score.key,capo:score.capo};
+  songKey=pc; keyObj={pc:pc,name:score.key,capo:total};
   song=LopdaSong.newSong(typeof now==="number"&&isFinite(now)&&now>=0?now:0);
   song.name=Array.from(score.title||"读谱磁带").slice(0,LopdaSong.NAME_MAX).join("");
   song.key=songKey; song.scale=mode; song.bpm=score.bpm===null?80:LopdaSong.clampBpm(score.bpm);
@@ -233,6 +285,10 @@ function toSong(input,now,opts){
       var chordNote={t:step*LopdaSong.STEP,len:1,deg:cc.deg,q:cc.q,vel:0.6};
       if(cc.acc) chordNote.acc=cc.acc;
       notes.chords.push(chordNote);
+      if(arp){
+        if(!pickNotes(notes.bass,cc,pc,mode,score.pick,barChords.length===2?j*4:0,barChords.length===2?4:8)) return {error:"song"};
+        continue;
+      }
       rootPc=cc.bassPc===undefined?mod(pc+SCALE[mode][cc.deg]+cc.acc,12):cc.bassPc;
       midi=midiForPc(rootPc,pc,"bass"); pitch=degreeFor({key:pc,scale:mode},"bass",midi);
       if(!pitch) return {error:"song"};
@@ -314,10 +370,23 @@ function toSong(input,now,opts){
   }
   song.patterns=patterns;
   song.song=chain;
+  if(arp){
+    /* the chords stay on their screen to read and edit; the mixer mutes them, so the picked strings carry the harmony */
+    for(i=0;i<song.tracks.length;i++){
+      if(song.tracks[i].id==="chords") song.tracks[i].mute=true;
+      if(song.tracks[i].id==="bass") song.tracks[i].voice="pick";
+    }
+  }
+  /* what the notes changed comes first in the line under the result, so the user sees whether the AI understood */
+  if(notesOn){
+    if(arp) lost.unshift("note:arp");
+    if(score.shift) lost.unshift("note:shift:"+(score.shift>0?"+":"")+score.shift);
+    if(score.capo) lost.unshift("note:capo:"+score.capo);
+  }
   var valid=LopdaSong.validate(song);
   if(valid.error) return {error:"song"};
   return {song:valid.song,lost:lost};
 }
 
-window.LopdaScore={check:check,parseBeat:parseBeat,keyPc:keyPc,chord:chord,toSong:toSong,degreeFor:degreeFor};
+window.LopdaScore={PICK:PICK,DEFAULT_PICK:DEFAULT_PICK,check:check,parseBeat:parseBeat,keyPc:keyPc,chord:chord,toSong:toSong,degreeFor:degreeFor};
 })();
