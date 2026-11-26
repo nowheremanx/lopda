@@ -1,0 +1,401 @@
+<!doctype html>
+<!-- The project's landing page at the site root (https://nowheremanx.github.io/lopda/). The handheld itself is runtime/.
+     Plain HTML, no framework, no third-party requests: fonts and pictures come from this repo, and there is no analytics.
+     English is in the markup; the Chinese text is in the ZH table below and replaces it when the page is in Chinese. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lo-PDA</title>
+<meta name="description" content="A four-tone handheld from 1986 that lives on your phone. Film camera, darkroom, diary, games and a store of tiny apps. No accounts, works offline.">
+<meta name="theme-color" content="#171815">
+<link rel="stylesheet" href="site/site.css">
+<meta property="og:title" content="Lo-PDA">
+<meta property="og:description" content="A handheld from 1986. It lives on your phone.">
+<meta property="og:image" content="https://nowheremanx.github.io/lopda/docs/images/screens.png">
+<meta property="og:url" content="https://nowheremanx.github.io/lopda/">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="runtime/icons/icon-192.png">
+<style>
+@font-face{font-family:"VT323";font-display:swap;src:url(runtime/fonts/vt323-002.woff2) format("woff2")}
+/* Layout: alternating graphite (the case) and paper (the LCD) bands; the device itself is the hero image. */
+:root{
+  --case:#171815; --case-2:#22241f; --case-line:#33362e;
+  --lcd-ink:#1f2a14; --lcd-dark:#4a5a32; --lcd-mid:#7d8a58; --lcd-paper:#a3ad7e;
+  --paper:#e9ebdf; --paper-2:#dfe2d2; --on-case:#eef0e6; --on-case-dim:#9a9f8c;
+  --home:#c4432f;
+  --f-display:-apple-system,"SF Pro Display",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+  --f-body:-apple-system,"SF Pro Text",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+  --f-lcd:"VT323",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--case);color:var(--on-case);font:17px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+.band{padding-block:clamp(72px,11vw,140px)}
+.band.paper{background:var(--paper);color:var(--lcd-ink)}
+.lcd{font-family:var(--f-lcd);letter-spacing:.08em;text-transform:uppercase}
+h1,h2{font-family:var(--f-display);font-weight:700;letter-spacing:-.035em;line-height:1.02;text-wrap:balance;margin:0}
+h1{font-size:clamp(46px,8.4vw,104px)}
+h2{font-size:clamp(36px,5.6vw,68px)}
+h3{font:600 20px/1.25 var(--f-display);letter-spacing:-.01em;margin:0 0 6px}
+p{margin:0}
+.lede{font-size:clamp(19px,2.2vw,24px);line-height:1.4;max-width:34ch;color:var(--on-case-dim);text-wrap:pretty}
+.paper .lede{color:var(--lcd-dark)}
+.eyebrow{font-size:20px;color:var(--lcd-mid);margin-bottom:18px}
+.paper .eyebrow{color:var(--lcd-dark)}
+
+/* the top bar is shared by every page of the site: site/site.css and site/site.js */
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--case)}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0}
+.btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.btn.home:hover{filter:brightness(1.08)}
+.btn.ghost{color:var(--on-case);box-shadow:inset 0 0 0 1px var(--case-line)}
+.paper .btn.ghost{color:var(--lcd-ink);box-shadow:inset 0 0 0 1px var(--lcd-mid)}
+a:focus-visible,.btn:focus-visible,button:focus-visible{outline:2px solid var(--lcd-paper);outline-offset:3px}
+
+/* device crops: each screenshot strip holds four phones side by side */
+.dev{aspect-ratio:390/844;width:100%;max-width:100%;background-size:400% 100%;background-repeat:no-repeat;border-radius:14px}
+.dev.s{background-image:url(docs/images/screens.png)}
+html[lang=zh] .dev.s{background-image:url(docs/images/zh/screens.png)}
+.dev.b{background-image:url(docs/images/builtins.png)}
+html[lang=zh] .dev.b{background-image:url(docs/images/zh/builtins.png)}
+.dev.a{background-image:url(docs/images/apps.png)}
+html[lang=zh] .dev.a{background-image:url(docs/images/zh/apps.png)}
+.dev.m{background-image:url(docs/images/more.png)}
+html[lang=zh] .dev.m{background-image:url(docs/images/zh/more.png)}
+.dev.i0{background-position:0 0}.dev.i1{background-position:33.333% 0}.dev.i2{background-position:66.667% 0}.dev.i3{background-position:100% 0}
+
+/* hero */
+.hero{padding-block:clamp(48px,8vw,96px) 0;overflow:hidden}
+.hero .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:clamp(24px,5vw,64px);align-items:end}
+.hero .copy{padding-bottom:clamp(40px,8vw,110px);min-width:0;display:grid;gap:26px}
+.hero .ctas{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.hero .fine{font-size:14px;color:var(--on-case-dim)}
+.stage{position:relative;max-width:400px;justify-self:center;width:100%}
+.stage .dev{border-radius:22px 22px 0 0;box-shadow:0 40px 120px -30px rgba(163,173,126,.35)}
+.film{display:block;width:100%;aspect-ratio:9/16;object-fit:cover;background:#1f2a14;border-radius:22px;margin-bottom:clamp(24px,5vw,48px);box-shadow:0 40px 120px -30px rgba(163,173,126,.35)}
+@media (max-width:820px){.hero .grid{grid-template-columns:1fr}.hero .copy{padding-bottom:0}.stage{max-width:320px}}
+
+/* four tones */
+.tones{display:grid;grid-template-columns:repeat(4,1fr);margin-top:56px;border-radius:16px;overflow:hidden}
+.tone{aspect-ratio:3/4;padding:18px;display:flex;flex-direction:column;justify-content:flex-end;gap:2px}
+.tone b{font:600 18px var(--f-display)}
+.tone code{font-family:var(--f-lcd);font-size:20px;letter-spacing:.04em}
+.t0{background:var(--lcd-ink);color:var(--lcd-paper)}.t1{background:var(--lcd-dark);color:var(--lcd-paper)}
+.t2{background:var(--lcd-mid);color:var(--lcd-ink)}.t3{background:var(--lcd-paper);color:var(--lcd-ink)}
+@media (max-width:560px){.tones{grid-template-columns:repeat(2,1fr)}.tone{aspect-ratio:4/3}}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:clamp(24px,5vw,72px);align-items:end}
+.split>*{min-width:0}
+@media (max-width:760px){.split{grid-template-columns:1fr}}
+
+/* camera -> darkroom */
+/* the camera: the viewfinder's four tones, then the darkroom's print */
+.develop{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:clamp(16px,3vw,40px);align-items:start;margin-top:64px}
+.develop figure{margin:0;display:grid;gap:14px;min-width:0}
+.develop figcaption{font-size:15px;color:var(--on-case-dim)}
+.develop figcaption b{color:var(--on-case);font-weight:600}
+.lcdpic{background:#0c0d0b;border-radius:14px;padding:12px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.4)}
+.lcdpic img{display:block;width:100%;height:auto;aspect-ratio:8/7;image-rendering:pixelated;border-radius:4px}
+.arrow{font-family:var(--f-lcd);font-size:22px;color:var(--lcd-mid);text-align:center;line-height:1.1;align-self:center}
+.print{background:#f4f2ea;padding:12px 12px 40px;border-radius:3px;box-shadow:0 30px 80px -30px rgba(0,0,0,.8);transform:rotate(-1deg)}
+.print img{display:block;width:100%;height:auto;aspect-ratio:8/7;object-fit:cover}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chips button{font:20px var(--f-lcd);letter-spacing:.05em;text-transform:uppercase;background:none;color:var(--on-case-dim);border:1px solid var(--case-line);border-radius:999px;padding:6px 14px;min-height:44px;cursor:pointer}
+.chips button[aria-pressed="true"]{background:var(--lcd-paper);color:var(--lcd-ink);border-color:var(--lcd-paper)}
+@media (max-width:640px){.develop{grid-template-columns:1fr}.arrow{display:none}}
+
+/* built-ins */
+.shelf{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:clamp(12px,2vw,24px);margin-top:56px}
+.shelf figure{margin:0;display:grid;gap:12px}
+.shelf figcaption{font-size:15px;color:var(--lcd-dark)}
+.shelf figcaption b{display:block;color:var(--lcd-ink);font-size:17px}
+@media (max-width:760px){.shelf{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px 32px;margin-top:72px;padding-top:40px;border-top:1px solid var(--lcd-mid)}
+.list p{font-size:16px;color:var(--lcd-dark)}
+@media (max-width:760px){.list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:440px){.list{grid-template-columns:1fr}}
+
+/* store */
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;margin-top:48px}
+.stat .n{font:700 clamp(44px,6vw,72px)/1 var(--f-display);letter-spacing:-.04em}
+.stat .u{font-size:15px;color:var(--on-case-dim);margin-top:8px}
+@media (max-width:560px){.stats{grid-template-columns:1fr}}
+/* the gallery: the best apps, each with a cover and a film; the store section ends on it */
+.gal{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:clamp(24px,4vw,56px);align-items:center;margin-top:64px;
+  padding:clamp(24px,4vw,48px);border-radius:24px;background:var(--case-2);box-shadow:inset 0 0 0 1px var(--case-line);text-decoration:none;color:inherit}
+.gal h3{font:700 clamp(28px,3.4vw,40px)/1.1 var(--f-display);letter-spacing:-.02em;margin:0 0 14px}
+.gal p{color:var(--on-case-dim);margin:0 0 26px;max-width:34ch}
+.gal .covers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(10px,1.6vw,18px)}
+.gal .cv{aspect-ratio:692/1036;border-radius:10px;background:#0c0d0b center/cover no-repeat;box-shadow:0 24px 60px -24px rgba(0,0,0,.9);transition:transform .25s}
+.gal .cv:nth-child(2){transform:translateY(-14px)}
+.gal:hover .cv{transform:translateY(-6px)}.gal:hover .cv:nth-child(2){transform:translateY(-20px)}
+.cv.c0{background-image:url(gallery/media/lost-deck/en-1.png)}html[lang=zh] .cv.c0{background-image:url(gallery/media/lost-deck/zh-1.png)}
+.cv.c1{background-image:url(gallery/media/zhenyao-tower/en-1.png)}html[lang=zh] .cv.c1{background-image:url(gallery/media/zhenyao-tower/zh-1.png)}
+.cv.c2{background-image:url(gallery/media/fake-yu/en-1.png)}html[lang=zh] .cv.c2{background-image:url(gallery/media/fake-yu/zh-1.png)}
+@media (max-width:760px){.gal{grid-template-columns:1fr}.gal .covers{order:-1}}
+
+/* make an app */
+pre{margin:0;background:var(--lcd-ink);color:var(--lcd-paper);border-radius:14px;padding:24px;overflow-x:auto;font:15px/1.6 ui-monospace,"SF Mono",Menlo,monospace}
+pre .c{color:var(--lcd-mid)}
+.links{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+#make pre{margin-top:28px}
+/* the first-app film: it waits for a tap, with sound */
+.howto{margin:0;display:grid;gap:12px;justify-self:center;width:100%;max-width:320px}
+.howto video{display:block;width:100%;aspect-ratio:9/16;object-fit:cover;background:#1f2a14;border-radius:18px}
+.howto figcaption{font-size:15px;color:var(--lcd-dark)}
+
+/* data */
+.three{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:56px}
+.three p{color:var(--on-case-dim);font-size:16px}
+@media (max-width:760px){.three{grid-template-columns:1fr}}
+
+footer{border-top:1px solid var(--case-line);padding-block:40px 56px;font-size:14px;color:var(--on-case-dim)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center}
+footer .mark{font-family:var(--f-lcd);font-size:22px;color:var(--on-case);margin-right:auto}
+.final{text-align:center;display:grid;gap:24px;justify-items:center}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<script src="site/site.js" data-root="" data-page="home"></script>
+
+<header class="hero" id="top"><div class="wrap grid">
+  <div class="copy">
+    <div class="eyebrow lcd">Model LP-86 &middot; 4-tone LCD &middot; 1986</div>
+    <h1 data-i18n="hero.h">A handheld from 1986. It lives on your phone.</h1>
+    <p class="lede" data-i18n="hero.p">Four shades of green, a D-pad, a film camera and a darkroom. No accounts, no ads. It works offline.</p>
+    <div class="ctas">
+      <a class="btn home" href="runtime/" data-i18n="cta.open">Open Lo-PDA</a>
+      <a class="btn ghost" href="#install" data-i18n="cta.install">Add to Home Screen</a>
+    </div>
+    <p class="fine" data-i18n="hero.fine">Free and open source. Made for phones.</p>
+  </div>
+  <div class="stage">
+    <!-- The intro film (docs/video/intro-<lang>, 720p, with music; a voice-over in Chinese): the script sets its language. It waits for a tap. -->
+    <video class="film" id="film" controls playsinline preload="none" poster="docs/video/intro-en.jpg"
+      aria-label="A one-minute film of Lo-PDA on a phone: a photo taken with the four-tone camera comes out of the darkroom as a colour print, then the programs and apps on the handheld"></video>
+  </div>
+</div></header>
+
+<section class="band paper"><div class="wrap">
+  <div class="split">
+    <div><div class="eyebrow lcd" data-i18n="tones.e">The display</div><h2 data-i18n="tones.h">Four tones. That is the whole palette.</h2></div>
+    <p class="lede" data-i18n="tones.p">Every pixel on the screen is one of four greens, like the LCDs of the eighties. Apps are drawn with them and photos are dithered into them.</p>
+  </div>
+  <div class="tones">
+    <div class="tone t0"><b data-i18n="tone.ink">Ink</b><code>#1F2A14</code></div>
+    <div class="tone t1"><b data-i18n="tone.dark">Dark</b><code>#4A5A32</code></div>
+    <div class="tone t2"><b data-i18n="tone.mid">Mid</b><code>#7D8A58</code></div>
+    <div class="tone t3"><b data-i18n="tone.paper">Paper</b><code>#A3AD7E</code></div>
+  </div>
+</div></section>
+
+<section class="band" id="camera"><div class="wrap">
+  <div class="split">
+    <div><div class="eyebrow lcd" data-i18n="cam.e">Shot on Lo-PDA</div><h2 data-i18n="cam.h">No preview. You find out in the darkroom.</h2></div>
+    <p class="lede" data-i18n="cam.p">Load a roll of 8, 12 or 16 frames. The viewfinder is a live four-tone dither. When the roll is done, the darkroom develops it once, in colour.</p>
+  </div>
+  <!-- One photo, the owner's own (docs/images/stocks/): on the left as the viewfinder shows it, four tones
+       (tools/stock-tones.mjs runs it through runtime/finder.js); on the right as the darkroom develops it, one stock at a time. -->
+  <div class="develop">
+    <figure class="vf"><div class="lcdpic"><img src="docs/images/stocks/0-tones.png" width="256" height="224"
+      alt="An autumn valley with a lake in the camera's four-tone viewfinder"></div>
+      <figcaption data-i18n="cam.vf"><b>The viewfinder.</b> Four tones, live.</figcaption></figure>
+    <div class="arrow" aria-hidden="true">DEVELOP<br>&rarr;</div>
+    <figure class="pr"><div class="print"><img id="stock-img" src="docs/images/stocks/1-portrait.jpg" width="800" height="700" alt="The same valley developed on Portrait 400"></div>
+      <figcaption data-i18n="cam.pr"><b>The print.</b> Seven film stocks, each with its own colour and grain. Pick one:</figcaption>
+      <div class="chips" id="chips">
+        <button type="button" data-f="1-portrait" aria-pressed="true">Portrait 400</button>
+        <button type="button" data-f="2-sunny" aria-pressed="false">Sunny 200</button>
+        <button type="button" data-f="3-verde" aria-pressed="false">Verde 400</button>
+        <button type="button" data-f="4-pastel" aria-pressed="false">Pastel 400</button>
+        <button type="button" data-f="5-tungsten" aria-pressed="false">Tungsten 800T</button>
+        <button type="button" data-f="6-noir" aria-pressed="false">Noir 400</button>
+        <button type="button" data-f="7-expired" aria-pressed="false">Expired</button>
+      </div></figure>
+  </div>
+</div></section>
+
+<section class="band paper" id="inside"><div class="wrap">
+  <div class="split">
+    <div><div class="eyebrow lcd" data-i18n="in.e">Built in</div><h2 data-i18n="in.h">A pocket full of programs.</h2></div>
+    <p class="lede" data-i18n="in.p">A diary that opens on today, a calendar with lunar dates, an English dictionary, and a book reader that looks words up for you.</p>
+  </div>
+  <div class="shelf">
+    <figure><div class="dev b i0" role="img" aria-label="Notes, opening on today's diary"></div><figcaption data-i18n="in.notes"><b>Notes</b>Today's diary, tags, search.</figcaption></figure>
+    <figure><div class="dev b i1" role="img" aria-label="The calendar with lunar dates and solar terms"></div><figcaption data-i18n="in.cal"><b>Calendar</b>US holidays in English; lunar dates in Chinese.</figcaption></figure>
+    <figure><div class="dev b i2" role="img" aria-label="A dictionary entry"></div><figcaption data-i18n="in.dict"><b>Dictionary</b>English and Chinese, offline.</figcaption></figure>
+    <figure><div class="dev b i3" role="img" aria-label="A page of a book in the reader"></div><figcaption data-i18n="in.reader"><b>Reader</b>TXT and EPUB, an e-ink refresh.</figcaption></figure>
+  </div>
+  <div class="shelf">
+    <figure><div class="dev m i0" role="img" aria-label="The pet in its room, with a bed, a calendar and a shelf"></div><figcaption data-i18n="in.pet"><b>Pet</b>Lives in its room, sleeps at night.</figcaption></figure>
+    <figure><div class="dev m i1" role="img" aria-label="Tape4's melody screen with a grid of notes"></div><figcaption data-i18n="in.tape"><b>Tape4</b>Four tracks on tape. Export a WAV.</figcaption></figure>
+    <figure><div class="dev m i2" role="img" aria-label="The Tuner: a radio dial with saved stations as frequencies, the needle on one"></div><figcaption data-i18n="in.tuner"><b>Tuner</b>Internet radio on a dial. Plays on with the phone locked.</figcaption></figure>
+    <figure><div class="dev m i3" role="img" aria-label="Radio: text and a small picture sent between two phones"></div><figcaption data-i18n="in.radio"><b>Radio</b>Phone to phone, through the air. Gomoku plays over it too.</figcaption></figure>
+  </div>
+  <div class="list">
+    <div><h3 data-i18n="in.cart.h">Cartridge</h3><p data-i18n="in.cart.p">A Game Boy player. Bring your own ROMs.</p></div>
+    <div><h3 data-i18n="in.scripts.h">Scripts</h3><p data-i18n="in.scripts.p">Ask an AI for a small program, paste it in, run it. Connect your own AI line in Settings (DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter) and it writes the program on the spot; Revise changes it with one more sentence, and keeps the old version. Tape4 can arrange with it too.</p></div>
+    <div><h3 data-i18n="in.backup.h">Backup</h3><p data-i18n="in.backup.p">The whole handheld in one zip file. Restore it on a new phone.</p></div>
+  </div>
+</div></section>
+
+<section class="band" id="store"><div class="wrap">
+  <div class="split">
+    <div><div class="eyebrow lcd" data-i18n="st.e">The app store</div><h2 data-i18n="st.h">Small apps, made by people.</h2></div>
+    <p class="lede" data-i18n="st.p">Games, puzzles and tools from the community. Each one installs in a second and runs in a sandbox with no internet.</p>
+  </div>
+  <div class="shelf">
+    <figure><a href="gallery/?app=lost-deck"><div class="dev a i0" role="img" aria-label="LostDeck, a first-person shooter on a lost space station"></div></a></figure>
+    <figure><a href="gallery/?app=fake-yu"><div class="dev a i1" role="img" aria-label="Fake Yu, a rhythm story"></div></a></figure>
+    <figure><div class="dev a i2" role="img" aria-label="Paper Tower, a small dungeon game"></div></figure>
+    <figure><div class="dev a i3" role="img" aria-label="The store's list of apps"></div></figure>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="n">22</div><div class="u" data-i18n="st.n1">apps in the store today</div></div>
+    <div class="stat"><div class="n">512 KB</div><div class="u" data-i18n="st.n2">the most an app may weigh</div></div>
+    <div class="stat"><div class="n">0</div><div class="u" data-i18n="st.n3">network requests an app can make</div></div>
+  </div>
+  <a class="gal" href="gallery/">
+    <div>
+      <div class="eyebrow lcd" data-i18n="st.g.e">The gallery</div>
+      <h3 data-i18n="st.g.h">The best of the store, in motion.</h3>
+      <p data-i18n="st.g.p">A cover and a short film of each, before you install anything. One tap opens it on your phone.</p>
+      <span class="btn home" data-i18n="st.g.b">Browse the gallery</span>
+    </div>
+    <div class="covers" aria-hidden="true"><div class="cv c0"></div><div class="cv c1"></div><div class="cv c2"></div></div>
+  </a>
+</div></section>
+
+<section class="band paper" id="make"><div class="wrap split">
+  <div>
+    <div class="eyebrow lcd" data-i18n="mk.e">Make an app</div>
+    <h2 data-i18n="mk.h">One HTML file. Your AI can write it.</h2>
+    <p class="lede" style="margin-top:24px" data-i18n="mk.p">The spec is short and frozen at 1.0. Hand the prompt to your AI assistant, try the app in the dev harness, send a pull request.</p>
+    <div class="links">
+      <a class="btn ghost" href="https://github.com/nowheremanx/lopda/blob/main/SPEC.md" data-i18n="mk.spec">Read the spec</a>
+      <a class="btn ghost" href="https://github.com/nowheremanx/lopda/blob/main/sdk/PROMPT.md" data-i18n="mk.prompt">The AI prompt</a>
+      <a class="btn ghost" href="events/" data-i18n="mk.events">Challenges</a>
+    </div>
+  <pre><span class="c">&lt;!-- index.html --&gt;</span>
+&lt;script&gt;
+PAD.on("press", function (b) {
+  if (b === "a") PAD.sfx("coin");
+});
+PAD.save({ best: 42 });
+PAD.music.play({ bpm: 120,
+  p1: "o4 c8 e8 g8 &gt;c4" });
+&lt;/script&gt;</pre>
+  </div>
+  <!-- The first-app film (docs/video/first-app-<lang>): one line on the phone becomes a program. It never starts by itself. -->
+  <figure class="howto">
+    <video id="film2" controls playsinline preload="none" poster="docs/video/first-app-en.jpg"
+      aria-label="A one-minute film: a program written on the phone from one line, then changed with another"></video>
+    <figcaption data-i18n="mk.film">Your first app, start to finish, in about a minute.</figcaption>
+  </figure>
+</div></section>
+
+<section class="band" id="install"><div class="wrap">
+  <div class="split">
+    <div><div class="eyebrow lcd" data-i18n="d.e">Your data</div><h2 data-i18n="d.h">It stays on your phone.</h2></div>
+    <p class="lede" data-i18n="d.p">There is no account to make and nothing to sign in to. Notes, photos and saves live in the phone's own storage.</p>
+  </div>
+  <div class="three">
+    <div><h3 data-i18n="d.off.h">Works offline</h3><p data-i18n="d.off.p">Open it once and it keeps working on a plane or in the hills.</p></div>
+    <div><h3 data-i18n="d.home.h">Add to Home Screen</h3><p data-i18n="d.home.p">On an iPhone, open Lo-PDA in Safari, tap Share, then Add to Home Screen. It runs full screen, like an app.</p></div>
+    <div><h3 data-i18n="d.mit.h">MIT licensed</h3><p data-i18n="d.mit.p">All of it is open source. Read it, fork it, learn from it.</p></div>
+  </div>
+  <div class="final" style="margin-top:clamp(80px,12vw,140px)">
+    <h2 data-i18n="end.h">Pick it up.</h2>
+    <a class="btn home" href="runtime/" data-i18n="cta.open">Open Lo-PDA</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span class="mark">LO-PDA</span>
+  <a href="https://github.com/nowheremanx/lopda">GitHub</a>
+  <span data-i18n="foot">MIT &middot; A fictional handheld, made for fun.</span>
+</div></footer>
+
+<script>
+(function () {
+  // Chinese text, keyed like the data-i18n attributes. Values may hold <b> (the captions).
+  var ZH = {
+    "hero.h": "一台 1986 年的掌机，住在你的手机里。",
+    "hero.p": "四种绿色，一个十字键，一台胶片相机和一间冲洗店。不用注册，没有广告，离线也能用。",
+    "cta.open": "打开 Lo-PDA", "cta.install": "添加到主屏幕", "hero.fine": "免费，开源，为手机而做。",
+    "tones.e": "屏幕", "tones.h": "四种色调，就是全部。",
+    "tones.p": "屏幕上的每个像素，都是这四种绿色之一，就像八十年代的液晶屏。应用用它们来画，照片也被抖动成它们。",
+    "tone.ink": "墨", "tone.dark": "深", "tone.mid": "中", "tone.paper": "纸",
+    "cam.e": "Lo-PDA 拍摄", "cam.h": "没有预览，冲出来才知道。",
+    "cam.p": "装一卷 8、12 或 16 张的胶卷。取景器是实时的四色抖动画面。拍完一卷，冲洗店会把它冲一次，彩色的。",
+    "cam.vf": "<b>取景器。</b>四种颜色，实时。", "cam.pr": "<b>相片。</b>七种胶卷，各有自己的颜色和颗粒。挑一种看看：",
+    "in.e": "内置", "in.h": "一口袋的程序。",
+    "in.p": "打开就是今天的日记，带农历的万年历，英汉词典，还有一个能帮你查词的阅读器。",
+    "in.notes": "<b>记事本</b>今天的日记、标签、搜索。", "in.cal": "<b>万年历</b>农历、节气、放假安排。",
+    "in.dict": "<b>词典</b>英汉双解，离线可用。", "in.reader": "<b>阅读器</b>TXT 和 EPUB，墨水屏式刷新。",
+    "in.pet": "<b>宠物</b>住在自己的小房间里，晚上睡觉。", "in.tape": "<b>四轨机</b>四轨磁带录音，可以导出 WAV。",
+    "in.tuner": "<b>收音机</b>刻度盘上的网络电台，锁屏也接着响。", "in.radio": "<b>电波台</b>手机对手机，声音隔空传；五子棋也能用它对下。",
+    "in.cart.h": "卡带机", "in.cart.p": "Game Boy 模拟器，卡带自备。",
+    "in.scripts.h": "脚本", "in.scripts.p": "让 AI 写个小程序，粘贴进来，就能运行。在设置里接一条自己的 AI 线路（DeepSeek、Kimi、通义千问、硅基流动或 OpenRouter），它就当场写好；「改一改」再说一句就能改，旧版本先存好。四轨机也能和它一起编曲。",
+    "in.backup.h": "备份", "in.backup.p": "整台掌机打包成一个 zip，换手机也能恢复。",
+    "st.e": "应用商店", "st.h": "小小的应用，由人来做。",
+    "st.p": "社区做的游戏、谜题和工具。每个一秒装好，在没有网络的沙盒里运行。",
+    "st.n1": "个应用已上架", "st.n2": "一个应用的体积上限", "st.n3": "个应用能发出的网络请求", "st.g.e": "精选", "st.g.h": "商店里最好的几个，先看它们动起来。",
+    "st.g.p": "每个应用一张封面、一段实机画面，装之前就知道它长什么样。点一下，在手机上打开。", "st.g.b": "看看精选应用",
+    "mk.e": "做个 app", "mk.h": "一个 HTML 文件，你的 AI 就能写。",
+    "mk.p": "规范很短，1.0 已冻结。把提示词交给你的 AI 助手，在开发台里试，再提一个 pull request。",
+    "mk.spec": "阅读规范", "mk.prompt": "AI 提示词", "mk.events": "挑战卡",
+    "mk.film": "你的第一个 app，从头到尾，一分钟左右。",
+    "d.e": "你的数据", "d.h": "数据只留在你的手机上。",
+    "d.p": "不用注册，也没有要登录的地方。笔记、照片和存档都存在手机自己的存储里。",
+    "d.off.h": "离线可用", "d.off.p": "打开一次，之后在飞机上、山里都能用。",
+    "d.home.h": "添加到主屏幕", "d.home.p": "在 iPhone 上用 Safari 打开 Lo-PDA，点分享，再点「添加到主屏幕」。它会全屏运行，像一个 app。",
+    "d.mit.h": "MIT 许可", "d.mit.p": "全部开源。读它，fork 它，从里面学。",
+    "end.h": "拿起来玩吧。", "foot": "MIT · 一台虚构的掌机，做着玩的。"
+  };
+  var EN = {};
+  var nodes = document.querySelectorAll("[data-i18n]");
+  for (var i = 0; i < nodes.length; i++) EN[nodes[i].getAttribute("data-i18n")] = nodes[i].innerHTML;
+
+  function setLang(lang) {
+    var t = lang === "zh" ? ZH : EN;
+    for (var i = 0; i < nodes.length; i++) nodes[i].innerHTML = t[nodes[i].getAttribute("data-i18n")];
+  }
+
+  // The language is the site's (site/site.js: the visitor's choice, else the phone's); its button in the top bar switches.
+  var lang = LopdaSite.lang;
+  if (lang === "zh") setLang("zh");
+
+  // The two films in the visitor's language. They carry sound (a voice-over in Chinese), so neither starts by itself: a tap plays it.
+  var film = document.getElementById("film"), film2 = document.getElementById("film2");
+  function setFilm(lang) {
+    film.poster = "docs/video/intro-" + lang + ".jpg";
+    film.src = "docs/video/intro-" + lang + ".mp4";
+    film2.poster = "docs/video/first-app-" + lang + ".jpg";
+    film2.src = "docs/video/first-app-" + lang + ".mp4";
+  }
+  setFilm(lang);
+  // Only one film talks at a time: starting one pauses the other.
+  film.addEventListener("play", function () { film2.pause(); });
+  film2.addEventListener("play", function () { film.pause(); });
+
+  LopdaSite.onLang(function (l) { lang = l; setLang(lang); setFilm(lang); });
+
+  // The film stock buttons swap the print.
+  var img = document.getElementById("stock-img"), chips = document.getElementById("chips");
+  chips.addEventListener("click", function (e) {
+    var b = e.target.closest("button");
+    if (!b) return;
+    var all = chips.querySelectorAll("button");
+    for (var i = 0; i < all.length; i++) all[i].setAttribute("aria-pressed", all[i] === b ? "true" : "false");
+    img.src = "docs/images/stocks/" + b.getAttribute("data-f") + ".jpg";
+    img.alt = "The same valley developed on " + b.textContent;
+  });
+})();
+</script>
+</body>
+</html>
