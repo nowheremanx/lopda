@@ -6,6 +6,7 @@
 <title>Lo-PDA Events</title>
 <meta name="description" content="Lo-PDA events: challenges for making small apps for a fictional 1986 handheld, and what people made.">
 <link rel="icon" href="../runtime/icons/icon-192.png">
+<link rel="stylesheet" href="../site/site.css">
 <style>
 @font-face{font-family:"VT323";font-display:swap;src:url(../runtime/fonts/vt323-002.woff2) format("woff2")}
 /* The landing page's look: graphite (the case) and paper (the LCD) bands. Same tokens as ../index.html. */
@@ -37,14 +38,7 @@ p{margin:0}
 .eyebrow{font-size:20px;color:var(--lcd-mid);margin-bottom:14px}
 .paper .eyebrow{color:var(--lcd-dark)}
 
-nav{position:sticky;top:0;z-index:5;background:var(--case);border-bottom:1px solid var(--case-line)}
-nav .wrap{display:flex;align-items:center;gap:18px;height:52px;font-size:14px}
-nav .mark{font-family:var(--f-lcd);font-size:24px;letter-spacing:.06em;text-decoration:none;margin-right:auto}
-nav a.l{text-decoration:none;color:var(--on-case-dim)}
-nav a.l:hover,nav .lang:hover{color:var(--on-case)}
-nav .mark,nav a.l,nav .btn{white-space:nowrap}
-@media (max-width:380px){nav .wrap{gap:12px} nav a.gh{display:none}}
-nav .lang{background:none;border:0;color:var(--on-case-dim);font:14px var(--f-body);cursor:pointer;padding:8px 4px}
+/* the top bar is shared by every page of the site: ../site/site.css and ../site/site.js */
 .btn{display:inline-flex;align-items:center;min-height:44px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0;cursor:pointer}
 .btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
 .btn.ghost{background:transparent;color:inherit;box-shadow:inset 0 0 0 1.5px currentColor}
@@ -147,13 +141,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
 </style>
 </head>
 <body>
-<nav><div class="wrap">
-  <a class="mark" href="../">LO-PDA</a>
-  <a class="l" href="./" data-t="nav.events">Events</a>
-  <a class="l gh" href="https://github.com/nowheremanx/lopda">GitHub</a>
-  <button class="lang" type="button" id="lang">中文</button>
-  <a class="btn home" href="../runtime/" data-t="nav.open">Open</a>
-</div></nav>
+<script src="../site/site.js" data-root="../" data-page="events"></script>
 <main id="main"></main>
 <footer><div class="wrap" data-t="foot">MIT · A fictional handheld, made for fun.</div></footer>
 
@@ -163,7 +151,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
   // Page text. Event text comes from events.js as {en, zh}.
   var T = {
     en: {
-      "nav.events": "Events", "nav.open": "Open", "foot": "MIT · A fictional handheld, made for fun.",
+      "foot": "MIT · A fictional handheld, made for fun.",
       "list.e": "Events", "list.h": "Make something small.",
       "list.p": "Challenges for making apps for Lo-PDA, with an AI or without. When one ends, what people made stays here.",
       "open": "Open", "archived": "Archived", "back": "All events",
@@ -178,7 +166,7 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
       "join": "Made one? Open a pull request and link this event."
     },
     zh: {
-      "nav.events": "活动", "nav.open": "打开", "foot": "MIT · 一台虚构的掌机，做着玩的。",
+      "foot": "MIT · 一台虚构的掌机，做着玩的。",
       "list.e": "活动", "list.h": "做点小东西。",
       "list.p": "给 Lo-PDA 做 app 的挑战，用不用 AI 都行。活动结束后，大家做的东西会留在这里。",
       "open": "进行中", "archived": "已归档", "back": "全部活动",
@@ -197,10 +185,8 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
   var events = window.LOPDA_EVENTS || [];
   var main = document.getElementById("main");
 
-  // Same choice as the landing page (same origin, same key).
-  var lang = null;
-  try { lang = localStorage.getItem("lopda-landing-lang"); } catch (e) {}
-  if (lang !== "zh" && lang !== "en") lang = /^zh/i.test(navigator.language || "") ? "zh" : "en";
+  // The site's language (../site/site.js); the top bar's button switches it.
+  var lang = LopdaSite.lang;
 
   function t(k) { return T[lang][k]; }
   function L(v) { return v ? (v[lang] || v.en) : ""; }
@@ -377,17 +363,11 @@ footer{padding-block:32px;color:var(--on-case-dim);font-size:14px}
       document.documentElement.style.setProperty("--nav-h", document.querySelector("nav").offsetHeight + "px");
       at.scrollIntoView();
     }
-    document.documentElement.lang = lang;
-    document.getElementById("lang").textContent = lang === "zh" ? "EN" : "中文";
     var ts = document.querySelectorAll("[data-t]");
     for (var j = 0; j < ts.length; j++) ts[j].textContent = t(ts[j].getAttribute("data-t"));
   }
 
-  document.getElementById("lang").addEventListener("click", function () {
-    lang = lang === "zh" ? "en" : "zh";
-    try { localStorage.setItem("lopda-landing-lang", lang); } catch (e) {}
-    render();
-  });
+  LopdaSite.onLang(function (l) { lang = l; render(); });
   addEventListener("hashchange", function () {
     var sub = location.hash.indexOf("/") > 0;
     render();

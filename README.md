@@ -61,7 +61,7 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 
 ## The app store
 
-![Three store apps in play, Paper Tower, Fake Yu and Rain Station, and the store's list](docs/images/apps.png)
+![Three store apps in play, LostDeck, Fake Yu and Paper Tower, and the store's list](docs/images/apps.png)
 
 Twenty-four apps today, all open source and all made for Lo-PDA:
 
