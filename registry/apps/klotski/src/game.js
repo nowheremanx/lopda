@@ -1185,6 +1185,8 @@ function drawCard(g) {
 }
 
 /* ---------------- title ---------------- */
+/* the picture fills the top; the four buttons sit in two rows under it */
+var TITLE_ART_X = 18, TITLE_ART_Y = 2, TITLE_MENU_Y = 130, TITLE_ROW = 28;
 var title = { sel: 0, items: [], loading: false };
 function titleItems() {
   return [
@@ -1194,33 +1196,6 @@ function titleItems() {
     { label: T({ zh: "玩法", en: "How To" }), act: function () { game.push("pages", { section: T({ zh: "玩法", en: "How to Play" }), blocks: KLOTSKI_DATA.help }); } }
   ];
 }
-function drawMini(g, x, y, cell) {
-  var rows = ["HAAI", "HAAI", "JBBK", "JNOK", "P@@Q"], map = {}, i, yy, xx, ch, p;
-  var pieces = [];
-  for (yy = 0; yy < 5; yy++) {
-    for (xx = 0; xx < 4; xx++) {
-      ch = rows[yy].charAt(xx);
-      if (ch === "@" || ch === ".") continue;
-      if (!map[ch]) { map[ch] = []; pieces.push(ch); }
-      map[ch].push([xx, yy]);
-    }
-  }
-  g.rect(x - 2, y - 2, 4 * cell + 4, 5 * cell + 4, g.DARK);
-  g.rect(x, y, 4 * cell, 5 * cell, g.PAPER);
-  for (i = 0; i < pieces.length; i++) {
-    ch = pieces[i];
-    var list = map[ch], xs = [], ys = [], c;
-    for (c = 0; c < list.length; c++) { xs.push(list[c][0]); ys.push(list[c][1]); }
-    var x0 = Math.min.apply(null, xs), y0 = Math.min.apply(null, ys);
-    var x1 = Math.max.apply(null, xs), y1 = Math.max.apply(null, ys);
-    var w = x1 - x0 + 1, h = y1 - y0 + 1;
-    var isCao = w === 2 && h === 2;
-    g.rect(x + x0 * cell + 1, y + y0 * cell + 1, w * cell - 2, h * cell - 2, isCao ? g.INK : g.PAPER);
-    g.frame(x + x0 * cell + 1, y + y0 * cell + 1, w * cell - 2, h * cell - 2, g.INK);
-    if (!isCao && w === 1 && h === 1) g.rect(x + x0 * cell + 4, y + y0 * cell + 4, 2, 2, g.MID);
-  }
-}
-
 var titleScene = {
   enter: function () {
     PT.clear();
@@ -1237,37 +1212,35 @@ var titleScene = {
     if (game.pressed("a") || game.pressed("start")) { title.items[title.sel].act(); game.sfx("ok"); return; }
     var ev = PT.take();
     if (ev && ev.dist < 8) {
-      var col = ev.x0 >= 80 ? 1 : 0, row = ev.y0 >= 136 ? 1 : 0;
-      if (ev.x0 >= 18 && ev.x0 < 142 && ev.y0 >= 104 && ev.y0 < 164) {
+      var col = ev.x0 >= 80 ? 1 : 0, row = ev.y0 >= TITLE_MENU_Y + TITLE_ROW - 1 ? 1 : 0;
+      if (ev.x0 >= 18 && ev.x0 < 142 && ev.y0 >= TITLE_MENU_Y && ev.y0 < TITLE_MENU_Y + 2 * TITLE_ROW) {
         title.sel = row * 2 + col; game.sfx("ok"); title.items[title.sel].act(); return;
       }
     }
   },
   draw: function (g) {
     g.clear(g.PAPER);
-    drawMini(g, 58, 42, 11);
-    g.window(45, 2, 70, 18, { thin: true });
-    g.text(T({ zh: "华容道", en: "KLOTSKI" }), 80, 5, { align: "center", color: g.INK });
-    g.text(T({ zh: "曹操脱险", en: "A Huarong tale" }), 80, 22, { align: "center", color: g.INK });
+    /* the title picture (src/title-art.js) over the four buttons */
+    KLOTSKI_TITLE_ART.draw(g, TITLE_ART_X, TITLE_ART_Y, T({ zh: "华容道", en: "KLOTSKI" }), 2);
     var i, bx, by;
     for (i = 0; i < title.items.length; i++) {
-      bx = 18 + (i % 2) * 62; by = 104 + Math.floor(i / 2) * 30;
+      bx = 18 + (i % 2) * 62; by = TITLE_MENU_Y + Math.floor(i / 2) * TITLE_ROW;
       if (!loaded) break;
       if (i === title.sel) {
-        g.rect(bx, by, 60, 27, g.INK);
-        g.text(title.items[i].label, bx + 30, by + 8, { align: "center", color: g.PAPER });
+        g.rect(bx, by, 60, 26, g.INK);
+        g.text(title.items[i].label, bx + 30, by + 7, { align: "center", color: g.PAPER });
       } else {
-        g.frame(bx, by, 60, 27, g.INK);
-        g.text(title.items[i].label, bx + 30, by + 8, { align: "center", color: g.INK });
+        g.frame(bx, by, 60, 26, g.INK);
+        g.text(title.items[i].label, bx + 30, by + 7, { align: "center", color: g.INK });
       }
     }
     if (!loaded) {
-      g.text(T({ zh: "读取中…", en: "Loading..." }), 80, 120, { align: "center", color: g.INK });
+      g.text(T({ zh: "读取中…", en: "Loading..." }), 80, 150, { align: "center", color: g.INK });
     }
-    g.rect(0, 169, 160, 1, g.DARK);
+    /* the progress line; the old "Arrows  A OK" hint gave its row to the picture */
+    g.rect(0, 186, 160, 1, g.DARK);
     g.text(T({ zh: "已通 {a}/{b}　课 {c}/{d}", en: "Cleared {a}/{b}  Lessons {c}/{d}" },
-      { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, 172, { align: "center", color: g.INK });
-    g.text(T({ zh: "方向 选　A 好", en: "Arrows  A OK" }), 5, 186, { color: g.INK });
+      { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, 187, { align: "center", color: g.INK });
   }
 };
 
