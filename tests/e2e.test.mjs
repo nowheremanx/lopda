@@ -201,7 +201,10 @@ test("each built-in's fresh-profile first screen has visible content", { skip, t
   const { p, errors } = await page(t, { locale: "en-US" });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && LP.builtins.filter((b) => b.icon).length > 0 && document.querySelectorAll("#home .app.builtin").length === LP.builtins.filter((b) => b.icon).length);
-  const ids = await p.evaluate(() => LP.builtins.filter((b) => b.icon).map((b) => b.view));
+  /* the views in home-screen order (decisions.md section 71: a stored order, not the order the built-ins registered) */
+  const ids = await p.evaluate(() => [...document.querySelectorAll("#home .app.builtin .label")]
+    .map((l) => LP.builtins.find((b) => b.icon && LP.tr(b.label) === l.textContent).view));
+  assert.deepEqual(ids.slice(0, 3), ["notes", "cal", "pet"], "a new phone starts with notes, calendar and pet");
   const firstScreens = [];
   for (let i = 0; i < ids.length; i++) {
     await p.locator("#home .app.builtin").nth(i).click();
