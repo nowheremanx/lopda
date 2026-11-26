@@ -42,7 +42,7 @@
     rows.forEach(function (r) { w = Math.max(w, r.length); });
     var M = this.M = { w: w, h: h, cells: new Uint8Array(w * h), open: new Float32Array(w * h), axis: new Uint8Array(w * h),
       timer: new Float32Array(w * h), seen: new Uint8Array(w * h), slime: null, dist: new Int16Array(w * h) };
-    this.things = []; this.time = 0; this.kills = 0; this.foes = 0; this.secrets = 0; this.secretsFound = 0;
+    this.things = []; this.time = 0; this.lockAt = -1; this.lockT = 0; this.kills = 0; this.foes = 0; this.secrets = 0; this.secretsFound = 0;
     this.cards = [false, false, false, false, false];   /* 1-3 the cards, 4 the switch */ this.logs = []; this.fx = [];
     var P = this.P = { x: 1.5, y: 1.5, a: (deck.face || 0) * Math.PI / 180, hp: 100, ammo: deck.ammo != null ? deck.ammo : 30,
       guns: { wrench: true, rivet: true, scatter: !!deck.scatter }, gun: "rivet", cd: 0, kick: 0, hurt: 0, hurtDir: 0,
@@ -163,7 +163,11 @@
     if (c === 6 && byPlayer) { this.hooks.terminal && this.hooks.terminal(this.logs[i]); return true; }
     if (c < 10 || c > 14) return false;
     if (c > 10 && !this.cards[c - 10]) {
-      if (byPlayer) this.hooks.locked && this.hooks.locked(c - 10);
+      /* once a second per door: holding UP against it must not flood the sound budget */
+      if (byPlayer && (this.lockAt !== i || this.time - this.lockT > 1)) {
+        this.lockAt = i; this.lockT = this.time;
+        this.hooks.locked && this.hooks.locked(c - 10);
+      }
       return true;
     }
     if (M.open[i] < 1 && M.timer[i] <= 0) { M.timer[i] = 0.01; this.hooks.door && this.hooks.door(x + 0.5, y + 0.5); }
@@ -175,7 +179,12 @@
     for (var i = 0; i < n; i++) {
       var c = M.cells[i]; if (c < 10 || c > 14) continue;
       if (M.timer[i] > 0) {
-        if (M.open[i] < 1) { M.open[i] = Math.min(1, M.open[i] + dt * 2.2); if (M.open[i] >= 1) M.timer[i] = 0.01; }
+        if (M.open[i] < 1) {
+          var was = M.open[i];
+          M.open[i] = Math.min(1, M.open[i] + dt * 2.2);
+          if (was <= 0.5 && M.open[i] > 0.5) this.pcell = -1;   /* the robots' routes change */
+          if (M.open[i] >= 1) M.timer[i] = 0.01;
+        }
         else {
           if (c !== 14) M.timer[i] += dt;   /* shutters stay up once the switch is thrown */
           if (M.timer[i] > 3.5) {
@@ -184,7 +193,9 @@
           }
         }
       } else if (M.timer[i] < 0) {
+        var was2 = M.open[i];
         M.open[i] = Math.max(0, M.open[i] - dt * 2.2);
+        if (was2 > 0.5 && M.open[i] <= 0.5) this.pcell = -1;
         if (M.open[i] <= 0) M.timer[i] = 0;
         if (this.doorBusy(i % M.w, (i / M.w) | 0)) M.timer[i] = 0.01;   /* never close on anyone: open again */
       }
@@ -269,7 +280,7 @@
         var tries = [[P.x + ca * 0.6, P.y + sa * 0.6], [P.x + ca * 0.6, P.y], [P.x, P.y + sa * 0.6]];
         for (var q = 0; q < 3; q++) {
           var fx = tries[q][0] | 0, fy = tries[q][1] | 0, c = this.cell(fx, fy);
-          if ((c >= 10 && c <= 14) || c === 19) { this.tryDoor(fx, fy, true); break; }
+          if ((c >= 10 && c <= 14) || c === 19 || c === 8) { this.tryDoor(fx, fy, true); break; }
         }
       }
     } else P.moving = Math.max(0, P.moving - dt * 4);

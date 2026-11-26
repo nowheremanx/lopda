@@ -288,7 +288,7 @@
     door: function () { sfx("door"); },
     locked: function (k) {
       sfx("err");
-      if (k === 4) say(t("闸门锁着。找开关。", "A shutter. Find the switch."));
+      if (k === 4) say(t("闸门锁着。找开关，走过去就能拉。", "A shutter. Walk into its switch."));
       else say(t("要{c}门卡。", "Needs the {c} card.", { c: T(CARD_NAME[k]) }));
     },
     flip: function () {
@@ -501,7 +501,9 @@
       var i = y * M.w + x; if (!M.seen[i]) continue;
       var c = M.cells[i], px = ox + x * k, py = oy + y * k;
       if (c === 0) g.rect(px, py, k, k, 1);
-      else if (c >= 10 && c <= 14) { g.rect(px, py, k, k, 2); if (c > 10 && !Wd.cards[c - 10]) g.rect(px + 1, py + 1, k - 2, k - 2, 0); }
+      else if (c === 14) { g.rect(px, py, k, k, Wd.cards[4] ? 1 : 2); if (!Wd.cards[4]) for (var s = 0; s < k; s += 2) g.rect(px, py + s, k, 1, 0); }   /* a shutter: stripes */
+      else if (c >= 10 && c <= 13) { g.rect(px, py, k, k, 2); if (c > 10 && !Wd.cards[c - 10]) g.rect(px + 1, py + 1, k - 2, k - 2, 0); }
+      else if (c === 8) g.rect(px, py, k, k, Wd.cards[4] ? 3 : ((Math.floor(game.time * 3) & 1) ? 3 : 0));   /* the switch blinks until thrown */
       else if (c === 19) g.rect(px, py, k, k, (Math.floor(game.time * 3) & 1) ? 3 : 2);
       else g.rect(px, py, k, k, 2);
     }

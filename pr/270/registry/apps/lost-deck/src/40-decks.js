@@ -13,7 +13,7 @@
   var LD = window.LD;
   LD.DECKS = [
     {
-      id: 1, par: 75, face: 0, fog: 0.42, ammo: 30,
+      id: 1, par: 50, face: 0, fog: 0.42, ammo: 30,
       name: { zh: "对接环", en: "Docking Ring" },
       brief: { zh: "曙光七号三天没有回话。你的飞船刚接上对接环。先找到方块门卡，再坐电梯下去。",
                en: "Dawn-7 has been silent for three days. Your ship just docked. Find the square card, then take the lift down." },
@@ -51,8 +51,8 @@
         "#..@..##D###D######D####",
         "#.....................c#",
         "###D##########D#####1###",
-        "#.....#.........#......#",
-        "#.x...D..f...f..#..s...#",
+        "#.....#.........#.....s#",
+        "#.x...D..f...f..#......#",
         "#.....#..k.G.k..#.k..o.#",
         "#.....#.........#......#",
         "####S##..f...x..#..x...#",
@@ -70,7 +70,7 @@
                en: "The crates in the cargo bay stand like a maze. The crane desk is behind the square door; the circle card is locked in the office." },
       goal: { zh: "方块卡→圆形卡→电梯", en: "Square + circle, lift" },
       logs: [
-        { zh: "吊车日志：所有补给已经卸下。警卫机守在这里，别跟它对枪，绕箱子走。", en: "Crane log: all supplies unloaded. A guard watches the bay; don't trade shots with it, use the crates." },
+        { zh: "吊车日志：补给都卸完了。下层还有一台警卫机，别跟它对枪，借控制台挡着。", en: "Crane log: all unloaded. One more guard down here; don't trade shots, use the desk." },
         { zh: "货单：铆钉二十箱，医疗包十箱。收货人：曙光七号全体。", en: "Manifest: rivets, 20 boxes; med kits, 10 boxes. For: all of Dawn-7." }
       ],
       map: [
@@ -97,7 +97,7 @@
       ]
     },
     {
-      id: 4, par: 110, face: 0, fog: 0.5, ammo: 30, scatter: true, slime: true,
+      id: 4, par: 75, face: 0, fog: 0.5, ammo: 30, scatter: true, slime: true,
       name: { zh: "温室", en: "Greenhouse" },
       brief: { zh: "温室的霉长疯了，地上是一层菌毯。三角门卡在育苗室，那里有个会开枪的东西。",
                en: "The greenhouse mould ran wild; the floor is one soft mat. The triangle card is in the nursery, and something there shoots." },
@@ -132,7 +132,7 @@
                en: "The wards are empty; the theatre lights are still on. The square card is in the west ward, the triangle card in the pharmacy." },
       goal: { zh: "方块卡→三角卡→电梯", en: "Square + triangle, lift" },
       logs: [
-        { zh: "医生：孢子钻进了通风管。病人都转走了。药房里还有一盒急救包，藏在墙板后面。", en: "Doctor: spores got into the vents. The patients were moved. There's a med kit behind a wall panel near the pharmacy." }
+        { zh: "医生：孢子钻进了通风管。病人都转走了。西边病房的墙板后面还藏着一盒急救包。", en: "Doctor: spores got into the vents. The patients were moved. There's a med kit behind a wall panel by the west ward." }
       ],
       map: [
         "############################",
@@ -196,7 +196,7 @@
         "##########################",
         "#@...#CCCCCCCCC#....k...H#",
         "#....D.........D.........#",
-        "#....#.C.C.C.C.#..s......#",
+        "#....#.C.C.C.C.#.......s.#",
         "#T...#.........#.........#",
         "######.C.C.C.C.####1######",
         "#u..#.....s....#.........#",
@@ -206,7 +206,7 @@
         "#.......c..........#######",
         "#.###########D####.#.....#",
         "#.#..o..#.......c#.2..a..#",
-        "#.D..s..D...x....#.#..s..E",
+        "#.D..c..D...x....#.#..s..E",
         "#.#.....#.c...c..#.#.....#",
         "#.#######.......##.#######",
         "#....f............f......#",
@@ -214,7 +214,7 @@
       ]
     },
     {
-      id: 8, par: 100, face: 0, fog: 0.4, ammo: 40, scatter: true,
+      id: 8, par: 75, face: 0, fog: 0.4, ammo: 40, scatter: true,
       name: { zh: "通讯阵列", en: "Comms Array" },
       brief: { zh: "通讯阵列的长廊一眼望得到头，哨兵也一样望得到你。借柱子躲着走。",
                en: "You can see the whole length of the comms gallery, and so can the sentries. Move from pillar to pillar." },
@@ -231,7 +231,7 @@
         "####D###########2#####D#######",
         "#.....#......#.......#.......#",
         "#.c...D..f...#..v....#...g...#",
-        "#.....#......#...s...#.......#",
+        "#.....#......#...c...#.......#",
         "##T####..o...#######3#..x....#",
         "#.....#......#.......#.......#",
         "#..f..D......#.......#..c....#",
@@ -253,14 +253,14 @@
         "#...#..x.x..#PP.u.PP#......#",
         "##D##.......####1####x..x..#",
         "#...#####D###.........###D##",
-        "#.a.#.......#......s..#....#",
+        "#.a.#......h#......s..#....#",
         "#...D..g....1.........D..o.#",
-        "#...#.......#..x...x..#....#",
-        "###.#####D###....g....##D###",
+        "#...#.......#.ax...x..#....#",
+        "###.#####D###....c....##D###",
         "###..#......####2####......#",
         "#HS..D..c...#.......#..x...#",
-        "###..#...f..#..xxx..#..g...#",
-        "###########.2...v...D......#",
+        "###..#...f..#..xxx..#..g..h#",
+        "###########.2...v...2......#",
         "#c........#.#.......###3####",
         "#..x...f..D.#.s...s.#......E",
         "#c........#.#.......#..c...#",
@@ -268,7 +268,7 @@
       ]
     },
     {
-      id: 10, par: 110, face: 0, fog: 0.58, ammo: 40, scatter: true,
+      id: 10, par: 80, face: 0, fog: 0.58, ammo: 40, scatter: true,
       name: { zh: "冷冻库", en: "Cryo Vault" },
       brief: { zh: "冷冻舱一排排立着，有几个是空的。通往核心的电梯在中间，两道闸门挡着。",
                en: "Rows of cryo pods, some of them empty. The lift to the core is in the middle, behind two shutters." },
