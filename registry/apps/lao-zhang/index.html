@@ -55,7 +55,8 @@
   #ov .small { font-size: 13px; color: #4a5a32; }
   #ov .best { font-size: 13px; color: #4a5a32; }
   #ov .warn { font-size: 13px; color: #4a5a32; max-width: 290px; }
-  #logo { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  #logo { display: block; flex: none; image-rendering: pixelated; image-rendering: crisp-edges; }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   #ov button { font: inherit; touch-action: manipulation; border: 0; }
   #ov .primary { min-height: 44px; padding: 8px 22px; background: #1f2a14; color: #a3ad7e; font-size: 17px; font-weight: bold; box-shadow: 3px 3px 0 #4a5a32; }
   #ov .primary:active { transform: translate(1px, 1px); box-shadow: 2px 2px 0 #4a5a32; }
@@ -3030,6 +3031,52 @@ GM.iconCanvas = function () {
 
 GM.initArt();
 </script>
+<script data-src="src/25-title-art.js">
+/* 矿工老张: the title picture. */
+var GM = (typeof GM !== "undefined" && GM) || {};
+
+/* the title picture: a 156 x 156 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
+   Old Zhang winds his winch on the ledge while the claw closes on a big nugget in the dark below; the name is
+   written on the sky above. Stored packed, 2 bits a pixel; the letters are lopix12 glyphs (sdk/fonts, OFL). */
+GM.titleArt = (function () {
+  var W = 156, H = 156;
+  var PIC = "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX//9VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVa9VVrlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVluVVVpVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWQP1VVaVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVXAL6pValVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWQfv+pqlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVW6////qlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVaqqqv//VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVb////v/VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVW5UBVALVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVZQBQRXVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVekKkUbVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVaADAFJVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVYEBAVJVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVYFAAVlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVYFABXlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVaKoBf9VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVaQBFv/lVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWRVbv/5VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWUFevq/VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX0F+/qvVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf9b/+qvVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV+uu6uqv1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVb6v666q/1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVa+uv6v6q/1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVW/8Ov//+6r/5VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVaAAHv/wKuv/9VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVqlWkABb8AACr//9VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVa/+r5qju0BpSr//+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVW/qv//6/pwDW27//+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVX6/7taq625Xq////+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVfv+/5a/qm6qv////+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVv+lV1r//blVb////+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV+8FR6v+/bVVb///++VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVW60US++5tvVVuquuq+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWr0QXW/nptVW6qu6q+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWrRkna/mS9VW6q/6q+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVW7Vlnqvrm9VXqq/6q9VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV9eamqav/9Vbqr+6r1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV9eZl6a++tVeqv26r1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVtf7v6a/6tVeq/W6r1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVdr//Wb6vtVf7+W6v9VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVur/6b6/tVf/+V//+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRv+v/bvXdVf/+Vv/+VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRt//mbVXdVf/+Vb//lVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGta/nbVXdVX/+VX//lVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGtV/3bVXdVX/+VW//lVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVP////////1f/+VVv/1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUFVVVVqqqqq6v+VV+v1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVKqqqpqqqqv6/+VX//1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWqqpv///+////////qr//6qVVVVVVVVVVVVVVVVVVVVVVVVVVVVVbVVUVaVVv+VVVf/lVVb5VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVdAAUAaQAbQFAAC4AVVSwAAAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVYFVRValVXBVFVUgVVVUhVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVYVVRVZVVWFFVVVxVVWVhVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVZVVRVVVVWVFVVVxVVWWlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVdWVBVVVVWVVVVV1VVVWpVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVeWVBVVVVXVVVVV1VVVWWVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVeVUFVVVVXVVVVW1VVVXVZVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVeVUFVVVVbVVVVX1VVVXVVlVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVflUFlVVVrVVVVb1VVVrVVpVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVb6kVlVVWvqqqqr6VVWr1VqVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVb6kv6q/q//qq/7+6qq/6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/0////////////////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlr7rv77/q7rqv+/77rvu+qqqqqqqqqqqqqqquqqqqqqqqqqqqqqqSqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrqqqqqqqqqqqqqqqWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrqqqqqqqqqqqqqqqGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr+qqqqqqqqqqqqqpaqqqqqqqqvqqqqquqqqqqqqqqqqqqqqqqqqqr6qqqqqqqqqqqqqpaqqv6qqqqgqqqqqqqqqqqqqqqqqqqwqqqqqqqqqqqqqqqqqqvqqpaqqvqqqqrAqqqqqqqqq+qqqqqqqqrQqqqqqqqqqsAeqqqqqq/qqkqqqqqqqqqq6qqqqqqqq6qqqqqqqqrRqqqqqqqqq0AGqqqqqr/6qpqqqqqqqqqqqqrqqqqqqqqqWqqqqqq/6qqqqqqqqAAWqqqqqv//6hqqqqqqqqqqqqqqqqqqqqqqqqrqqqqqqqqqqqqqqAFGqqqqq////n6qqqqqqqqqqqqqqqqqqqqqqq5ZVqqqqqqqqqqqaAVXlVb//////n//+qqqqqqqqqqqqqqr1VqVVWAaVVVqqqqqVVVVWlV5VW///////X///5qpVVVVWqqqpVVueVVVVeAWlVVVVVVVVVVVVv/VVb//////+f///9VVVVVVVVVVVVVgKVVVVcBSlVVVVVVVVVVVVVVVVv//////+f////lVVapVVVVVVVaAqlVVVdVWlVVVVVVVVVVVVVVVa///////4v////5VVgGVVVVVVVdValVVValeVVVVVVVVVVVVVVVWv///////8/////5VWgGlVVVVVVdGblVVVVv1VVVVVf/lVVVVVVVb////////2/////9VVkaVVVVVVVbqqVVVVVVVVVVVXgBpVVVVVVVv////////7/////+VVaqVVVVVVVW/5VVVVVVVVVVVdABtVVVVVVX////////4f//////VVWpVVVVVVVVVVVVVVVVVVVVVpACupVWpVVv////////kW//////VVVVVValVVVVVVVVVVVVVVVVVkAateVWWVX/////////+W//////VVVVVVqlVVVVVVVVVVVVVVVVWgal5blWmVv/////////T+//////1VVVVVaVVVVVVVVVVVVVVVVVW1qq1blVpVv////////3Rf//////1VVVVVVVVVVVVVVVVVVVVVVVV///6+VVVX////////+tFf//////1VVVVVVVVVVVVVVVVVVVVVVVVaqqqZVVVf////////a8F6//////1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVf///////9f0V6//////1VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV///////9H0qW///////1VVVVVVVVVVVVVVVVVVWVVVVVWlVVVVVW//////1cXwGrn//////6qqqqlVVVqqqqqqpqqqqlVqqqqqlVVVar/////+RcnxAbm//////6qqqqqlVWqq/+qqqqqqqqqqqqqqqqqqqv/////UVeb0AG6//////6qqqqqqqqqrQLqqqqqqqqqqqqqqqqqqqv////RpVr5uUa5//////6rqqqqqqqqqAF6qqqqqqqqqqqqqqqqqqv///+V6q/4u5qu//////6qqqqqqqqqtAV6qqqqqr6qqqqqqqqqqq////6R///+Zb/5//////6qqqqqqqqqsAVuqqqqqteqqqqqqqqqqq////yq////1j/Vf/////6qqqqqqqqqqVVeqqqqq0Gqqqqqqqqqqq////xv////+fraf/////6qqqqqqqqqr6V6qqqqqQBqqqqqqqqqqq////wb/////+rWv/////6qqquqqqqqqv/qqqqqrAFqqqqqqqqqqq////wX/+Vf///67/////6qqqgB6qqqqqqqqqqqrAVqqqqqqqqqqqv///wf/wAAC//6n////6qqqrAAeqqqqqqqqqqqrhVqqqqqqqqqqqv///xf/AAAAP/5l////6qqqtAAbqqqqqqqqqqqq6rqqqqqqqqmqiv///xv0AAAAD/9l////qqqqkABWqqr6qqqqqqqqv+qqqqqqqqppa////x/wAAAAB/9V////qqqrQAFX6qqqqqqqqqqqqqqqqqqqqqppq////R/QAAAAAv/Zv///6qqrAAUXqqqqqqqqqqqqqqqqqqqqqqr2qv///G/AAAAAAf/pf///6qqqgAUbqqqqqqqqqqqqqqqqr+qqqqkpqv///G8AAAAAAL/6v///6qqq0BWuqqqqqqqqqqqqqqqqquqq+ub6qv///HwAAAAAAL/5H///+qqquar6qqqqqqqqqqqqqqqq6uqu/5+pqv///HgAAAAABb/0T///5qqqr/+qqqqqqqqqqqqqqqqqququW3qqqv///HQAAAAAFX/4n///6qqqqqqqqqqqqqqqqqq/6qqqq6qulu/qqr///yQAAAAAEX/ev///6qqqqqqqqqqqqqqqqqqv6qqqqqq6qqr6qr///2gAAAAAFX+L////qqqqqqqqqqqqqqq6qqqr6qqqqqq6aqr6qq////0AAAAAFW9pf//+qqqqqqqqqqqqqrQ6qqqqqqqqqqr6qr/6qq////0AAAAAVV1p///6qqqqqqqqqqqqqpBuqqqqqqqqqqrpqr/qqq///+QAAAABVXmX///6qqqqqqqqqqqqqqleqqqqqqqqqqrqqq/qqqv///kAAAFVBfZf///q+qqqqqqqqqqqqqv6qqqqqqqqqqumqqvqqqv///0AABVFBuV///+r+qqqqqqqqqqqqqqqqqqqqqqqqqumqv+qqqr///1AAVUBW6X///6q+qqqqqqqqqqqqqqqqqqqqqqqqq+Wqv+qqqr///9VVVQBXlf///qqqqqqqqqqqqqqqqqqqqqqqqqqqq6Wq/+qqqr///9VVVQFeV///+qqqqqqqqqqqqqqqqqqq///+qqqqv+qq/6qr/7////5VVVWtX///+r//////+qqqqv//qqqq/////////6uqr//////////VaquWv////////////////////////////////5aqr//////////////////////+Va///////////////////////5av///////////////////////kAW///////////////+////7//+qv///////////////////+//+UAav//////////////6r////////////////////////////6//9RQav/////+v///////6v/////////////+r/////////////7//9QFar/////6q///6r//+//////////////+q////////////7///9kGq//////6r///qr/////////////////6r////////////////0BauG///+/+r///qr/////////////////6r6///////////////0WqoG///6vvr///6////////////////////6///////////////5aq0a///6+r////////////////////////////////////////////1r////+q//////////9Vf//////////////////////////////////////r/////////+VVV////6////////////////////////////////////qv/////9VVVv///6//////////////////v////////////////9AFv////5VVVr//////////////+v/////+P////////////////8AAb////6VVWq//////////////6v/////4AAB//////////////wAAW////6qVaq//////////////+///////YAAv/////////////AEBW////qlrqqv////////1f///////////gAAL////////////9BUBW////qVrqq9b///////QL///////////gABb////////////9AAFX////qWq6rUC//////9AH///////////4AFv////////////+VAVb////6qqqtAGv/////0BG///////////+QG/////////////+VAQf////+qqu+Rav/////0BW////////////gb//////////////VVRv////////+Vqv/////5VX////////////0f//////+V//////1VW//////////qq///////1f////////////////////4Bf//////////////////////////////////Vf/////////////gFf/////////////////////////////////9Vb/////////////gW//////////////////////////////////1Vq/////////////+r//////////////////////////////////laqv//////////////////////////";
+  var GLYPH = {" ":"6:AAAAAAAAAAAAAA==","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","O":"8:AAA4RIKCgoKCRDgAAA==","T":"8:AAD+EBAQEBAQEBAAAA==","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","工":"12:AAf8BABABABABABABABABA/+AAA=","张":"12:AA5EJEJI5QhAn+5QJIJIJUxiAAA=","矿":"12:AA8IJ+JARAdA1AVAVAVAdACAAAA=","老":"12:AACEfoCQCg/+CAME0YHgECD+AAA=","金":"12:AABACgMYwGP4BABAf8JIFQ/+AAA=","钩":"12:AARAd+iC8iQiQi9KRKT2YCQMAAA="};
+  function glyph(ch) {
+    var s = GLYPH[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [];
+    for (var y = 0; y < 14; y++) { var r = []; for (var x = 0; x < w; x++) { var i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
+    /* drop the empty columns on both sides: the title is set tight */
+    var l = 0, rr = w - 1, col = function (x) { for (var y = 0; y < 14; y++) if (rows[y][x]) return true; return false; };
+    while (l < rr && !col(l)) l++; while (rr > l && !col(rr)) rr--;
+    return { w: rr - l + 1, rows: rows.map(function (r) { return r.slice(l, rr + 1); }) };
+  }
+  /* a line of glyphs at scale s, tone t, with a shadow of tone sh one pixel down and right */
+  function text(px, str, x, y, s, gap, t, sh) {
+    var gs = str.split("").map(function (ch) { return ch === " " ? { w: 3, rows: [] } : glyph(ch); });
+    [[1, sh], [0, t]].forEach(function (pass) {
+      var cx = x + pass[0];
+      gs.forEach(function (g) {
+        for (var j = 0; j < g.rows.length; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i])
+          for (var a = 0; a < s; a++) for (var b = 0; b < s; b++) {
+            var X = cx + i * s + a, Y = y + pass[0] + j * s + b;
+            if (X >= 0 && Y >= 0 && X < W && Y < H) px[Y * W + X] = pass[1];
+          }
+        cx += g.w * s + gap;
+      });
+    });
+  }
+  function draw(lang) {
+    var px = new Uint8Array(W * H), b = atob(PIC);
+    for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
+    var en = lang === "en";
+    text(px, en ? "GOLD DIG" : "矿工老张", 4, 4, 2, en ? 1 : 3, 3, 0);
+    text(px, en ? "HOOK THE GOLD" : "钩金子", 5, 33, 1, en ? 1 : 3, 3, 0);
+    return px;
+  }
+  return { W: W, H: H, draw: draw };
+})();
+</script>
 <script data-src="src/30-ui.js">
 /* 矿工老张: DOM screens, the chin buttons, touch, sound and the page loop. */
 var GM = (typeof GM !== "undefined" && GM) || {};
@@ -3064,6 +3111,7 @@ GM.ui = (function () {
     cv.addEventListener("pointerdown", onCanvas);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
+    addEventListener("resize", function () { if (lastScreen === "title") paintTitle(); });
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
@@ -3138,9 +3186,8 @@ GM.ui = (function () {
         ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
         : T.menuNoRun;
       return shell("title center",
-        '<canvas id="logo" width="16" height="16" aria-hidden="true"></canvas>' +
-        "<h1>" + esc(T.title) + "</h1>" +
-        '<p class="sub">' + esc(T.sub) + "</p>" +
+        '<canvas id="logo" aria-hidden="true"></canvas>' +
+        '<h1 class="vh">' + esc(T.title) + "</h1>" +
         '<div class="menu">' +
           row(state.menuCursor === 0, "continue", T.menuContinue, runSub, !state.run) +
           row(state.menuCursor === 1, "new", T.menuNew, T.menuNewSub, false) +
@@ -3257,13 +3304,7 @@ GM.ui = (function () {
   function post(screen) {
     var i, c, ctx2, spr;
     if (screen === "title") {
-      var logo = $("logo");
-      if (!logo) return;
-      logo.style.width = "64px";
-      logo.style.height = "64px";
-      var lctx = logo.getContext("2d");
-      lctx.imageSmoothingEnabled = false;
-      lctx.drawImage(GM.iconCanvas(), 0, 0);
+      paintTitle();
       return;
     }
     if (screen === "shop") {
@@ -3296,6 +3337,35 @@ GM.ui = (function () {
         ctx2.drawImage(src, (32 - iw) / 2, (32 - ih) / 2, iw, ih);
       }
     }
+  }
+
+  /* The title picture (the name is written in it), as large as the room above the menu allows, at most 3x, in
+     whole device pixels so every pixel stays square; on a screen too short for 1x it shrinks rather than push the
+     menu off. Written with putImageData only; the pixels for one size are kept, as every cursor move redraws. */
+  var titleImg = null;
+  function paintTitle() {
+    var logo = $("logo");
+    if (!logo || !ov) return;
+    var A = GM.titleArt, W = A.W, H = A.H, body = logo.parentNode, kids = body.children, used = 20, n = 0, i;
+    for (i = 0; i < kids.length; i++) if (kids[i] !== logo && kids[i].offsetHeight) { used += kids[i].offsetHeight; n++; }
+    used += n * 4 + (ov.lastElementChild && ov.lastElementChild !== body ? ov.lastElementChild.offsetHeight : 0);
+    var room = ov.clientHeight - used;
+    var d = window.devicePixelRatio || 1;
+    var fit = Math.max(0.25, Math.min((ov.clientWidth - 24) / W, room / H, 3)) * d, k = Math.max(1, Math.floor(fit));
+    logo.style.width = (W * (fit < 1 ? fit : k) / d) + "px";
+    logo.style.height = (H * (fit < 1 ? fit : k) / d) + "px";
+    if (!titleImg || titleImg.width !== W * k) {
+      var px = A.draw(LANG), tones = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
+      titleImg = new ImageData(W * k, H * k);
+      var o = titleImg.data;
+      for (var y = 0; y < H * k; y++) for (var x = 0; x < W * k; x++) {
+        var t = tones[px[((y / k) | 0) * W + ((x / k) | 0)]], j = (y * W * k + x) * 4;
+        o[j] = t[0]; o[j + 1] = t[1]; o[j + 2] = t[2]; o[j + 3] = 255;
+      }
+    }
+    logo.width = W * k;
+    logo.height = H * k;
+    logo.getContext("2d").putImageData(titleImg, 0, 0);
   }
 
   function enter(screen) {
