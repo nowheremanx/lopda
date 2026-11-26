@@ -4,16 +4,16 @@
   "name": "滚珠迷宫",
   "glyph": "珠",
   "category": "game",
-  "version": "1.2.0",
-  "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
+  "version": "2.0.0",
+  "description": "倾斜机身让小钢珠滚过花园、地窖和钟楼十二关：捡宝石、点亮存档点、绕开慢吞吞的甲虫，别掉进洞。也能用方向键推。",
   "i18n": {
     "zh": {
       "name": "滚珠迷宫",
-      "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。"
+      "description": "倾斜机身让小钢珠滚过花园、地窖和钟楼十二关：捡宝石、点亮存档点、绕开慢吞吞的甲虫，别掉进洞。也能用方向键推。"
     },
     "en": {
       "name": "Marble",
-      "description": "Tilt to roll the ball home past the holes, or push it with the D-pad."
+      "description": "Tilt to roll the ball through twelve levels of garden, cellar and clock tower: pick up gems, light checkpoints, outrun slow beetles, mind the holes. Or push it with the D-pad."
     }
   },
   "author": "Haowei Wu",
