@@ -27,7 +27,7 @@ LP.renderHome();
     S.refs.rolls=db.doc(base+"/rolls").collection("items");
     S.refs.camera=db.doc(base+"/camera");
     S.refs.settings=db.doc(base+"/settings");
-    S.refs.home=db.doc(base+"/home");   /* the order of the home screen's tiles (core.js, homeorder.js) */
+    S.refs.home=db.doc(base+"/home-order");   /* the order of the home screen's tiles (core.js, homeorder.js) */
     S.refs.carts=db.doc(base+"/carts").collection("items");
     S.refs.roms=db.doc(base+"/roms").collection("items");
     S.refs.cartsave=db.doc(base+"/cartsave").collection("items");

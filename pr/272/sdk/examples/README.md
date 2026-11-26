@@ -1,7 +1,7 @@
 # Examples / 示例
 
 Three small apps that show one part of the `PAD` API each, with nothing else in the way. They follow every store
-rule (`node tools/check-app.mjs sdk/examples/*` passes) but are not in the store: players do not need them, developers
+rule (`node tools/check-app.mjs sdk/examples/*/` passes) but are not in the store: players do not need them, developers
 and their AI agents do. Copy one, or point your agent at it.
 
 三个小 app，每个只示范 `PAD` 的一部分。它们守商店的全部规矩（检查能过），但不在商店里：玩家用不上，开发者和

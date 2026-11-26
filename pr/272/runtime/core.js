@@ -247,7 +247,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.5.0+08f87d9";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.5.0+9cd534b";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -496,17 +496,17 @@ function dismissAddHomeTip(){
   });
 }
 /* ---------- the order of the tiles (runtime/homeorder.js, decisions.md section 71) ----------
-   data/users/local/home keeps the order once it has been written: new built-ins and new installs go last,
+   data/users/local/home-order keeps the order once it has been written: new built-ins and new installs go last,
    an uninstall takes away only its own tile. It is written only after both the document and the installed apps
    have been read, so a slow read never stores half a home screen. */
 var HO=window.LopdaHomeOrder;
-var H={stored:null, loaded:false, appsKnown:false, restoring:false};
+var H={stored:null, loaded:false, appsKnown:false, restoring:false, newer:false};
 function homeBuiltins(){ return LP.builtins.filter(function(b){ return b.icon; }); }
 function homeArrange(){
   return HO.arrange(H.stored, homeBuiltins().map(function(b){ return b.id; }), S.apps, H.appsKnown);
 }
 function syncHome(){
-  if(!H.loaded || !H.appsKnown || H.restoring || !S.refs.home) return;
+  if(!H.loaded || !H.appsKnown || H.restoring || H.newer || !S.refs.home) return;
   var r=homeArrange();
   if(!r.changed) return;
   H.stored=r.order;
@@ -514,7 +514,8 @@ function syncHome(){
 }
 function loadHome(){
   S.refs.home.get().then(function(sn){
-    H.stored=HO.read(sn.exists ? own(sn.data()) : null);
+    var d=sn.exists ? own(sn.data()) : null;
+    H.stored=HO.read(d); H.newer=HO.newer(d);
     H.loaded=true;
     syncHome();
     if(!$("v-home").hidden) renderHome();
