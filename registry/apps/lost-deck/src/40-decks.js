@@ -125,7 +125,37 @@
       ]
     },
     {
-      id: 5, par: 150, face: 0, fog: 0.5, dark: 1.1, ammo: 35, scatter: true,
+      id: 5, par: 110, face: 0, fog: 0.45, ammo: 35, scatter: true,
+      name: { zh: "医疗舱", en: "Medbay" },
+      brief: { zh: "医疗舱的病房空了，手术室的灯还亮着。方块门卡在西边病房，三角门卡在药房。",
+               en: "The wards are empty; the theatre lights are still on. The square card is in the west ward, the triangle card in the pharmacy." },
+      goal: { zh: "方块门卡 → 三角门卡 → 电梯", en: "Square card, triangle card, lift" },
+      logs: [
+        { zh: "医生：孢子钻进了通风管。病人都转走了。药房里还有一盒急救包，藏在墙板后面。", en: "Doctor: spores got into the vents. The patients were moved. There's a med kit behind a wall panel near the pharmacy." }
+      ],
+      map: [
+        "############################",
+        "#@..#W..W#.....#W..W#..k...#",
+        "#...D....D.....D....D......#",
+        "#...#.c..#..h..#..f.#..f.A.#",
+        "#TD###..####D####..###D#####",
+        "#.....#....................#",
+        "#.u.k.#.i....i....i....i...#",
+        "#.....D....f.......c.......#",
+        "#.k.h.#.i....i....i....i...#",
+        "#######......g.............#",
+        "#..f..####1#################",
+        "#.....#........#.....#.....#",
+        "#.....D.c...k..D..c..#.x.x.#",
+        "#.....#........#.....D.....#",
+        "###S###.f..s...##3####..g..#",
+        "#.....#......c.#.....#..v..#",
+        "#..H..##########.....#..a..#",
+        "##################E#########"
+      ]
+    },
+    {
+      id: 6, par: 150, face: 0, fog: 0.5, dark: 1.1, ammo: 35, scatter: true,
       name: { zh: "主控室", en: "Control" },
       brief: { zh: "主控层断电了，只剩你的手电。终端上也许有人留了话。哨兵在黑暗里等着。",
                en: "Control has no power; you have only your torch. Someone may have left word on the terminals. Sentries wait in the dark." },
@@ -156,7 +186,7 @@
       ]
     },
     {
-      id: 6, par: 150, face: 0, fog: 0.45, ammo: 40, scatter: true,
+      id: 7, par: 150, face: 0, fog: 0.45, ammo: 40, scatter: true,
       name: { zh: "反应堆", en: "Reactor" },
       brief: { zh: "反应堆层，到处是燃料罐，一枪就炸。警卫机在这里巡逻。三张门卡都要拿到。",
                en: "The reactor deck is full of fuel canisters; one shot and they burst. Guards patrol here. You need all three cards." },
@@ -184,7 +214,7 @@
       ]
     },
     {
-      id: 7, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
+      id: 8, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
       name: { zh: "核心", en: "The Core" },
       brief: { zh: "核心就在下面。四个电源节点给它供护盾，通风口里还会爬出东西。先断电，再关掉它。",
                en: "The core is below. Four power nodes feed its shield, and things crawl out of the vents. Cut the power, then shut it down." },
