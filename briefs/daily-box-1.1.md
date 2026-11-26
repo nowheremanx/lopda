@@ -55,4 +55,4 @@ Four tones only, no emoji, ≤ 512 KB, sdk/UI.md 44 px targets on touch.
   before committing.
 - Lay out the title screen and the calendar for 331 x 359 first (smallest screen), then check 390 x 500.
 - Delete this `briefs/` file in the last commit.
-- Commit after each goal (1-4). Do not push; the foreman pushes.
+- Commit after each goal (1-4). Only the Mac dispatcher pushes, to this branch only (never main).
