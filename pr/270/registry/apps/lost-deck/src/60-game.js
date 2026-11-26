@@ -286,7 +286,18 @@
   };
   var hooks = {
     door: function () { sfx("door"); },
-    locked: function (k) { sfx("err"); say(t("要{c}门卡。", "Needs the {c} card.", { c: T(CARD_NAME[k]) })); },
+    locked: function (k) {
+      sfx("err");
+      if (k === 4) say(t("闸门锁着。找开关。", "A shutter. Find the switch."));
+      else say(t("要{c}门卡。", "Needs the {c} card.", { c: T(CARD_NAME[k]) }));
+    },
+    flip: function () {
+      sfx("lift"); game.shake(1, 0.3);
+      var D = LD.DECKS[deckIdx];
+      world.M.lit = true;
+      if (D.dark) { say(t("电力恢复！灯亮了。", "Power is back! Lights on."), 2.6); game.ambience("wind", 0.18); }
+      else say(t("开关拉下，闸门升起。", "Switch thrown: shutters up."), 2.6);
+    },
     exit: function () { if (!pending) { pending = "exit"; endT = 0; world.safe = true; sfx("lift"); } },
     secret: function (n, m) { sfx("win"); say(t("暗格 {n}/{m}", "Secret {n}/{m}", { n: n, m: m }), 2.5); },
     terminal: function (i) {
@@ -327,7 +338,7 @@
       game.music(D.boss ? LD.MUSIC.boss : LD.MUSIC.deck);
       game.ambience("wind", D.dark ? 0.35 : 0.18);
       if (deckIdx === 0) game.after(2.4, function () { tip("move", t("上下走，左右转，A开火。", "UP/DOWN walk, LEFT/RIGHT turn, A fires.")); });
-      if (D.dark) game.after(2.4, function () { tip("dark", t("停电了，只有手电。", "Power is out. Only your torch.")); });
+      if (D.dark) game.after(2.4, function () { if (!world.M.lit) tip("dark", t("停电了，只有手电。找电闸。", "Power is out. Find the switch.")); });
     },
     update: function (dt) {
       if (!world) return;
@@ -359,7 +370,7 @@
       if (!world) return;
       var D = LD.DECKS[deckIdx], P = world.P;
       var bob = Math.sin(P.bob) * 1.5 * P.moving;
-      var view = { x: P.x, y: P.y, a: P.a, bob: bob * 0.6, fog: D.fog || 0.42, dark: D.dark || 0, time: world.time, light: 0 };
+      var view = { x: P.x, y: P.y, a: P.a, bob: bob * 0.6, fog: D.fog || 0.42, dark: D.dark && !world.M.lit ? D.dark : 0, time: world.time, light: 0 };
       if (P.kick > 0.08 && P.gun !== "wrench") view.light = 0.6;
       R.render(world.M, view, world.sprites());
       var fb = R.fb;
@@ -490,8 +501,8 @@
       var i = y * M.w + x; if (!M.seen[i]) continue;
       var c = M.cells[i], px = ox + x * k, py = oy + y * k;
       if (c === 0) g.rect(px, py, k, k, 1);
-      else if (c >= 10 && c <= 13) { g.rect(px, py, k, k, 2); if (c > 10 && !Wd.cards[c - 10]) g.rect(px + 1, py + 1, k - 2, k - 2, 0); }
-      else if (c === 14) g.rect(px, py, k, k, (Math.floor(game.time * 3) & 1) ? 3 : 2);
+      else if (c >= 10 && c <= 14) { g.rect(px, py, k, k, 2); if (c > 10 && !Wd.cards[c - 10]) g.rect(px + 1, py + 1, k - 2, k - 2, 0); }
+      else if (c === 19) g.rect(px, py, k, k, (Math.floor(game.time * 3) & 1) ? 3 : 2);
       else g.rect(px, py, k, k, 2);
     }
     /* floor cells next to seen walls count as seen, so rooms fill in as you look at them */

@@ -202,7 +202,22 @@ var LD = window.LD = {};
     "0333333333333330",
     "0000000000000000"
   ]);
-  LD.TEX = { 7: crateWall, 1: panel, 2: pipes, 3: comp, 4: win, 5: mould, 6: [term, term2], 10: door, 11: lockDoor(1), 12: lockDoor(2), 13: lockDoor(3), 14: lift, 15: panel, jamb: jamb };
+  /* a shutter: heavy slats, opened only by a switch somewhere on the deck */
+  var shutter = blank(16, 16, 2);
+  for (var hy2 = 0; hy2 < 16; hy2++) for (var hx2 = 0; hx2 < 16; hx2++) {
+    var r4 = hy2 % 4, tt = r4 === 0 ? 0 : r4 === 1 ? 3 : 2;
+    if (hx2 === 0 || hx2 === 15) tt = 0;
+    if (hy2 >= 6 && hy2 <= 9 && hx2 >= 5 && hx2 <= 10) tt = (hy2 === 6 || hy2 === 9 || hx2 === 5 || hx2 === 10) ? 0 : (hx2 + hy2) & 1 ? 0 : 3;
+    set(shutter, hx2, hy2, tt);
+  }
+  /* the switch: a lever on a panel, down when off, up when thrown */
+  var switchOff = copy(panel), switchOn;
+  stamp(switchOff, ["0000000000", "0111111110", "0122222210", "0122222210", "0122222210", "0122222210", "0122222210", "0111111110", "0000000000"], 3, 3);
+  switchOn = copy(switchOff);
+  stamp(switchOff, ["00", "33", "33", "00"], 7, 7);
+  stamp(switchOn, ["00", "33", "33", "00"], 7, 3);
+  stamp(switchOff, ["0", "3"], 5, 10); stamp(switchOn, ["3", "0"], 5, 10);
+  LD.TEX = { 7: crateWall, 1: panel, 2: pipes, 3: comp, 4: win, 5: mould, 6: [term, term2], 8: [switchOff, switchOn], 10: door, 11: lockDoor(1), 12: lockDoor(2), 13: lockDoor(3), 14: shutter, 18: panel, 19: lift, jamb: jamb };
 
   /* ---------------- floor and ceiling (16 x 16) ---------------- */
   var floor = blank(16, 16, 2);

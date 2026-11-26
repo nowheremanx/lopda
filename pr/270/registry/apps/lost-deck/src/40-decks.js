@@ -1,6 +1,7 @@
 /* Lost Deck: the decks. Each map is drawn in characters:
    walls  # panel  P pipes  C computers  W window  M mould  K crates  T terminal (B reads it)  S loose panel (a secret)
-   doors  D door  1 2 3 doors that need the square, circle or triangle card  E the lift (the way out)
+          X switch (B throws it: shutters open, and on a dark deck the lights come back)
+   doors  D door  1 2 3 doors that need the square, circle or triangle card  = a shutter (X opens it)  E the lift (the way out)
    floor  .  ~ mould on the floor
    things @ you  c crawler  f spore  s sentry  g guard  n power node  B the core  z vent
           a A rivets  h H med kits  u o v the square, circle and triangle cards  G scatter gun
@@ -155,7 +156,34 @@
       ]
     },
     {
-      id: 6, par: 150, face: 0, fog: 0.5, dark: 1.1, ammo: 35, scatter: true,
+      id: 6, par: 160, face: 0, fog: 0.5, ammo: 35, scatter: true, slime: true,
+      name: { zh: "水循环", en: "Water Plant" },
+      brief: { zh: "水循环舱的管道漏了，菌毯一路长到门口。电梯前面落了闸门，开关在方块门后面。",
+               en: "The water plant's pipes leak and the mat grows to the doors. A shutter blocks the lift; its switch is behind the square door." },
+      goal: { zh: "方块卡→开关→电梯", en: "Square card, switch, lift" },
+      logs: [],
+      map: [
+        "############################",
+        "#@..#PPPPPPPPPP#~~~~~~~f~~~#",
+        "#...D~~~~~~~~~~D~~P~~~~P~~~#",
+        "#...#~~P~~P~~~~#~~P~~c~P~~~#",
+        "##=##~~P~~P~f~~#~~PPPP~P~~~#",
+        "#.h.#~~~~~~~~~~#~~~~~~~P~u~#",
+        "#.a.#PPPP~PPPPP#~~~f~~~~~~~#",
+        "#####.....c....#############",
+        "#~~~#.k..k..k..#.....s.....#",
+        "#~f~D....g.....1....x......X",
+        "#~~~#..........#.....c.....#",
+        "#~~~#####=######PPPPPPPPPPP#",
+        "#~~~#....f.....#############",
+        "#~~a#.x.....x..#############",
+        "#~~~#..c....c..#############",
+        "#~~~#.l........#############",
+        "#########E##################"
+      ]
+    },
+    {
+      id: 7, par: 150, face: 0, fog: 0.5, dark: 1.1, ammo: 35, scatter: true,
       name: { zh: "主控室", en: "Control" },
       brief: { zh: "主控层断电了，只剩你的手电。终端上也许有人留了话。哨兵在黑暗里等着。",
                en: "Control has no power; you have only your torch. Someone may have left word on the terminals. Sentries wait in the dark." },
@@ -172,7 +200,7 @@
         "#T...#.........#.........#",
         "######.C.C.C.C.####1######",
         "#u..#.....s....#.........#",
-        "#...D..C.C.C.C.#..c...c..#",
+        "#...D..C.C.C.C.#..c...c..X",
         "#.h.#..........#.........#",
         "#####T##########.k..g..k.#",
         "#.......c..........#######",
@@ -186,7 +214,33 @@
       ]
     },
     {
-      id: 7, par: 150, face: 0, fog: 0.45, ammo: 40, scatter: true,
+      id: 8, par: 100, face: 0, fog: 0.4, ammo: 40, scatter: true,
+      name: { zh: "通讯阵列", en: "Comms Array" },
+      brief: { zh: "通讯阵列的长廊一眼望得到头，哨兵也一样望得到你。借柱子躲着走。",
+               en: "You can see the whole length of the comms gallery, and so can the sentries. Move from pillar to pillar." },
+      goal: { zh: "圆形卡→三角卡→电梯", en: "Circle + triangle, lift" },
+      logs: [
+        { zh: "通讯员：求救信号发出去了，可是核心把天线转向了深空。它在跟谁说话？", en: "Comms officer: the distress call went out, but the core turned the dish to deep space. Who is it talking to?" }
+      ],
+      map: [
+        "##############################",
+        "#WWWWWWW#WWWWWWWWWWWW#WWWWWWW#",
+        "#@......#..i...s...i.#......s#",
+        "#.......D............D.......#",
+        "#..k....#..i...g...i.#....k..#",
+        "####D###########2#####D#######",
+        "#.....#......#.......#.......#",
+        "#.c...D..f...#..v....#...g...#",
+        "#.....#......#...s...#.......#",
+        "##T####..o...#######3#..x....#",
+        "#.....#......#.......#.......#",
+        "#..f..D......#.......#..c....#",
+        "#..a..#..h...#.......#..H....#",
+        "#################E############"
+      ]
+    },
+    {
+      id: 9, par: 150, face: 0, fog: 0.45, ammo: 40, scatter: true,
       name: { zh: "反应堆", en: "Reactor" },
       brief: { zh: "反应堆层，到处是燃料罐，一枪就炸。警卫机在这里巡逻。三张门卡都要拿到。",
                en: "The reactor deck is full of fuel canisters; one shot and they burst. Guards patrol here. You need all three cards." },
@@ -214,7 +268,33 @@
       ]
     },
     {
-      id: 8, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
+      id: 10, par: 110, face: 0, fog: 0.58, ammo: 40, scatter: true,
+      name: { zh: "冷冻库", en: "Cryo Vault" },
+      brief: { zh: "冷冻舱一排排立着，有几个是空的。通往核心的电梯在中间，两道闸门挡着。",
+               en: "Rows of cryo pods, some of them empty. The lift to the core is in the middle, behind two shutters." },
+      goal: { zh: "方块卡→开关→电梯", en: "Square card, switch, lift" },
+      logs: [],
+      map: [
+        "##############E###########",
+        "#@.#i.i.i.i#.....#i.i.i.h#",
+        "#..D.......=.....=.......#",
+        "#..#i.i.i.i#..c..#i.i.i.i#",
+        "##.###D############D######",
+        "#.......c.........c......#",
+        "#.#####.#####.###.#####..#",
+        "#.#cc.#.#...#.#H#.#..f#..#",
+        "#.#...D.#.u.#.#.#.#...D..#",
+        "#.#####.##D##.#S#.#####..#",
+        "#........g..........#..c.#",
+        "###1#######.#######.#..x.#",
+        "#.....#....a..#.....#....#",
+        "X.c.c.#...s...D..f..#.HA.#",
+        "#.....#.......#.....#....#",
+        "##########################"
+      ]
+    },
+    {
+      id: 11, par: 120, face: 270, fog: 0.38, ammo: 40, scatter: true, boss: true,
       name: { zh: "核心", en: "The Core" },
       brief: { zh: "核心就在下面。四个电源节点给它供护盾，通风口里还会爬出东西。先断电，再关掉它。",
                en: "The core is below. Four power nodes feed its shield, and things crawl out of the vents. Cut the power, then shut it down." },
