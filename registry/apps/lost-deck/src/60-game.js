@@ -260,11 +260,11 @@
   var GUN_NAME = { wrench: { zh: "扳手", en: "Wrench" }, rivet: { zh: "铆钉枪", en: "Rivet gun" }, scatter: { zh: "散钉枪", en: "Scatter" } };
   var CARD_NAME = [null, { zh: "方块", en: "square" }, { zh: "圆形", en: "circle" }, { zh: "三角", en: "triangle" }];
   var FOE_TIP = {
-    crawler: { zh: "爬行机：贴身咬人，一钉就倒。", en: "Crawler: bites up close. One rivet." },
-    spore: { zh: "孢子：靠近会炸，远远打掉它。", en: "Spore: bursts near you. Pop it from afar." },
-    sentry: { zh: "哨兵：不动，打光弹。躲在墙后等它停火。", en: "Sentry: fixed, fires bolts. Duck behind walls." },
-    guard: { zh: "警卫机：三连发，会躲。散钉枪近打。", en: "Guard: three-shot bursts. Scatter it close." },
-    node: { zh: "电源节点：打掉它们，核心的护盾才会消失。", en: "Power nodes: break them to drop the shield." }
+    crawler: { zh: "爬行机：贴身咬，一钉倒。", en: "Crawler: bites. One rivet does it." },
+    spore: { zh: "孢子：靠近会炸，远打。", en: "Spore: bursts near you. Shoot early." },
+    sentry: { zh: "哨兵：不动，打光弹，可躲。", en: "Sentry: fixed. Sidestep its bolts." },
+    guard: { zh: "警卫机：三连发，绕着打。", en: "Guard: bursts of three. Use cover." },
+    node: { zh: "节点：全打掉，盾就没了。", en: "Nodes: break all four to drop the shield." }
   };
   var hooks = {
     door: function () { sfx("door"); },
@@ -283,7 +283,7 @@
     clang: function () { sfx("clang"); },
     hit: function () { sfx("hit"); },
     kill: function (e) { sfx("kill"); },
-    ping: function () { sfx("ping"); tip("shield", t("核心有护盾。先打电源节点。", "The core is shielded. Break the nodes.")); },
+    ping: function () { sfx("ping"); tip("shield", t("核心有盾，先打节点。", "Shielded. Break the nodes first.")); },
     boom: function (x, y, gas) { sfx(gas ? "puff" : "boom"); if (!gas) game.shake(2, 0.25); },
     hurt: function (d) { sfx("hurt"); if (d >= 12) game.shake(2, 0.2); },
     dead: function () { pending = "dead"; endT = 0; game.musicStop(); },
@@ -308,8 +308,8 @@
       bigMsg = t("第{n}层 {name}", "DECK {n} {name}", { n: deckIdx + 1, name: dname(D) }); bigT = 2.2;
       game.music(D.boss ? LD.MUSIC.boss : LD.MUSIC.deck);
       game.ambience("wind", D.dark ? 0.35 : 0.18);
-      if (deckIdx === 0) game.after(2.4, function () { tip("move", t("上下走，左右转。A 开火。", "UP/DOWN walk, LEFT/RIGHT turn. A fires.")); });
-      if (D.dark) game.after(2.4, function () { tip("dark", t("停电了。只有手电照亮前方。", "Power is out. Only your torch lights the way.")); });
+      if (deckIdx === 0) game.after(2.4, function () { tip("move", t("上下走，左右转，A开火。", "UP/DOWN walk, LEFT/RIGHT turn, A fires.")); });
+      if (D.dark) game.after(2.4, function () { tip("dark", t("停电了，只有手电。", "Power is out. Only your torch.")); });
     },
     update: function (dt) {
       if (!world) return;
@@ -325,8 +325,8 @@
       input.swap = game.pressed("select");
       world.update(dt, input);
       var P = world.P;
-      if (P.hp > 0 && P.hp <= 25) tip("low", t("生命低。找绿十字医疗包。", "Low health. Look for med kits."));
-      if (deckIdx === 0 && world.time > 12) tip("use", t("B 读终端、推松动的墙板。", "B reads terminals and pushes loose panels."));
+      if (P.hp > 0 && P.hp <= 25) tip("low", t("生命低，找医疗包。", "Low health. Find a med kit."));
+      if (deckIdx === 0 && world.time > 12) tip("use", t("B 读终端，推松动墙板。", "B reads terminals, pushes loose panels."));
     },
     finish: function () {
       if (pending === "exit" && endT > 1.0) { pending = null; finishDeck(); }
@@ -381,8 +381,11 @@
     }
     stampFb(fb, s, x0, y0, k);
     /* a small sight in the middle: shots go exactly there */
-    var cy = VH >> 1;
-    fb[cy * W + 80] = 3; fb[(cy - 3) * W + 80] = 0; fb[(cy + 3) * W + 80] = 0; fb[cy * W + 77] = 0; fb[cy * W + 83] = 0;
+    var cy = VH >> 1, ticks = [[-3, 0], [-2, 0], [2, 0], [3, 0], [0, -3], [0, -2], [0, 2], [0, 3]];
+    for (var i = 0; i < ticks.length; i++) {
+      var j = (cy + ticks[i][1]) * W + 80 + ticks[i][0];
+      fb[j] = fb[j] < 2 ? 3 : 0;   /* light on dark walls, dark on light ones */
+    }
   }
   function hurtOverlay(fb, P) {
     var k = P.hurt / 0.35, edge = Math.round(4 + 14 * k), side = P.hurtDir;

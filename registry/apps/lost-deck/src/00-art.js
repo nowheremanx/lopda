@@ -183,7 +183,26 @@ var LD = window.LD = {};
     "0000000000000000"
   ]);
 
-  LD.TEX = { 1: panel, 2: pipes, 3: comp, 4: win, 5: mould, 6: [term, term2], 10: door, 11: lockDoor(1), 12: lockDoor(2), 13: lockDoor(3), 14: lift, 15: panel, jamb: jamb };
+  /* a crate face for stacked cargo */
+  var crateWall = grid([
+    "0000000000000000",
+    "0333333333333330",
+    "0321111111111230",
+    "0312111111112130",
+    "0311211111121130",
+    "0311121111211130",
+    "0333333333333330",
+    "0111112112111110",
+    "0111121111211110",
+    "0333333333333330",
+    "0311121111211130",
+    "0311211111121130",
+    "0312111111112130",
+    "0321111111111230",
+    "0333333333333330",
+    "0000000000000000"
+  ]);
+  LD.TEX = { 7: crateWall, 1: panel, 2: pipes, 3: comp, 4: win, 5: mould, 6: [term, term2], 10: door, 11: lockDoor(1), 12: lockDoor(2), 13: lockDoor(3), 14: lift, 15: panel, jamb: jamb };
 
   /* ---------------- floor and ceiling (16 x 16) ---------------- */
   var floor = blank(16, 16, 2);

@@ -96,8 +96,8 @@ export function playDeck(deckIdx, seed, verbose) {
       if (first !== tgt) { tgt._wait = (tgt._wait || 0) + dt; if (tgt._wait > 1.5) { tgt._ban = w.time + 3; tgt._wait = 0; } } else tgt._wait = 0;
       if (first === tgt || (first && first.kind === 'barrel' && Math.hypot(first.x - P.x, first.y - P.y) > 2.5)) input.fire = true;
       if ((tgt.type === 'crawler' && td < 1.2) || (tgt.type === 'spore' && td < 2.2)) input.down = true;
-      if (P.guns.scatter && td < 3 && P.ammo > 10 && P.gun !== 'scatter') input.swap = true;
-      if (P.gun === 'scatter' && (td > 4 || P.ammo < 6)) input.swap = true;
+      const want = P.guns.scatter && td < 3 && P.ammo > 10 ? 'scatter' : P.ammo > 0 ? 'rivet' : 'wrench';
+      if (P.gun !== want) input.swap = true;
     } else {
       if (--replan <= 0) { route = goal(); replan = 20; }
       if (route && route.length > 1) {
@@ -110,7 +110,7 @@ export function playDeck(deckIdx, seed, verbose) {
         if (Math.abs(da) < 0.6) input.up = true;
       }
     }
-    if (input.swap && w._swapT > w.time) input.swap = false; else if (input.swap) w._swapT = w.time + 1;
+    if (input.swap && w._swapT > w.time) input.swap = false; else if (input.swap) w._swapT = w.time + 0.3;
     w.update(dt, input);
     if (++t % 120 === 0) {
       if (Math.hypot(P.x - lastX, P.y - lastY) < 0.1 && !tgt) { stuck++; P.a += 1.2; replan = 0; } else stuck = 0;

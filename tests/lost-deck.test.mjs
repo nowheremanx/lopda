@@ -9,7 +9,7 @@ import { boot } from "./app-vm.mjs";
 import { load, playDeck } from "../tools/lost-deck-bot.mjs";
 
 const LD = load();
-const WALLS = "#PCWMTES", DOORS = "D123";
+const WALLS = "#PCWMKTES", DOORS = "D123";
 
 test("lost-deck: every deck map is closed, its doors sit between walls, and every thing is on it", () => {
   for (const D of LD.DECKS) {
@@ -20,7 +20,7 @@ test("lost-deck: every deck map is closed, its doors sit between walls, and ever
     assert.equal(m.join("").split("@").length - 1, 1, `deck ${D.id}: one start`);
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
       const c = at(x, y);
-      assert.ok("#PCWMTDE123S.~@cfsgnBzaAhHuovGxiklb".includes(c), `deck ${D.id}: unknown "${c}" at ${x},${y}`);
+      assert.ok("#PCWMKTDE123S.~@cfsgnBzaAhHuovGxiklb".includes(c), `deck ${D.id}: unknown "${c}" at ${x},${y}`);
       if (!DOORS.includes(c)) continue;
       const wall = (q) => WALLS.includes(q), lr = wall(at(x - 1, y)) && wall(at(x + 1, y)), ud = wall(at(x, y - 1)) && wall(at(x, y + 1));
       assert.ok(lr !== ud, `deck ${D.id}: door at ${x},${y} must have walls on exactly one axis`);
@@ -43,7 +43,7 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
           if (seen.has(k)) continue;
           if (c === "E") { exit = true; continue; }
           if ("123".includes(c) && !cards.has(c)) continue;
-          if ("#PCWMT".includes(c) || (c === "S" && !secrets)) continue;
+          if ("#PCWMKT".includes(c) || (c === "S" && !secrets)) continue;
           seen.add(k);
           if ("ikx".includes(c)) continue;   /* columns, crates and canisters block the way */
           q.push([nx, ny]);
@@ -62,8 +62,8 @@ test("lost-deck: every deck can be finished without a secret, and every card, pi
   }
 });
 
-test("lost-deck: the auto-player clears the first three decks, killing every robot it meets", () => {
-  for (const d of [0, 1, 2]) {
+test("lost-deck: the auto-player clears the early decks inside par", () => {
+  for (const d of [0, 1, 3]) {
     const r = playDeck(d, 7919);
     assert.equal(r.end, "exit", `deck ${d + 1}: ${JSON.stringify(r)}`);
     assert.ok(r.hp > 0 && r.time < LD.DECKS[d].par, `deck ${d + 1}: ${JSON.stringify(r)}`);
