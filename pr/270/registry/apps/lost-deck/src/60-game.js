@@ -449,7 +449,8 @@
     },
     draw: function () {
       g.rect(0, 0, 160, VH, 0);
-      drawMap(world, 4, 4, 152, 80);
+      drawMap(world, 4, 2, 152, 68);
+      g.text(T(LD.DECKS[deckIdx].goal), 80, 72, { color: 2, align: "center" });
       var items = [t("继续", "Resume"), t("重来这一层", "Restart deck"), t("选层", "Decks")];
       for (var j = 0; j < 3; j++) {
         var yj = 87 + j * 13, s2 = j === pauseSel;
