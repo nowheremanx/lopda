@@ -28,6 +28,16 @@ test("every registry app passes", () => {
   assert.equal(r.code, 0, r.out);
 });
 
+/* the developer examples left the store (decisions.md section 72) but must stay apps anyone can copy and submit */
+test("every sdk example passes, and none of them is also in the store", () => {
+  const ids = readdirSync(join(ROOT, "sdk", "examples")).filter((d) => !d.includes("."));
+  assert.ok(ids.length >= 3);
+  const r = tool("check-app.mjs", ...ids.map((id) => join(ROOT, "sdk", "examples", id)));
+  assert.equal(r.code, 0, r.out);
+  const listed = JSON.parse(readFileSync(join(ROOT, "registry", "index.json"), "utf8")).apps.map((a) => a.id);
+  for (const id of ids) assert.ok(!listed.includes(id), id);
+});
+
 test("every sdk template passes once named after its id and built", (t) => {
   const templates = readdirSync(join(ROOT, "sdk")).filter((d) => d.startsWith("template"));
   assert.ok(templates.length >= 2);

@@ -201,7 +201,10 @@ test("each built-in's fresh-profile first screen has visible content", { skip, t
   const { p, errors } = await page(t, { locale: "en-US" });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && LP.builtins.filter((b) => b.icon).length > 0 && document.querySelectorAll("#home .app.builtin").length === LP.builtins.filter((b) => b.icon).length);
-  const ids = await p.evaluate(() => LP.builtins.filter((b) => b.icon).map((b) => b.view));
+  /* the views in home-screen order (decisions.md section 71: a stored order, not the order the built-ins registered) */
+  const ids = await p.evaluate(() => [...document.querySelectorAll("#home .app.builtin .label")]
+    .map((l) => LP.builtins.find((b) => b.icon && LP.tr(b.label) === l.textContent).view));
+  assert.deepEqual(ids.slice(0, 3), ["notes", "cal", "pet"], "a new phone starts with notes, calendar and pet");
   const firstScreens = [];
   for (let i = 0; i < ids.length; i++) {
     await p.locator("#home .app.builtin").nth(i).click();
@@ -9218,10 +9221,10 @@ test("blow-candles: B on the dialog falls back to holding A, says so, and A puts
 });
 
 /* ---------- 传感器台: the reference app for PAD.motion and PAD.mic (SPEC.md 6.4) ----------
-   It is plain HTML, not a lo-game app, so it is started straight from the registry and read through its own rows. */
+   It is plain HTML, not a lo-game app, so it is started straight from sdk/examples and read through its own rows. */
 const runDesk = async (p) => {
-  const man = JSON.parse(readFileSync(join(ROOT, "registry/apps/sensor-desk/manifest.json"), "utf8"));
-  const html = readFileSync(join(ROOT, "registry/apps/sensor-desk/index.html"), "utf8");
+  const man = JSON.parse(readFileSync(join(ROOT, "sdk/examples/sensor-desk/manifest.json"), "utf8"));
+  const html = readFileSync(join(ROOT, "sdk/examples/sensor-desk/index.html"), "utf8");
   await p.evaluate(([man, html]) => { const a = Object.assign({}, man, { html }); window.LP.upsert("apps", a); window.LP.runApp(a); }, [man, html]);
   let f;
   await until(p, async () => {
