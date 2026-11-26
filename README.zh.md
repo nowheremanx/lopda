@@ -60,13 +60,13 @@ Lo-PDA 是一个渐进式网页应用（PWA），样子是一台虚构的 1986 �
 
 ![正在玩的三个商店游戏：失联站、滥竽充数、纸塔，还有商店列表](docs/images/zh/apps.png)
 
-现在有 24 个，全部开源，都是给 Lo-PDA 做的：
+现在有 22 个，全部开源，都是给 Lo-PDA 做的：
 
 | 类型 | app |
 |---|---|
 | 游戏 | 纸塔（十分钟爬一座塔）、滥竽充数（单键节奏故事）、拍照拼图（用你拍的照片拼）、滚珠迷宫（倾斜手机）、吹蜡烛（对着话筒吹）、五子棋（也能两台掌机用声音对战）、打地鼠、矿工老张（六十秒一钩，挖金子也躲石头）、镇妖塔·序章（3D）、西西弗斯（推石上山，加缪的十六句话）、拼字格（转盘拼词填字谜）、每日推箱（每天一道推箱子）、华容道、山脚小馆（七天经营一家山脚小饭馆） |
 | 故事 | 雨站《晚点》，十分钟读完的短篇视觉小说：雨夜的小站，车晚点五十分钟，爸送你去上大学 |
-| 工具和玩具 | 计算器和点阵画板（预装）、每日一签、五十音图、声音样本、矢量梦、神位罗盘（把手机平放当罗盘）、存档本（计数本，也是"旧存档怎么继续读"的示范）、传感器台（实时显示倾斜、摇晃、方向和声音，传感器权限的示范） |
+| 工具和玩具 | 计算器和点阵画板（预装）、每日一签、五十音图、矢量梦、神位罗盘（把手机平放当罗盘） |
 
 预装的 app 和别的商店 app 一样：删掉就不会再自动装回来，商店里还能再装。
 
@@ -98,6 +98,10 @@ node tools/build-index.mjs
   视觉小说用 `sdk/template-vn/`。3D 用 [`sdk/lo-3d.js`](sdk/LO-3D.md)。
 - 线上开发台不用装任何东西，带按键和日志，能直接加载任何商店 app：
   `https://nowheremanx.github.io/lopda/sdk/dev.html?app=registry/apps/<id>`。
+- 可以照着抄的示例，每个只讲 `PAD` 的一部分，都在 [`sdk/examples/`](sdk/examples/README.md)：
+  [存档和迁移](https://nowheremanx.github.io/lopda/sdk/dev.html?app=sdk/examples/save-book)、
+  [每种声音和它的写法](https://nowheremanx.github.io/lopda/sdk/dev.html?app=sdk/examples/sound-board)、
+  [倾斜和话筒](https://nowheremanx.github.io/lopda/sdk/dev.html?app=sdk/examples/sensor-desk)，点开就在开发台里。
 - 投稿就是开一个 pull request。中英双语的步骤见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，
   审核看什么见 [`docs/REVIEW.md`](docs/REVIEW.md)。
 

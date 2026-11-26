@@ -54,7 +54,7 @@ async function appPage(t) {
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   await p.addInitScript(fakePad);
-  await p.goto(`${base}/registry/apps/sensor-desk/index.html`);
+  await p.goto(`${base}/sdk/examples/sensor-desk/index.html`);
   await p.waitForFunction(() => document.getElementById("mic-hint").textContent.length > 0);
   return { p, errors };
 }

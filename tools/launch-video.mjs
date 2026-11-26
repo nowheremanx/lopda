@@ -814,7 +814,9 @@ async function record() {
     };
     for (const [id, before, during] of APPS) {
       if (pick.length && !pick.includes("app:" + id)) continue;
-      const [man, html] = await Promise.all([readFile(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"), readFile(join(ROOT, "registry/apps", id, "index.html"), "utf8")]);
+      /* the developer examples (sound-board, save-book) left the store for sdk/examples */
+      const dir = existsSync(join(ROOT, "registry/apps", id)) ? join(ROOT, "registry/apps", id) : join(ROOT, "sdk/examples", id);
+      const [man, html] = await Promise.all([readFile(join(dir, "manifest.json"), "utf8"), readFile(join(dir, "index.html"), "utf8")]);
       await a.evaluate(([man, html]) => { const x = Object.assign({}, JSON.parse(man), { html }); window.LP.upsert("apps", x); window.LP.runApp(x); }, [man, html]);
       await a.waitForSelector("#v-run:not([hidden])"); await a.waitForTimeout(2000);
       await keys(before);

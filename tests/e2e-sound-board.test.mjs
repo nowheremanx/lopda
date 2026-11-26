@@ -14,7 +14,7 @@ let pw = null;
 try { pw = await import("playwright"); } catch {}
 const skip = pw ? false : "playwright is not installed";
 
-const APP = "registry/apps/sound-board";
+const APP = "sdk/examples/sound-board";
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json",
   ".png": "image/png", ".wasm": "application/wasm", ".webmanifest": "application/manifest+json" };
 let server, base, browser;

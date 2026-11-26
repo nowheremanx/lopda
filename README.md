@@ -63,13 +63,13 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 
 ![Three store apps in play, LostDeck, Fake Yu and Paper Tower, and the store's list](docs/images/apps.png)
 
-Twenty-four apps today, all open source and all made for Lo-PDA:
+Twenty-two apps today, all open source and all made for Lo-PDA:
 
 | Kind | Apps |
 |---|---|
 | Games | Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Candles (blow into the mic), Gomoku (also a two-handheld match over sound), Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus), Crossing (spell words on a wheel to fill a crossword), DailyBox (one crate-pushing puzzle a day), Klotski (the sliding-block escape), Foothill (seven days running a mountain diner) |
 | Story | Rain Station: Fifty Minutes Late, a ten-minute visual novel (a rainy platform, a late train, your dad seeing you off to university) |
-| Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, Sounds, VecDream, LuckyWay (hold the phone flat like a compass), SaveBook (a tally book, and the example of keeping old saves readable), Sensors (live tilt, shake, heading and sound, the example for the sensor permissions) |
+| Tools and toys | Calc and Paint (both preinstalled), Fortune, Kana, VecDream, LuckyWay (hold the phone flat like a compass) |
 
 Preinstalled apps are ordinary store apps: remove them and they stay removed; the store has them again.
 
@@ -103,6 +103,10 @@ node tools/build-index.mjs
   `sdk/template-game/`, or `sdk/template-vn/` for a visual novel. 3D: [`sdk/lo-3d.js`](sdk/LO-3D.md).
 - The online harness loads any registry app with buttons and a log, nothing to install:
   `https://nowheremanx.github.io/lopda/sdk/dev.html?app=registry/apps/<id>`.
+- Working examples to copy, one part of `PAD` each: [`sdk/examples/`](sdk/examples/README.md) has
+  [saves and migration](https://nowheremanx.github.io/lopda/sdk/dev.html?app=sdk/examples/save-book),
+  [every sound with its code](https://nowheremanx.github.io/lopda/sdk/dev.html?app=sdk/examples/sound-board) and
+  [tilt and the microphone](https://nowheremanx.github.io/lopda/sdk/dev.html?app=sdk/examples/sensor-desk), each in the harness.
 - To submit, open a pull request; [`CONTRIBUTING.md`](CONTRIBUTING.md) has the steps in English and Chinese, and
   [`docs/REVIEW.md`](docs/REVIEW.md) says what a review looks for.
 

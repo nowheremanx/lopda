@@ -9218,10 +9218,10 @@ test("blow-candles: B on the dialog falls back to holding A, says so, and A puts
 });
 
 /* ---------- 传感器台: the reference app for PAD.motion and PAD.mic (SPEC.md 6.4) ----------
-   It is plain HTML, not a lo-game app, so it is started straight from the registry and read through its own rows. */
+   It is plain HTML, not a lo-game app, so it is started straight from sdk/examples and read through its own rows. */
 const runDesk = async (p) => {
-  const man = JSON.parse(readFileSync(join(ROOT, "registry/apps/sensor-desk/manifest.json"), "utf8"));
-  const html = readFileSync(join(ROOT, "registry/apps/sensor-desk/index.html"), "utf8");
+  const man = JSON.parse(readFileSync(join(ROOT, "sdk/examples/sensor-desk/manifest.json"), "utf8"));
+  const html = readFileSync(join(ROOT, "sdk/examples/sensor-desk/index.html"), "utf8");
   await p.evaluate(([man, html]) => { const a = Object.assign({}, man, { html }); window.LP.upsert("apps", a); window.LP.runApp(a); }, [man, html]);
   let f;
   await until(p, async () => {
