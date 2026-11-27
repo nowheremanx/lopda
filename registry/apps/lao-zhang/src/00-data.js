@@ -31,8 +31,11 @@ GM.ENDLESS_GROW = 240;
 /* Cumulative cash targets for the ten written levels, retuned with tools/lao-zhang-sim.mjs.
    Early levels leave a real surplus; levels 4, 8 and 10 are the spikes that spend it.
    Level 4's target now expects the mine to open the vault; level 9's expects the big
-   blast, or enough bank from the levels before it. */
-GM.TARGETS = [1200, 3600, 5850, 10200, 13750, 18300, 24300, 31200, 37600, 46000];
+   blast, or enough bank from the levels before it. Levels 9 and 10 were lowered (37600 / 46000 to
+   35000 / 41000) after the auto-player failed about one run in six at the last level over 100 run
+   seeds: a run's layouts decide its last level's haul, so the old ending was a lottery even for a
+   perfect player. Now it fails about one seed in seventy; level 10 stays the hardest step. */
+GM.TARGETS = [1200, 3600, 5850, 10200, 13750, 18300, 24300, 31200, 35000, 41000];
 
 /* value is the base price; bag uses min/max and a roll; rocks are worth triple with the book.
    A bag now rolls cash, dynamite or a burst of strength when it is hauled in. */
@@ -203,6 +206,7 @@ GM.TEXT = {
     start: "开始",
     best: "最高 第 {l} 关 · ${b}",
     noBest: "还没有纪录",
+    bestNoClear: "最高 ${b} · 还没过关",
     footTitle: "A / START 开始",
     level: "第 {n} 关",
     time: "{n}秒",
@@ -247,9 +251,10 @@ GM.TEXT = {
     shopDescs: ["炸掉钩住的东西和周围，每店限购一个", "本关收绳更快，过关失效", "本关钱袋更鼓、多一颗钻石", "本关石头值三倍，过关失效"],
     over: "时间到",
     overShort: "差 ${d}",
-    retry: "再来一次",
+    retry: "从第 1 关重来",
+    overRun: "一局只有一条命：没达标，这一局就结束了。",
     toTitle: "回标题",
-    footOver: "A 再来　B 标题",
+    footOver: "A 从头来　B 标题",
     victory: "矿场传说",
     victoryLine: "第 10 关通过",
     keep: "继续挖",
@@ -264,7 +269,7 @@ GM.TEXT = {
     menuContinueAt: "第 {n} 关 · 现金 ${b}",
     menuNoRun: "没有进行中的矿",
     menuNew: "重新开始",
-    menuNewSub: "从第 1 关开始",
+    menuNewSub: "从第 1 关开始，没达标就从头来",
     menuCodex: "物品图鉴",
     menuCodexSub: "看看每样东西值多少",
     menuFoot: "↑↓ 选　A 确定",
@@ -294,6 +299,7 @@ GM.TEXT = {
     start: "START",
     best: "BEST LV {l} · ${b}",
     noBest: "NO RECORD YET",
+    bestNoClear: "BEST ${b} · NO CLEAR YET",
     footTitle: "A / START TO PLAY",
     level: "LV {n}",
     time: "{n}s",
@@ -338,9 +344,10 @@ GM.TEXT = {
     shopDescs: ["Blows up the hooked item and its neighbours; one per shop", "Faster reel, this level only", "Fatter bags, one extra diamond", "Rocks worth triple, this level only"],
     over: "TIME UP",
     overShort: "${d} SHORT",
-    retry: "TRY AGAIN",
+    retry: "RESTART AT LV 1",
+    overRun: "One life a run: miss a target and the run ends.",
     toTitle: "TITLE",
-    footOver: "A AGAIN　B TITLE",
+    footOver: "A RESTART　B TITLE",
     victory: "MINE LEGEND",
     victoryLine: "LEVEL 10 CLEARED",
     keep: "KEEP DIGGING",
@@ -355,7 +362,7 @@ GM.TEXT = {
     menuContinueAt: "LV {n} · ${b}",
     menuNoRun: "NO RUN IN PROGRESS",
     menuNew: "NEW GAME",
-    menuNewSub: "Start again at level 1",
+    menuNewSub: "From level 1; a miss starts over",
     menuCodex: "ITEM CODEX",
     menuCodexSub: "What each thing is worth",
     menuFoot: "UP/DOWN PICK　A CHOOSE",

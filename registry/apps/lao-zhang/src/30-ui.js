@@ -97,8 +97,10 @@ GM.ui = (function () {
   function render(screen) {
     var i, item, have, can, sel, price, rows, best, warn, extra, rec, next, target, short;
     if (screen === "title") {
+      /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
       best = state.best.level > 0
         ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
+        : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
         : T.noBest;
       warn = (state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "") +
              (state.runMsg ? '<p class="warn">' + esc(state.runMsg) + "</p>" : "");
@@ -204,6 +206,7 @@ GM.ui = (function () {
         "<h1>" + esc(T.over) + "</h1>" +
         '<p class="big">' + esc(GM.fmt(T.overShort, { d: GM.money(short) })) + "</p>" +
         '<p class="small">' + esc(GM.fmt(T.clearLine, { b: GM.money(state.bank), t: GM.money(state.target) })) + "</p>" +
+        '<p class="small">' + esc(T.overRun) + "</p>" +
         '<button type="button" class="primary" data-act="retry">' + esc(T.retry) + "</button>" +
         '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
         T.footOver);

@@ -200,7 +200,6 @@ var STORY = (function () {
         { who: "min", text: { zh: "够了。明晚，寡人要你一个人，吹一支寡人没听过的曲子。", en: "Enough. Tomorrow you will play me a tune I have never heard. Alone." } },
         { who: "nanguo", mood: "worried", text: { zh: "……没听过的？", en: "...Never heard?" } },
         { who: "min", text: { zh: "你自己写的。写不出来，就去喂马。", en: "One of yours. If you cannot write it, feed the horses." } },
-        { who: "narr", text: { zh: "南郭回到房里，对着一张白纸坐到天亮。", en: "Nan Guo sat before a blank page until dawn." } },
         { who: "aqin", text: { zh: "写吧。一个音也行。", en: "Write. One note is enough." } },
         { who: "nanguo", text: { zh: "一个音。要是我连一个音都写不出来呢？", en: "One note. What if I cannot write even one?" } },
         { who: "aqin", mood: "sad", text: { zh: "那就写你写不出来的那个晚上。", en: "Then write about the night you could not." } }
@@ -216,7 +215,7 @@ var STORY = (function () {
     {
       song: "elise",
       before: [
-        { who: "narr", text: { zh: "那天夜里，南郭没有回房。他坐在宫墙下，第一次认真看一支谱。", en: "That night Nan Guo did not go to his room. He sat under the wall and read a score for the first time." } },
+        { who: "narr", text: { zh: "天亮以后，南郭没有睡。他坐在宫墙下，第一次认真看一支谱。", en: "When dawn came, Nan Guo did not sleep. He sat under the wall and read a score for the first time." } },
         { who: "aqin", text: { zh: "这是《致爱丽丝》。我小时候学的第一支曲子。", en: "Für Elise. The first piece I ever learned." } },
         { who: "nanguo", text: { zh: "我不是爱丽丝。", en: "I am not Elise." } },
         { who: "aqin", mood: "sad", text: { zh: "你也不是乐师。你是一个骗子。但骗子也可以学一支新曲子。", en: "You are not a musician either. You are a liar. But a liar can learn one new tune." } }
