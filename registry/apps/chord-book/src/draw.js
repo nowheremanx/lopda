@@ -136,11 +136,9 @@ var Draw = (function () {
   /* The neck: low E at the bottom as you look down at a guitar on your lap, the nut at the left, 15 frets. Every
      place the chord's notes lie is a small mid dot (a dark one for the root); the voicing shown is in big ink dots. */
   var NECK_W = 150, NECK_H = 72, NX = 12, NF = 9, NS = 10, NY = 6;
-  function neck(v, tones, rootPc) {
-    var b = new Buf(NECK_W, NECK_H), s, f, i;
-    var want = {};
-    for (i = 0; i < tones.length; i++) want[tones[i].pc] = true;
-    var bottom = NY + 5 * NS;
+  /* the empty neck: inlays, strings, nut, frets and the fret numbers under it */
+  function neckFrame() {
+    var b = new Buf(NECK_W, NECK_H), s, f, bottom = NY + 5 * NS;
     /* inlays between the middle strings */
     [3, 5, 7, 9, 15].forEach(function (k) { b.disc(NX + (k - 1) * NF + 4, NY + 2 * NS + 5, 1, MID); });
     b.disc(NX + 11 * NF + 4, NY + NS + 5, 1, MID); b.disc(NX + 11 * NF + 4, NY + 3 * NS + 5, 1, MID);
@@ -151,6 +149,13 @@ var Draw = (function () {
       var t = String(k), cx = NX + (k - 1) * NF + 5;
       b.text(t, cx - t.length * 3 + 1, bottom + 6, DARK);
     });
+    return b;
+  }
+  function neckX(f) { return f === 0 ? NX - 7 : NX + (f - 1) * NF + 5; }
+  function neck(v, tones, rootPc) {
+    var b = neckFrame(), s, f, i, bottom = NY + 5 * NS;
+    var want = {};
+    for (i = 0; i < tones.length; i++) want[tones[i].pc] = true;
     for (s = 0; s < 6; s++) {
       var y = bottom - s * NS;
       for (f = 0; f <= 15; f++) {
@@ -167,6 +172,27 @@ var Draw = (function () {
       else {
         var vx = NX + (vf - 1) * NF + 5;
         if ((Chords.OPEN[s] + vf) % 12 === rootPc) b.rect(vx - 3, y - 3, 7, 7, INK); else b.disc(vx, y, 3, INK);
+      }
+    }
+    return b;
+  }
+
+  /* The improv view (1.4.0): the neck with every note of a scale and the chord's tones, by kind, on all 15 frets and the
+     open strings: the root a square, a chord tone a dot (land on these), a tension a ring (colour you can hold), an avoid
+     note a small cross (pass through it). notes: Scales' [{pc, kind}]. */
+  function scale(notes) {
+    var b = neckFrame(), kind = {}, s, f, bottom = NY + 5 * NS;
+    notes.forEach(function (n) { kind[n.pc] = n.kind; });
+    for (s = 0; s < 6; s++) {
+      var y = bottom - s * NS;
+      for (f = 0; f <= 15; f++) {
+        var k = kind[(Chords.OPEN[s] + f) % 12], x = neckX(f);
+        if (!k) continue;
+        if (f === 0) b.rect(x - 3, y - 3, 7, 7, PAPER);
+        if (k === "r") b.rect(x - 3, y - 3, 7, 7, INK);
+        else if (k === "c") b.disc(x, y, 3, INK);
+        else if (k === "t") { b.disc(x, y, 3, PAPER); b.ring(x, y, 3, INK); }
+        else { b.disc(x, y, 2, PAPER); for (var i = -2; i <= 2; i++) { b.set(x + i, y + i, DARK); b.set(x + i, y - i, DARK); } }
       }
     }
     return b;
@@ -196,5 +222,5 @@ var Draw = (function () {
     return k;
   }
 
-  return { Buf: Buf, box: box, map: map, boxAt: boxAt, neckAt: neckAt, neck: neck, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
+  return { Buf: Buf, box: box, map: map, boxAt: boxAt, neckAt: neckAt, neck: neck, scale: scale, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
 })();
