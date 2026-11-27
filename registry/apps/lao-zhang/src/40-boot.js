@@ -2,6 +2,8 @@
 (function () {
   var state = GM.newState();
   GM.ui.init(state);
+  /* the title waits for the saves: a press before they are read would start a run over the one on disk */
+  state.loading = true;
   GM.ui.setBest({ ok: true, best: { level: 0, bank: 0 } });
   GM.ui.setRun({ ok: true, run: null });
   GM.ui.enter("title");
@@ -27,6 +29,7 @@
     var runInfo = res[1] === undefined
       ? { ok: false, corrupt: true, run: null }
       : GM.readRun(res[1]);
+    state.loading = false;
     GM.ui.setBest(bestInfo);
     if (state.screen === "title" && !state.run) {
       GM.ui.setRun(runInfo);
