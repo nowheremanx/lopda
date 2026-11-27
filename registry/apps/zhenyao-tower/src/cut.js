@@ -96,8 +96,10 @@ var Cut = (function () {
     game.sfx("tap");
     return game.push({
       update: function () {
-        if (game.pressed("a")) { game.sfx("ok"); game.pop(true); }
-        else if (game.pressed("b")) { game.sfx("tap"); game.pop(false); }
+        /* touch: the 「A 是」 half of the window is A, the rest of the screen is B */
+        var p = game.pointer, yes = p.pressed && p.x >= 22 && p.x < 80 && p.y >= 36 && p.y < 74;
+        if (game.pressed("a") || yes) { game.sfx("ok"); game.pop(true); }
+        else if (game.pressed("b") || p.pressed) { game.sfx("tap"); game.pop(false); }
       },
       draw: function (g) {
         g.window(22, 36, 116, 38);
