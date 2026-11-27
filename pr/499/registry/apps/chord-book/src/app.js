@@ -77,13 +77,15 @@
     $("view").classList.toggle("on", set.view === "neck");
     $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
       (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
-    var tones = Chords.tones(c), row = $("tones");
+    /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
+    var row = $("tones");
     row.innerHTML = "";
-    tones.forEach(function (x) {
+    (v ? Chords.strings(v.frets, c) : []).forEach(function (x) {
+      if (!x) { row.appendChild(el("span", "tone mute", "x")); return; }
       var cell = el("button", "tone");
       cell.appendChild(el("b", "", Chords.NAMES[x.pc]));
       cell.appendChild(el("span", "", x.lab === "/" ? t("bassLab") : x.lab));
-      cell.addEventListener("click", function () { playTone(x); });
+      cell.addEventListener("click", function () { playString(x); });
       row.appendChild(cell);
     });
     paint();
@@ -107,19 +109,10 @@
     sfx("tick");
   }
   function notesOf(v) { return Chords.midiOf(v.frets); }
-  /* one chord tone on its own, so the intervals can be heard: every tone is counted up from the root as the voicing plays
-     it (its lowest root, or the first root above the bass when the voicing leaves the root out), so R, 3, 5, b7, 9 climb
-     in order; a slash chord's extra bass is the voicing's lowest note */
-  function toneMidi(v, x) {
-    var notes = notesOf(v), low = Math.min.apply(null, notes), root = set.cur.root, r = null;
-    if (x.iv === null) return low;
-    notes.forEach(function (n) { if (Chords.mod12(n) === root && (r === null || n < r)) r = n; });
-    if (r === null) r = low + Chords.mod12(root - low);
-    return r + x.iv;
-  }
-  function playTone(x) {
-    var v = current().v;
-    if (!v || !Guitar.play([toneMidi(v, x)], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+  /* one string on its own, at the pitch it sounds in this voicing; strings tapped one after another ring together (at
+     most 8), so the intervals between them can be heard as melody and as harmony */
+  function playString(x) {
+    if (!Guitar.play([x.midi], 0, true)) sfx(Guitar.level() ? "tap" : "err");
   }
   function strum(arp) {
     var v = current().v;
