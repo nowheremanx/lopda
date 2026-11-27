@@ -639,6 +639,50 @@
     },
     {
       "spec": "lopda/1",
+      "id": "chord-book",
+      "name": "和弦大全",
+      "glyph": "弦",
+      "category": "productivity",
+      "icon": [
+        "................",
+        "................",
+        "...00000000000..",
+        "...00000000000..",
+        "...1.1.1.1.1.1..",
+        "...1.1.1.10001..",
+        "...1.1.1.10001..",
+        "...11111111111..",
+        "...1.10001.1.1..",
+        "...1.10001.1.1..",
+        "...11111111111..",
+        "...10001.1.1.1..",
+        "...10001.1.1.1..",
+        "...11111111111..",
+        "...1.1.1.1.1.1..",
+        "................"
+      ],
+      "version": "1.4.0",
+      "released": "2026-11-27",
+      "updated": "2026-11-27",
+      "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板、度数图和即兴音阶，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。",
+      "i18n": {
+        "zh": {
+          "name": "和弦大全",
+          "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板、度数图和即兴音阶，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。"
+        },
+        "en": {
+          "name": "Chords",
+          "description": "Guitar chords: shapes, degree maps, scales to improvise, progressions and why."
+        }
+      },
+      "author": "Haowei Wu",
+      "license": "MIT",
+      "path": "apps/chord-book/index.html",
+      "sha256": "16e5df90388173301138da57f3cf3a2a5b8a3013bbcede83ff075e4157ac3334",
+      "bytes": 104191
+    },
+    {
+      "spec": "lopda/1",
       "id": "calculator",
       "name": "计算器",
       "glyph": "算",
@@ -897,8 +941,8 @@
         "notes"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "8eff541165d5ac97ba45d9bceff5fc4b27312e1f4363a6ec97fed7c9fe8c5230",
-      "bytes": 290596
+      "sha256": "bae0b0fa705578ed9dfb24380bb00bdbb5f1a63e3b5e56337ac791f496ec8587",
+      "bytes": 375267
     }
   ]
 }
