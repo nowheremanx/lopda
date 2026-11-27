@@ -22,13 +22,20 @@ header{flex:none;display:flex;gap:8px;padding:8px 12px 0;align-items:stretch}
 #prog,#view{min-width:56px;padding:0 6px}
 main{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:10px 12px 6px}
 /* the picture takes the height that is left; Draw.paint scales it by a whole number to fit */
-#pwrap{flex:1;min-height:110px;display:flex;align-items:center;justify-content:center;touch-action:pan-y;cursor:pointer}
+#pwrap{flex:1;min-height:110px;display:flex;align-items:center;justify-content:center;touch-action:pan-y;cursor:pointer;position:relative;overflow:hidden}
+.ghost{position:absolute;pointer-events:none}
 #pic{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
 /* every row around the picture has a fixed height, so the space left for it, and so its whole-number scale, is the
    same for every voicing of every chord: a longer line or a muted string must not shrink the picture (owner, 1.2.0) */
 #qname,#line{font-size:15px;text-align:center;flex:none;height:20px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #line{font-weight:bold}
 #line.tight{font-size:12px}
+#line.deg{font-weight:normal}
+#line.deg b{font-weight:bold}
+#line.deg s{color:#4a5a32}
+.why2{width:100%;max-width:330px;font-size:12px;line-height:14px;text-align:center}
+.why2 p{margin:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.why2 .legend{-webkit-line-clamp:1;white-space:nowrap;color:#4a5a32}
 #tones{display:flex;justify-content:center;align-items:center;gap:6px;flex:none;height:44px}
 /* one cell per string, low E first; a sounding string is a button that plays it alone */
 .tone{display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;width:44px;min-width:44px;
@@ -642,11 +649,9 @@ var Draw = (function () {
   /* The neck: low E at the bottom as you look down at a guitar on your lap, the nut at the left, 15 frets. Every
      place the chord's notes lie is a small mid dot (a dark one for the root); the voicing shown is in big ink dots. */
   var NECK_W = 150, NECK_H = 72, NX = 12, NF = 9, NS = 10, NY = 6;
-  function neck(v, tones, rootPc) {
-    var b = new Buf(NECK_W, NECK_H), s, f, i;
-    var want = {};
-    for (i = 0; i < tones.length; i++) want[tones[i].pc] = true;
-    var bottom = NY + 5 * NS;
+  /* the empty neck: inlays, strings, nut, frets and the fret numbers under it */
+  function neckFrame() {
+    var b = new Buf(NECK_W, NECK_H), s, f, bottom = NY + 5 * NS;
     /* inlays between the middle strings */
     [3, 5, 7, 9, 15].forEach(function (k) { b.disc(NX + (k - 1) * NF + 4, NY + 2 * NS + 5, 1, MID); });
     b.disc(NX + 11 * NF + 4, NY + NS + 5, 1, MID); b.disc(NX + 11 * NF + 4, NY + 3 * NS + 5, 1, MID);
@@ -657,6 +662,13 @@ var Draw = (function () {
       var t = String(k), cx = NX + (k - 1) * NF + 5;
       b.text(t, cx - t.length * 3 + 1, bottom + 6, DARK);
     });
+    return b;
+  }
+  function neckX(f) { return f === 0 ? NX - 7 : NX + (f - 1) * NF + 5; }
+  function neck(v, tones, rootPc) {
+    var b = neckFrame(), s, f, i, bottom = NY + 5 * NS;
+    var want = {};
+    for (i = 0; i < tones.length; i++) want[tones[i].pc] = true;
     for (s = 0; s < 6; s++) {
       var y = bottom - s * NS;
       for (f = 0; f <= 15; f++) {
@@ -673,6 +685,27 @@ var Draw = (function () {
       else {
         var vx = NX + (vf - 1) * NF + 5;
         if ((Chords.OPEN[s] + vf) % 12 === rootPc) b.rect(vx - 3, y - 3, 7, 7, INK); else b.disc(vx, y, 3, INK);
+      }
+    }
+    return b;
+  }
+
+  /* The improv view (1.4.0): the neck with every note of a scale and the chord's tones, by kind, on all 15 frets and the
+     open strings: the root a square, a chord tone a dot (land on these), a tension a ring (colour you can hold), an avoid
+     note a small cross (pass through it). notes: Scales' [{pc, kind}]. */
+  function scale(notes) {
+    var b = neckFrame(), kind = {}, s, f, bottom = NY + 5 * NS;
+    notes.forEach(function (n) { kind[n.pc] = n.kind; });
+    for (s = 0; s < 6; s++) {
+      var y = bottom - s * NS;
+      for (f = 0; f <= 15; f++) {
+        var k = kind[(Chords.OPEN[s] + f) % 12], x = neckX(f);
+        if (!k) continue;
+        if (f === 0) b.rect(x - 3, y - 3, 7, 7, PAPER);
+        if (k === "r") b.rect(x - 3, y - 3, 7, 7, INK);
+        else if (k === "c") b.disc(x, y, 3, INK);
+        else if (k === "t") { b.disc(x, y, 3, PAPER); b.ring(x, y, 3, INK); }
+        else { b.disc(x, y, 2, PAPER); for (var i = -2; i <= 2; i++) { b.set(x + i, y + i, DARK); b.set(x + i, y - i, DARK); } }
       }
     }
     return b;
@@ -702,7 +735,7 @@ var Draw = (function () {
     return k;
   }
 
-  return { Buf: Buf, box: box, map: map, boxAt: boxAt, neckAt: neckAt, neck: neck, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
+  return { Buf: Buf, box: box, map: map, boxAt: boxAt, neckAt: neckAt, neck: neck, scale: scale, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
 })();
 </script>
 <script data-src="src/guitar.js">
@@ -1041,6 +1074,136 @@ var Progs = (function () {
   return { LIST: LIST, forChord: forChord, nearVoicing: nearVoicing, keyName: keyName };
 })();
 </script>
+<script data-src="src/scales.js">
+/* 和弦大全 / Chords: the improv view's scales (即兴, version 1.4). Chord-scale theory: each chord quality has a few scales
+   (modes) a player can improvise over it with, the commonest first. Every note of the chosen scale, plus every chord tone,
+   is one of four kinds: the root, a chord tone (the safest to land on), a tension (colour you can hold) and an avoid note
+   (a half step over a chord tone where it clashes, or the 3 over a sus4: play it in passing, do not hold it). The kinds
+   are written by hand per
+   chord and scale, not derived from one rule, because the textbook exceptions (b9 over a dominant) matter.
+   With a key (the chord opened from a progression) the default is the first scale whose every note lies in that key or
+   in the chord, so Em7 in C major opens on Phrygian. Pure: no DOM, no PAD. MIT License. Copyright (c) 2026 Haowei Wu. */
+var Scales = (function () {
+  "use strict";
+  function mod12(n) { return ((n % 12) + 12) % 12; }
+
+  /* iv: semitones above the root; lab: how each is written when it is not one of the chord's own tones */
+  var S = {
+    ionian:     { zh: "Ionian（大调）", en: "Ionian (major)", iv: [0, 2, 4, 5, 7, 9, 11], lab: ["R", "9", "3", "11", "5", "13", "7"],
+      why: { zh: "大调本身，最稳的选择。", en: "The major scale itself, the safe choice." } },
+    lydian:     { zh: "Lydian", en: "Lydian", iv: [0, 2, 4, 6, 7, 9, 11], lab: ["R", "9", "3", "#11", "5", "13", "7"],
+      why: { zh: "大调把 11 升成 #11，听着更亮、更飘。", en: "Major with 11 raised to #11: brighter and floating." } },
+    mixolydian: { zh: "Mixolydian", en: "Mixolydian", iv: [0, 2, 4, 5, 7, 9, 10], lab: ["R", "9", "3", "11", "5", "13", "b7"],
+      why: { zh: "大调把 7 降成 b7，属七和弦自己的音阶。", en: "Major with a b7, the dominant chord's own scale." } },
+    lyddom:     { zh: "Lydian dominant", en: "Lydian dominant", iv: [0, 2, 4, 6, 7, 9, 10], lab: ["R", "9", "3", "#11", "5", "13", "b7"],
+      why: { zh: "Mixolydian 把 11 升成 #11，听着更开阔。", en: "Mixolydian with #11: a wider sound." } },
+    altered:    { zh: "Altered（变化音阶）", en: "Altered", iv: [0, 1, 3, 4, 6, 8, 10], lab: ["R", "b9", "#9", "3", "#11", "b13", "b7"],
+      why: { zh: "除了 R、3、b7，每个延伸音都变过。张力最大，适合马上要回主和弦的属七。", en: "Every tension altered. The tensest sound, for a 7 chord about to resolve." } },
+    hwdim:      { zh: "半全减音阶", en: "Half-whole diminished", iv: [0, 1, 3, 4, 6, 7, 9, 10], lab: ["R", "b9", "#9", "3", "#11", "5", "13", "b7"],
+      why: { zh: "半音、全音轮流，b9、#9、#11、13 都在，爵士里常用。", en: "Half step, whole step, repeat: b9, #9, #11 and 13 all at once." } },
+    mixob13:    { zh: "Mixolydian b13", en: "Mixolydian b13", iv: [0, 2, 4, 5, 7, 8, 10], lab: ["R", "9", "3", "11", "5", "b13", "b7"],
+      why: { zh: "Mixolydian 把 13 降成 b13，属七要去小和弦时常用。", en: "Mixolydian with b13, for a 7 chord heading to a minor chord." } },
+    phrygdom:   { zh: "Phrygian dominant", en: "Phrygian dominant", iv: [0, 1, 4, 5, 7, 8, 10], lab: ["R", "b9", "3", "11", "5", "b13", "b7"],
+      why: { zh: "和声小调从第五级开始，小调里 V7 的音阶，b9 和 b13 都往主和弦拉。", en: "Harmonic minor from its fifth: a minor key's V7. b9 and b13 pull home." } },
+    dorian:     { zh: "Dorian", en: "Dorian", iv: [0, 2, 3, 5, 7, 9, 10], lab: ["R", "9", "b3", "11", "5", "13", "b7"],
+      why: { zh: "小调里最亮的一种，13 让它没那么伤感。放克和爵士的小和弦多用它。", en: "The brightest minor: the 13 lifts it. Funk and jazz use it on minor chords." } },
+    aeolian:    { zh: "Aeolian（自然小调）", en: "Aeolian (natural minor)", iv: [0, 2, 3, 5, 7, 8, 10], lab: ["R", "9", "b3", "11", "5", "b13", "b7"],
+      why: { zh: "自然小调，比 Dorian 忧伤。", en: "Natural minor, sadder than Dorian." } },
+    phrygian:   { zh: "Phrygian", en: "Phrygian", iv: [0, 1, 3, 5, 7, 8, 10], lab: ["R", "b9", "b3", "11", "5", "b13", "b7"],
+      why: { zh: "b9 带一点西班牙味。", en: "The b9 gives it a Spanish colour." } },
+    locrian:    { zh: "Locrian", en: "Locrian", iv: [0, 1, 3, 5, 6, 8, 10], lab: ["R", "b9", "b3", "11", "b5", "b13", "b7"],
+      why: { zh: "半减七和弦自己的音阶。", en: "The half-diminished chord's own scale." } },
+    locrian2:   { zh: "Locrian #2", en: "Locrian #2", iv: [0, 2, 3, 5, 6, 8, 10], lab: ["R", "9", "b3", "11", "b5", "b13", "b7"],
+      why: { zh: "Locrian 把 b9 换成 9，更顺耳。", en: "Locrian with 9 instead of b9: smoother." } },
+    whdim:      { zh: "全半减音阶", en: "Whole-half diminished", iv: [0, 2, 3, 5, 6, 8, 9, 11], lab: ["R", "9", "b3", "11", "b5", "b13", "13", "7"],
+      why: { zh: "全音、半音轮流，减七和弦的音阶，每个延伸音都能用。", en: "Whole step, half step, repeat: the dim 7's scale, every tension works." } },
+    wholetone:  { zh: "全音音阶", en: "Whole tone", iv: [0, 2, 4, 6, 8, 10], lab: ["R", "9", "3", "#11", "#5", "b7"],
+      why: { zh: "六个音全隔全音，增三和弦的音阶，听着像在做梦。", en: "Six notes, all whole steps: the augmented chord's dreamy scale." } },
+    melmin:     { zh: "旋律小调", en: "Melodic minor", iv: [0, 2, 3, 5, 7, 9, 11], lab: ["R", "9", "b3", "11", "5", "13", "7"],
+      why: { zh: "小调配大七，小大七和弦自己的音阶。", en: "Minor with a major 7: the minor-major 7's own scale." } },
+    harmmin:    { zh: "和声小调", en: "Harmonic minor", iv: [0, 2, 3, 5, 7, 8, 11], lab: ["R", "9", "b3", "11", "5", "b13", "7"],
+      why: { zh: "b13 到 7 隔了一个半全音，有中东味。", en: "The wide gap from b13 to 7 sounds Middle Eastern." } },
+    majpent:    { zh: "大调五声", en: "Major pentatonic", iv: [0, 2, 4, 7, 9], lab: ["R", "9", "3", "5", "13"],
+      why: { zh: "大调去掉 4 和 7，五个音都不撞，最不容易弹错。", en: "Major without 4 and 7: nothing clashes, the hardest to get wrong." } },
+    minpent:    { zh: "小调五声", en: "Minor pentatonic", iv: [0, 3, 5, 7, 10], lab: ["R", "b3", "11", "5", "b7"],
+      why: { zh: "五个音都不撞，摇滚和布鲁斯的即兴多从这里开始。", en: "Five notes, nothing clashes. Rock and blues solos start here." } },
+    blues:      { zh: "布鲁斯音阶", en: "Blues scale", iv: [0, 3, 5, 6, 7, 10], lab: ["R", "b3", "11", "b5", "5", "b7"],
+      why: { zh: "小调五声加 b5 蓝调音。在属七上 b3 磨着 3，就是布鲁斯味。", en: "Minor pentatonic plus the blue b5. Over a 7 chord, b3 rubbing on 3 is the blues." } }
+  };
+
+  /* per quality: [scale, avoid notes in semitones above the root], the commonest first (docs/design/chord-book.md 14) */
+  var FOR = {
+    "":    [["ionian", [5]], ["lydian"], ["majpent"], ["mixolydian", [5]]],
+    "m":   [["aeolian", [8]], ["dorian"], ["phrygian", [1, 8]], ["minpent"]],
+    "dim": [["locrian", [1]], ["whdim"]],
+    "aug": [["wholetone"]],
+    "5":   [["minpent"], ["blues"], ["majpent"]],
+    "7":   [["mixolydian", [5]], ["blues"], ["lyddom"], ["altered"], ["hwdim"], ["mixob13", [5]], ["phrygdom", [5]]],
+    "maj7": [["ionian", [5]], ["lydian"], ["majpent"]],
+    "m7":  [["dorian"], ["aeolian", [8]], ["phrygian", [1, 8]], ["minpent"], ["blues"]],
+    "m7b5": [["locrian", [1]], ["locrian2"]],
+    "dim7": [["whdim"]],
+    "mmaj7": [["melmin"], ["harmmin", [8]]],
+    "sus2": [["majpent"], ["mixolydian"], ["ionian"]],
+    "sus4": [["mixolydian", [4]], ["ionian", [4]], ["minpent"]],
+    "7sus4": [["mixolydian", [4]], ["dorian"], ["minpent"]],
+    "add9": [["ionian", [5]], ["lydian"], ["majpent"]],
+    "6":   [["ionian", [5]], ["lydian"], ["majpent"]],
+    "m6":  [["dorian"], ["melmin"]],
+    "9":   [["mixolydian", [5]], ["lyddom"], ["mixob13", [5]]],
+    "m9":  [["dorian"], ["aeolian", [8]], ["minpent"]]
+  };
+  var MAJOR = [0, 2, 4, 5, 7, 9, 11], MINOR = [0, 2, 3, 5, 7, 8, 10];
+
+  /* one option: the scale's notes and the chord's tones together, low to high, each {iv, pc, lab, kind} with kind
+     "r" root, "c" chord tone, "t" tension, "a" avoid. A chord tone keeps the chord's own name (the 6 of a 6 chord). */
+  function option(c, pair) {
+    var Q = Chords.qual(c.q), sc = S[pair[0]], avoid = pair[1] || [], by = {};
+    sc.iv.forEach(function (v, i) {
+      by[v] = { iv: v, lab: sc.lab[i], kind: v === 0 ? "r" : avoid.indexOf(v) >= 0 ? "a" : "t" };
+    });
+    Q.iv.forEach(function (v, i) {
+      by[v] = { iv: v, lab: Q.lab[i], kind: v === 0 ? "r" : "c" };
+    });
+    var notes = Object.keys(by).map(Number).sort(function (a, b) { return a - b; }).map(function (v) {
+      var n = by[v];
+      n.pc = mod12(c.root + v);
+      return n;
+    });
+    /* the avoid notes said in words after the scale's own line: which chord tone each sits a half step over, or for a
+       sus4 that the 3 would undo the suspension */
+    var zh = [], en = [];
+    notes.forEach(function (n) {
+      if (n.kind !== "a") return;
+      var under = null;
+      Q.iv.forEach(function (v, i) { if (mod12(n.iv - v) === 1) under = Q.lab[i]; });
+      if (under) { zh.push(n.lab + " 比 " + under + " 高半音"); en.push(n.lab + " is a half step over " + under); }
+      else { zh.push(n.lab + " 会把挂留解决掉"); en.push(n.lab + " would undo the sus"); }
+    });
+    var why = { zh: sc.why.zh + (zh.length ? zh.join("，") + "，经过就好，别停在上面。" : ""),
+      en: sc.why.en + (en.length ? " " + en.join(", ") + ": pass through, don't hold it." : "") };
+    return { id: pair[0], zh: sc.zh, en: sc.en, why: why, notes: notes };
+  }
+  /* a chord's scales {list, def, inKey}: def is the one to show first. With ctx {key: tonic pc, minor} it is the first
+     seven-note scale whose notes all lie in the key's scale or the chord (inKey true); otherwise, or when none does, 0. */
+  function forChord(c, ctx) {
+    var pairs = FOR[Chords.qual(c.q).id] || FOR[""], list = pairs.map(function (p) { return option(c, p); }), def = 0, inKey = false;
+    if (ctx) {
+      var ok = {};
+      (ctx.minor ? MINOR : MAJOR).forEach(function (v) { ok[mod12(ctx.key + v)] = true; });
+      Chords.tones(c).forEach(function (x) { ok[x.pc] = true; });
+      for (var i = 0; i < list.length; i++) {
+        var sc = S[list[i].id];
+        if (sc.iv.length !== 7) continue;
+        if (sc.iv.every(function (v) { return ok[mod12(c.root + v)]; })) { def = i; inKey = true; break; }
+      }
+    }
+    return { list: list, def: def, inKey: inKey };
+  }
+
+  return { S: S, FOR: FOR, forChord: forChord };
+})();
+</script>
 <script data-src="src/app.js">
 /* 和弦大全 / Chords: the screens. The main screen shows one chord's voicings one at a time (box or neck); the picker
    chooses a root, a quality and a bass; the finder names the chord your fingers make. docs/design/chord-book.md 3-8.
@@ -1049,23 +1212,25 @@ var Progs = (function () {
   "use strict";
   var EN = PAD.lang === "en";
   var T = EN ? {
-    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees",
+    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
     listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
-    role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}"
+    role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
+    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k}. "
   } : {
-    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数",
+    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
     listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
-    role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}"
+    role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
+    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}选的。"
   };
   function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
@@ -1075,7 +1240,7 @@ var Progs = (function () {
   /* ---------------- state and save (section 5) ---------------- */
   var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
-  var saveTimer = 0;
+  var saveTimer = 0, VIEWS = ["box", "neck", "map", "scale"];
   function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
   function adopt(s) {
     if (!s || s.v !== 1 || !s.cur) return;
@@ -1084,7 +1249,7 @@ var Progs = (function () {
       (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
-    if (s.view === "neck" || s.view === "box" || s.view === "map") set.view = s.view;
+    if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
     if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
@@ -1106,6 +1271,25 @@ var Progs = (function () {
     remember(); store(); show();
   }
 
+  /* ---------------- the improv view's scale (version 1.4) ---------------- */
+  /* the scale shown for the chord in view: back to the chord's default whenever the chord changes (owner, 1.4.0), and
+     picked by the key when the chord was opened from a progression (ctx: {key, minor, name}) */
+  var md = { name: "", i: 0, ctx: null, sc: null };
+  function modes() {
+    var n = Chords.name(chord());
+    if (md.name !== n) md = { name: n, i: -1, ctx: null, sc: null };
+    if (!md.sc) md.sc = Scales.forChord(chord(), md.ctx);
+    if (md.i < 0) md.i = md.sc.def;
+    return md;
+  }
+  function stepMode(d) {
+    var m = modes(), n = m.sc.list.length;
+    if (n < 2) { sfx("err"); return false; }
+    m.i = (m.i + d + n) % n;
+    sfx("move"); show();
+    return true;
+  }
+
   /* ---------------- the main screen ---------------- */
   var cv = $("pic"), wrap = $("pwrap");
   function current() {
@@ -1118,9 +1302,11 @@ var Progs = (function () {
     var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    $("view").textContent = t(set.view === "map" ? "degrees" : set.view);
+    $("view").textContent = t(set.view === "map" ? "degrees" : set.view === "scale" ? "improv" : set.view);
+    if (set.view === "scale") { showScale(); paint(); return; }
     /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
        fret position, which the picture shows anyway; a second row would shrink the picture */
+    $("line").classList.remove("deg");
     var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
     line.classList.remove("tight");
     line.textContent = v ? head + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
@@ -1139,18 +1325,68 @@ var Progs = (function () {
     });
     paint();
   }
+  /* the improv view's words: the scale and how far through the list, its notes by kind, why it works and the legend */
+  function showScale() {
+    var m = modes(), o = m.sc.list[m.i], c = chord(), line = $("line"), row = $("tones");
+    $("qname").textContent = Chords.NAMES[c.root] + " " + (EN ? o.en : o.zh) + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
+    line.classList.remove("tight");
+    line.classList.add("deg");
+    line.innerHTML = "";
+    o.notes.forEach(function (n, i) {
+      if (i) line.appendChild(document.createTextNode(" "));
+      line.appendChild(el(n.kind === "a" ? "s" : n.kind === "t" ? "span" : "b", "", n.lab));
+    });
+    if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
+    row.innerHTML = "";
+    var why = el("div", "why2");
+    why.appendChild(el("p", "", (m.sc.inKey && m.i === m.sc.def ? t("inKey", { k: m.ctx.label }) : "") + (EN ? o.why.en : o.why.zh)));
+    why.appendChild(el("p", "legend", t("legend")));
+    row.appendChild(why);
+  }
   function paint() {
     var cur = current(), c = chord();
     if (!cur.v) return;
     var w = wrap.clientWidth, h = wrap.clientHeight;
-    var b = set.view === "map" ? Draw.map(cur.v, c) : set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
+    var b = set.view === "scale" ? Draw.scale(modes().sc.list[md.i].notes) : set.view === "map" ? Draw.map(cur.v, c) :
+      set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
     Draw.paint(cv, b, Math.max(1, w), Math.max(1, h));
+    prevBuf = lastBuf; lastBuf = b;
   }
+  /* the swipe's animation (1.4.0): the picture that was there slides out the way the finger went and the new one slides
+     in behind it, in whole css pixels so every pixel stays one of the four tones. The new picture is already painted, so
+     the words and a tap see the new voicing at once. A ghost canvas carries the old picture (put with putImageData,
+     never drawImage, sdk/UI.md). No animation when the system asks for reduced motion. */
+  var lastBuf = null, prevBuf = null, ghost = null, anim = 0;
+  function slide(d) {
+    cancelAnimationFrame(anim);
+    if (ghost) { ghost.remove(); ghost = null; }
+    cv.style.transform = "";
+    var W = wrap.clientWidth;
+    if (!prevBuf || !W || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
+    ghost = el("canvas", "ghost");
+    Draw.paint(ghost, prevBuf, Math.max(1, wrap.clientWidth), Math.max(1, wrap.clientHeight));
+    ghost.style.left = cv.offsetLeft + "px"; ghost.style.top = cv.offsetTop + "px";
+    ghost.style.imageRendering = "pixelated";
+    wrap.appendChild(ghost);
+    var t0 = 0, dir = d > 0 ? -1 : 1, dur = 180;
+    function frame(now) {
+      if (!t0) t0 = now;
+      var p = Math.min(1, (now - t0) / dur), e = 1 - (1 - p) * (1 - p);
+      ghost.style.transform = "translateX(" + Math.round(dir * e * W) + "px)";
+      cv.style.transform = "translateX(" + Math.round(-dir * (1 - e) * W) + "px)";
+      if (p < 1) anim = requestAnimationFrame(frame);
+      else { ghost.remove(); ghost = null; cv.style.transform = ""; }
+    }
+    cv.style.transform = "translateX(" + Math.round(-dir * W) + "px)";
+    anim = requestAnimationFrame(frame);
+  }
+  /* left and right: the next voicing, or in the improv view the next scale; the picture slides the way the finger went */
   function step(d) {
+    if (set.view === "scale") { if (stepMode(d)) slide(d); return; }
     var n = list().length;
     if (!n) return;
     set.cur.i = (set.cur.i + d + n) % n;
-    sfx("move"); store(); show();
+    sfx("move"); store(); show(); slide(d);
   }
   function stepQual(d) {
     var qi = Chords.QUALS.indexOf(Chords.qual(set.cur.q)), n = Chords.QUALS.length;
@@ -1176,7 +1412,7 @@ var Progs = (function () {
     var v = current().v, r = cv.getBoundingClientRect();
     if (!v || !r.width) return;
     var bx = (e.clientX - r.left) * cv.width / r.width, by = (e.clientY - r.top) * cv.height / r.height;
-    var hit = set.view === "neck" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
+    var hit = set.view === "neck" || set.view === "scale" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
     if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true)) sfx(Guitar.level() ? "tap" : "err");
   }
   (function () {
@@ -1221,9 +1457,8 @@ var Progs = (function () {
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("tick"); store(); show();
   }
-  /* the header's view button cycles the three pictures: box, neck, degree map */
-  var VIEWS = ["box", "neck", "map"];
-  function nextView() { set.view = VIEWS[(VIEWS.indexOf(set.view) + 1) % 3]; sfx("tick"); store(); show(); }
+  /* the header's view button cycles the four pictures: box, neck, degree map, improv */
+  function nextView() { set.view = VIEWS[(VIEWS.indexOf(set.view) + 1) % VIEWS.length]; sfx("tick"); store(); show(); }
   $("view").addEventListener("click", nextView);
   $("cname").parentNode.addEventListener("click", function () { openPicker(); });
 
@@ -1370,6 +1605,7 @@ var Progs = (function () {
     stopSeq();
     progs.classList.remove("open"); gl = null;
     go(c, 0);
+    md = { name: Chords.name(c), i: -1, ctx: { key: r.key, minor: r.p.key === "min", label: t(r.p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName }) }, sc: null };
     var l = list(), id = v ? v.frets.join(",") : "";
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("ok"); store(); show();
