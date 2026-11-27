@@ -57,7 +57,7 @@ var T={
   /* the editor: which screen, which pattern, the focus box and the per-track selections (memory only) */
   drum:"kick", focus:0, kb:false, screen:"drums", pat:0, slot:0,
   noteSel:{bass:-1,melody:-1}, noteDeg:{bass:0,melody:0}, oct:{bass:0,melody:0}, chordSel:-1, chordDeg:0,
-  sheet:"", copyTo:-1, built:false, exporting:false,
+  sheet:"", copyTo:-1, built:false, exporting:false, wavJob:null, awake:false,
   /* 12.15: undo/redo (memory), persistent versions and the project library */
   history:[], redo:[], snap:null, historySilent:false,
   versions:[], versionsOk:false, versionsLoad:null, versionsFail:false, versionPick:0, projects:null, projectsLoading:false,
@@ -1026,7 +1026,7 @@ function startPlay(){
   if(T.mode==="song") startSongPos(T.slot,0);
   else { T.ahead=null; T.hSlot=-1; T.hPat=-1; T.hTicks=0; T.nSlot=0; }
   T.loop=setInterval(loop,LOOP_MS);
-  LP.keepAwake(true);
+  awake();
   renderPlay(); renderNav();
   paintPlaying(true);
   hushTip();
@@ -1046,13 +1046,23 @@ function stopPlay(){
   if(T.loop){ clearInterval(T.loop); T.loop=0; }
   dropSynth();                       /* silence the hits already scheduled in the look-ahead */
   T.painted=null;
-  if(was) LP.keepAwake(false);
+  if(was) awake();
   if(T.built){
     clearPlaying();
     renderPlay(); renderNav();
   }
 }
 function togglePlay(){ if(T.playing) stopPlay(); else startPlay(); }
+/* LP.keepAwake is one switch for the whole runtime: the transport, an AI request and a WAV render each want the screen
+   on, so the switch follows all three, and none of them turns it off under another (issue #450). Off the screen the
+   tape machine wants nothing, and it only ever turns off what it turned on: a job that ends after HOME must not take
+   the lock from the program that has the screen now */
+function awake(){
+  var want=visible() && !!(T.playing || T.aiJob || T.wavJob);
+  if(want===T.awake) return;
+  T.awake=want;
+  LP.keepAwake(want);
+}
 /* a new tempo keeps the place: the tick being heard stays on its scheduled sound */
 function setBpm(bpm){
   if(!T.loaded || !T.song) return;
@@ -2690,12 +2700,12 @@ function askAi(text,mode){
   T.aiJob=job;
   if(T.aiTick) clearInterval(T.aiTick);
   T.aiTick=setInterval(paintAiProgress,1000);
-  LP.keepAwake(true);
+  awake();
   function end(){
     if(T.aiTick){ clearInterval(T.aiTick); T.aiTick=0; }
     T.aiJob=null;
     T.aiBusy=false;
-    LP.keepAwake(false);
+    awake();
   }
   job.then(function(res){
     end();
@@ -2746,8 +2756,8 @@ function askScore(text,note){
   var job=H.readScore({text:text,images:images,note:note,ask:ask,onStage:onStage,onTrouble:onTrouble,now:Date.now()});
   T.aiJob=job;
   if(T.aiTick) clearInterval(T.aiTick);
-  T.aiTick=setInterval(paintAiProgress,1000); LP.keepAwake(true);
-  function end(){ if(T.aiTick){clearInterval(T.aiTick);T.aiTick=0;} T.aiJob=null; T.aiBusy=false; T.aiTrouble=null; LP.keepAwake(false); }
+  T.aiTick=setInterval(paintAiProgress,1000); awake();
+  function end(){ if(T.aiTick){clearInterval(T.aiTick);T.aiTick=0;} T.aiJob=null; T.aiBusy=false; T.aiTrouble=null; awake(); }
   job.then(function(res){
     end();
     clearScorePages();
@@ -3490,20 +3500,34 @@ function exportWav(){
   T.exporting=true;
   /* a long tape renders for many seconds on a phone, longer than a toast stays: the line is shown again every second
      with the time so far until the render ends (owner, 2026-11-21: the toast went and the share sheet came much later) */
-  var t0=Date.now(), tick=function(){ toast(tr("studio.exporting",{s:Math.floor((Date.now()-t0)/1000)})); }, timer=setInterval(tick,1000);
+  /* the render is the program's: leaving it (HOME, another program) drops the job, so no progress line and no share
+     sheet turn up over whatever is on the screen then (issue #451); the render itself cannot be stopped and is
+     thrown away when it ends */
+  var t0=Date.now(), job={timer:0}, tick=function(){ if(T.wavJob===job) toast(tr("studio.exporting",{s:Math.floor((Date.now()-t0)/1000)})); };
+  job.timer=setInterval(tick,1000);
+  T.wavJob=job;
+  awake();
   tick();
   renderWav().then(function(blob){
-    clearInterval(timer);
+    if(T.wavJob!==job) return;
+    clearInterval(job.timer);
     return LP.S.downloads.save({filename:wavName(),data:blob}).then(function(res){
       if(res && res.status==="saved") toast(tr("studio.exported"));
     },function(e){
       if(!(e && e.code==="declined")){ toast(LP.saveErr(e)); }
     });
-  }).then(function(){ T.exporting=false; },function(){
-    clearInterval(timer);
-    T.exporting=false;
+  }).then(function(){ endWav(job); },function(){
+    if(T.wavJob!==job) return;
+    endWav(job);
     toast(tr("studio.export.fail"));
   });
+}
+function endWav(job){
+  if(!job || T.wavJob!==job) return;
+  clearInterval(job.timer);
+  T.wavJob=null;
+  T.exporting=false;
+  awake();
 }
 /* ---------- a tape as JSON or MIDI ----------
    Two one-shot exports, no render: the stored v1 song exactly as the library saves it, and the chain through the pure
@@ -4200,6 +4224,13 @@ function tapFocus(){
   else if(T.screen==="song") selectSlot(T.focus);
   else if(T.screen==="mixer") toggleMute(MIX_TRACKS[Math.max(0,Math.min(MIX_TRACKS.length-1,T.focus))]);
 }
+/* a question sheet (delete, restore, import, use a template...) is an .st-ask with its yes button first in the row:
+   A is that button, as on every other dialog (issue #452) */
+function askOpen(){ var sh=$("studio-sheet"); return !!(T.sheet && sh && sh.querySelector(".st-ask")); }
+function askYes(){
+  var sh=$("studio-sheet"), yes=sh && sh.querySelector(".st-ask .row .btn:not(.ghost)");
+  if(yes && !yes.disabled) yes.click();
+}
 function confirmCopy(){
   if(T.copyTo>=0 && T.copyTo<SONGS.PATTERNS_MAX) copyTo(T.copyTo);
 }
@@ -4226,9 +4257,11 @@ document.addEventListener("keydown",function(e){
       else if(sr && !sr.disabled) sr.click();
     }
     else if(T.sheet==="noteplay"||T.sheet==="chordtype") sheetConfirm();
-    else if(!T.sheet) tapFocus();
+    else if(T.sheet) askYes();
+    else tapFocus();
   }
-  else if(key==="Enter"){ if(e.repeat) return; togglePlay(); }
+  /* START plays and stops (design 12.2), but not under a question: the answer comes first (issue #452) */
+  else if(key==="Enter"){ if(e.repeat) return; if(!askOpen()) togglePlay(); }
   else if(key==="Shift"){ if(e.repeat) return; if(!T.sheet && T.screen==="drums") nextDrum(); }
   else if((e.metaKey||e.ctrlKey) && (key==="z"||key==="Z")){ if(e.repeat) return; if(e.shiftKey) redo(); else undo(); }
   else if((e.metaKey||e.ctrlKey) && (key==="y"||key==="Y")){ if(e.repeat) return; redo(); }
@@ -4274,6 +4307,7 @@ function open(){
   else if(S.db) loadStore().then(function(){ if(visible()){ maybeTour(); guideTip(); } });
 }
 function leave(){
+  endWav(T.wavJob);
   aiStopJob();
   clearScorePages();
   stopRepeatAll();
@@ -4282,6 +4316,7 @@ function leave(){
   flush();
   T.sheet="";
   if(T.built) renderSheet();
+  awake();                           /* lets go of the screen if the tape machine held it (the next program asks after) */
   var a=document.activeElement;
   if(a && a.blur && $("v-studio").contains(a)) a.blur();
 }
