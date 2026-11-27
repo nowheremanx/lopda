@@ -789,7 +789,7 @@ async function record() {
         }
       }], ["wait", 900]]],
       ["sound-board", [["wait", 300]], [["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700], ["ArrowDown", 80], ["x", 80], ["wait", 700]]],
-      ["daily-slip", [["x", 80], ["wait", 1200]], play(10)],
+      ["luck-compass", [["ArrowDown", 80], ["x", 80], ["x", 80], ["wait", 1200]], play(10)],
       /* Save book: two tallies named first (the name field, then the handheld's A: the app's own 新增 button is a form
          submit, which the sandbox blocks), then counted up by tapping them */
       ["save-book", [["fn", async (f) => { for (const n of (LANG === "zh" ? ["喝水", "练琴"] : ["Water", "Piano"])) {
@@ -859,7 +859,7 @@ const GRIDS = [
   [["vector-dream", 1.0], ["fake-yu", 0.3], ["zhenyao-tower", 0.3], ["lao-zhang", 0.3], ["whack-a-mole", 0], ["sisyphus", 0.3],
    ["paper-tower", 0.3], ["daily-box", 0.3], ["shanjiao-diner", 0.3]],
   [["rain-station", 0.3], ["gomoku", 0.3], ["klotski", 0.3], ["crossing", 0.3], ["kana-cards", 0.3], ["paint", 0.3],
-   ["sound-board", 0.3], ["daily-slip", 0.3], ["calculator", 0.3]],
+   ["sound-board", 0.3], ["luck-compass", 0.3], ["calculator", 0.3]],
 ];
 const END = 3.0;                       /* the end card's seconds */
 const SHUTTER = [4.27, 5.40, 5.97, 6.53, 7.07, 7.63]; /* the camera clip's shutters (its screen goes dark), for the click */
