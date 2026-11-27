@@ -530,7 +530,19 @@ var SECTIONS = [
   { id: "almanac", name: T({ zh: "老黄历", en: "Almanac" }) },
   { id: "fortune", name: T({ zh: "每日一签", en: "Fortune" }) },
   { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) },
-  { id: "hexagram", name: T({ zh: "八卦", en: "Hexagram" }) }
+  { id: "hexagram", name: T({ zh: "八卦", en: "Hexagram" }) },
+  { id: "bazi", name: T({ zh: "八字", en: "Chart" }) }
+];
+var baziState = { loaded: false, failed: false, saved: null, chart: null, picker: false,
+  y: 1990, m: 1, d: 1, hour: null, field: 0 };
+var BAZI_HOURS = [
+  { label: "早子", en: "Early Rat", hour: 0 }, { label: "丑", en: "Ox", hour: 1 },
+  { label: "寅", en: "Tiger", hour: 3 }, { label: "卯", en: "Rabbit", hour: 5 },
+  { label: "辰", en: "Dragon", hour: 7 }, { label: "巳", en: "Snake", hour: 9 },
+  { label: "午", en: "Horse", hour: 11 }, { label: "未", en: "Goat", hour: 13 },
+  { label: "申", en: "Monkey", hour: 15 }, { label: "酉", en: "Rooster", hour: 17 },
+  { label: "戌", en: "Dog", hour: 19 }, { label: "亥", en: "Pig", hour: 21 },
+  { label: "晚子", en: "Late Rat", hour: 23 }, { label: "不知道", en: "Unknown", hour: null }
 ];
 var counterCursor = 0;
 var almanacOffset = 0, almanacScroll = 0, almanacTear = 0, almanacTearDir = 1;
@@ -698,7 +710,8 @@ function appendSlip() {
   });
 }
 function openSection(id) {
-  if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac" && id !== "hexagram") return;
+  if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac" &&
+      id !== "hexagram" && id !== "bazi") return;
   game.go(id, null, { fade: false });
 }
 function backToCounter() { openSection("counter"); }
@@ -730,6 +743,9 @@ function sectionSummary(id) {
     return game.lang === "en" ? hex.number + " " + hex.short + " " + hex.name :
       hex.name + " " + hex.short;
   }
+  if (id === "bazi") return baziState.chart ?
+    T({ zh: "日主 " + baziState.chart.dayMaster, en: "Day master " + baziMasterEnglish(baziState.chart.dayMaster) }) :
+    T({ zh: "未填", en: "Not set" });
   /* the counter always speaks of today, whatever day the compass was left on */
   var now = new Date(), p = LUCK.pillar(now.getFullYear(), now.getMonth() + 1, now.getDate()), gods = LUCK.gods(p.stem);
   return GODS[0].name + " " + dirName(gods.xi);
@@ -756,7 +772,14 @@ function drawCounter(g) {
   g.text(T({ zh: "玄机阁", en: "Oracle" }), CX, 9, { align: "center", color: g.PAPER });
   var entries = SECTIONS.slice(), hexIndex = -1;
   for (var n = 0; n < entries.length; n++) if (entries[n].id === "hexagram") hexIndex = n;
-  if (hexIndex >= 0 && hexIndex < entries.length - 1) entries.push(entries.splice(hexIndex, 1)[0]);
+  if (entries.length > 5) {
+    var regular = entries.filter(function (entry) { return entry.id !== "hexagram" && entry.id !== "bazi"; });
+    var hex = entries.filter(function (entry) { return entry.id === "hexagram"; })[0];
+    var bazi = entries.filter(function (entry) { return entry.id === "bazi"; })[0];
+    entries = regular.concat(hex ? [hex] : [], bazi ? [bazi] : []);
+  } else if (hexIndex >= 0 && entries[entries.length - 1].id !== "bazi" && hexIndex < entries.length - 1) {
+    entries.push(entries.splice(hexIndex, 1)[0]);
+  }
   for (var i = 0; i < entries.length; i++) {
     var y = 43 + i * 34, summary = fitSummary(sectionSummary(entries[i].id), 134);
     if (i === counterCursor) g.rect(6, y - 2, 204, 31, g.INK);
@@ -1231,6 +1254,210 @@ function drawGuaChart(g) {
   g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
 }
 
+function baziHourIndex(hour) {
+  for (var i = 0; i < BAZI_HOURS.length; i++) if (BAZI_HOURS[i].hour === hour) return i;
+  return BAZI_HOURS.length - 1;
+}
+function baziHourText(hour) {
+  var option = BAZI_HOURS[baziHourIndex(hour)];
+  if (option.hour === null) return T({ zh: "不知道", en: "Unknown" });
+  var range = option.hour === 0 ? "0-1" : option.hour === 23 ? "23-24" : option.hour + "-" + (option.hour + 2);
+  return game.lang === "en" ? option.en + " " + range : option.label + " " + range;
+}
+function baziMasterEnglish(master) {
+  var elements = ["木", "火", "土", "金", "水"], english = ["Wood", "Fire", "Earth", "Metal", "Water"];
+  return master.charAt(0) + " " + english[elements.indexOf(master.charAt(1))];
+}
+function baziHourBranch(hour) {
+  return hour === null ? null : LUCK.BRANCHES[Math.floor((hour + 1) / 2) % 12];
+}
+function validBaziSave(value) {
+  return !!(value && value.v === 1 && BAZI.valid(value.y, value.m, value.d) &&
+    (value.hour === null || (typeof value.hour === "number" && Math.floor(value.hour) === value.hour &&
+      value.hour >= 0 && value.hour <= 23)));
+}
+function readBazi() {
+  if (typeof PAD === "undefined" || typeof PAD.load !== "function") { baziState.loaded = true; return; }
+  var result;
+  try { result = PAD.load("bazi"); }
+  catch (e) { baziState.failed = true; baziState.loaded = true; return; }
+  Promise.resolve(result).then(function (value) {
+    baziState.loaded = true;
+    if (validBaziSave(value)) {
+      baziState.saved = { v: 1, y: value.y, m: value.m, d: value.d, hour: value.hour };
+      baziState.chart = BAZI.chart(value.y, value.m, value.d, value.hour);
+    }
+  }, function () {
+    baziState.failed = true;
+    baziState.loaded = true;
+  });
+}
+function beginBaziEdit() {
+  var value = baziState.saved;
+  baziState.y = value ? value.y : 1990;
+  baziState.m = value ? value.m : 1;
+  baziState.d = value ? value.d : 1;
+  baziState.hour = value ? value.hour : null;
+  baziState.field = 0;
+  baziState.picker = true;
+}
+function saveBazi() {
+  var value = { v: 1, y: baziState.y, m: baziState.m, d: baziState.d, hour: baziState.hour };
+  baziState.saved = value;
+  baziState.chart = BAZI.chart(value.y, value.m, value.d, value.hour);
+  baziState.picker = false;
+  if (!baziState.failed && typeof PAD !== "undefined" && typeof PAD.save === "function") {
+    try { PAD.save("bazi", value); } catch (e) {}
+  }
+  sfx("ok");
+}
+function clampBaziDay() {
+  var max = new Date(Date.UTC(baziState.y, baziState.m, 0)).getUTCDate();
+  baziState.d = Math.min(baziState.d, max);
+}
+function changeBaziValue(amount) {
+  if (baziState.field === 0) {
+    baziState.y = Math.max(1900, Math.min(2100, baziState.y + amount));
+    clampBaziDay();
+  } else if (baziState.field === 1) {
+    baziState.m = Math.max(1, Math.min(12, baziState.m + amount));
+    clampBaziDay();
+  } else if (baziState.field === 2) {
+    var max = new Date(Date.UTC(baziState.y, baziState.m, 0)).getUTCDate();
+    baziState.d = Math.max(1, Math.min(max, baziState.d + amount));
+  } else {
+    var index = (baziHourIndex(baziState.hour) + amount + BAZI_HOURS.length) % BAZI_HOURS.length;
+    baziState.hour = BAZI_HOURS[index].hour;
+  }
+  sfx("move");
+}
+function updateBazi() {
+  if (!baziState.loaded) return;
+  if (!baziState.saved && !baziState.picker) beginBaziEdit();
+  if (baziState.picker) {
+    if (game.pressed("b")) {
+      baziState.picker = false;
+      if (!baziState.saved) backToCounter();
+      else sfx("tap");
+      return;
+    }
+    if (game.pressed("left")) { baziState.field = (baziState.field + 3) % 4; sfx("move"); }
+    if (game.pressed("right")) { baziState.field = (baziState.field + 1) % 4; sfx("move"); }
+    if (game.pressed("up")) changeBaziValue(1);
+    if (game.pressed("down")) changeBaziValue(-1);
+    if (game.pressed("a")) saveBazi();
+    var p = game.pointer;
+    if (p.pressed) {
+      var row = Math.floor((p.y - 44) / 38);
+      if (row >= 0 && row < 4) {
+        baziState.field = row;
+        if (p.x >= 12 && p.x < 54) changeBaziValue(1);
+        else if (p.x >= 162 && p.x < 204) changeBaziValue(-1);
+      }
+      if (p.y >= 208 && p.y < 239 && p.x > 150) saveBazi();
+    }
+    return;
+  }
+  if (game.pressed("b")) { backToCounter(); return; }
+  if (game.pressed("start")) { beginBaziEdit(); sfx("tap"); }
+}
+function drawBaziPicker(g) {
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 19, g.INK);
+  g.text(T({ zh: "八字 · 填写", en: "Chart · Birth" }), CX, 2, { align: "center", color: g.PAPER });
+  var names = game.lang === "en" ? ["Year", "Month", "Day", "Hour"] : ["年", "月", "日", "时辰"];
+  var values = game.lang === "en" ?
+    [String(baziState.y), String(baziState.m), String(baziState.d), baziHourText(baziState.hour)] :
+    [baziState.y + "年", baziState.m + "月", baziState.d + "日", baziHourText(baziState.hour)];
+  for (var i = 0; i < 4; i++) {
+    var y = 44 + i * 38;
+    if (i === baziState.field) g.rect(8, y, 200, 34, g.INK);
+    var color = i === baziState.field ? g.PAPER : g.INK;
+    g.text(names[i], CX, y + 1, { align: "center", color: color });
+    g.text(values[i], CX, y + 18, { align: "center", color: color });
+    g.frame(12, y + 1, 40, 32, i === baziState.field ? g.PAPER : g.INK);
+    g.frame(164, y + 1, 40, 32, i === baziState.field ? g.PAPER : g.INK);
+    g.line(27, y + 24, 32, y + 15, color);
+    g.line(32, y + 15, 37, y + 24, color);
+    g.line(179, y + 12, 184, y + 21, color);
+    g.line(184, y + 21, 189, y + 12, color);
+  }
+  if (baziState.failed) {
+    var message = T({ zh: "存档读不出，这次不会保存",
+      en: "Could not read; it won't save this time" });
+    var messageLines = g.wrap(message, 208);
+    for (var line = 0; line < messageLines.length && line < 2; line++)
+      g.text(messageLines[line], CX, 184 + line * 13, { align: "center", color: g.DARK });
+  }
+  g.text(fitPageText(g, T({ zh: "←→选 ↑↓改 A确认 B返回",
+    en: "←→ field ↑↓ edit A save B back" }), W), CX, 214, { align: "center", color: g.INK });
+  g.text(fitPageText(g, HINT, W), CX, 229, { align: "center", color: g.DARK });
+}
+function drawBaziChart(g) {
+  var chart = baziState.chart;
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 19, g.INK);
+  g.text(T({ zh: "八字", en: "Chart" }), CX, 2, { align: "center", color: g.PAPER });
+  var dateLine = game.lang === "en" ?
+    baziState.saved.y + "-" + pad2(baziState.saved.m) + "-" + pad2(baziState.saved.d) + " hour " +
+      (baziState.saved.hour === null ? "unknown" : baziHourBranch(baziState.saved.hour)) :
+    baziState.saved.y + "年" + baziState.saved.m + "月" + baziState.saved.d + "日 " +
+      (baziState.saved.hour === null ? "时辰未知" : baziHourBranch(baziState.saved.hour) + "时");
+  if (baziState.failed) dateLine += T({ zh: " · 不保存", en: " · no save" });
+  g.text(fitPageText(g, dateLine, 212), CX, 22, { align: "center", color: g.INK });
+  var columns = [
+    { key: "hour", label: T({ zh: "时", en: "Hour" }), x: 29 },
+    { key: "day", label: T({ zh: "日", en: "Day" }), x: 81 },
+    { key: "month", label: T({ zh: "月", en: "Month" }), x: 135 },
+    { key: "year", label: T({ zh: "年", en: "Year" }), x: 187 }
+  ];
+  for (var i = 0; i < columns.length; i++) {
+    var col = columns[i], index = chart[col.key];
+    g.text(col.label, col.x, 40, { align: "center", color: g.INK });
+    g.frame(col.x - 19, 54, 38, 22, g.INK);
+    g.frame(col.x - 19, 78, 38, 22, g.INK);
+    g.text(index === null ? T({ zh: "未知", en: "?" }) : LUCK.STEMS[index % 10],
+      col.x, 58, { align: "center", color: g.INK });
+    g.text(index === null ? T({ zh: "未知", en: "?" }) : LUCK.BRANCHES[index % 12],
+      col.x, 82, { align: "center", color: g.INK });
+  }
+  g.text(T({ zh: "纳音", en: "Na Yin" }), CX, 102, { align: "center", color: g.INK });
+  for (i = 0; i < columns.length; i++) {
+    var naYinColumn = columns[i], naYinIndex = chart[naYinColumn.key];
+    g.text(naYinIndex === null ? T({ zh: "未知", en: "?" }) : chart.nayin[naYinColumn.key],
+      naYinColumn.x, 116, { align: "center", color: g.INK });
+  }
+  var elements = ["木", "火", "土", "金", "水"];
+  var labels = game.lang === "en" ? ["Wd", "Fi", "Ea", "Me", "Wa"] : elements;
+  var centers = [18, 63, 108, 153, 198];
+  g.text(T({ zh: "五行", en: "Elements" }), CX, 130, { align: "center", color: g.INK });
+  for (i = 0; i < elements.length; i++) {
+    var count = chart.counts[elements[i]], barHeight = Math.min(24, count * 3);
+    g.text(labels[i], centers[i], 142, { align: "center", color: g.INK });
+    g.frame(centers[i] - 5, 157, 10, 26, g.INK);
+    if (barHeight) g.rect(centers[i] - 3, 181 - barHeight, 6, barHeight, g.DARK);
+    g.text(String(count), centers[i], 183, { align: "center", color: g.INK });
+  }
+  var zodiac = game.lang === "en" ? ZODIAC_EN[chart.year % 12] : chart.zodiac;
+  var summary = T({ zh: "属" + chart.zodiac + " · 日主 " + chart.dayMaster,
+    en: zodiac + " · Day master " + baziMasterEnglish(chart.dayMaster) });
+  g.text(summary, CX, 196, { align: "center", color: g.INK });
+  g.text(fitPageText(g, T({ zh: "START 修改 · B 返回", en: "START edit · B back" }), W),
+    CX, 211, { align: "center", color: g.INK });
+  g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
+}
+function drawBazi(g) {
+  if (!baziState.loaded) {
+    g.clear(g.PAPER);
+    g.rect(0, 0, W, 19, g.INK);
+    g.text(T({ zh: "八字", en: "Chart" }), CX, 2, { align: "center", color: g.PAPER });
+    g.text(T({ zh: "存档读取中…", en: "Reading save…" }), CX, 112, { align: "center", color: g.DARK });
+    return;
+  }
+  if (baziState.picker || !baziState.chart) drawBaziPicker(g);
+  else drawBaziChart(g);
+}
+
 game.scene("counter", {
   enter: function () { section = "counter"; syncMotion(); },
   update: updateCounter,
@@ -1273,7 +1500,17 @@ game.scene("hexagram", {
   update: updateHexagram,
   draw: function (g) { if (guaChart) drawGuaChart(g); else drawHexagram(g); }
 });
+game.scene("bazi", {
+  enter: function () {
+    section = "bazi";
+    if (baziState.loaded && !baziState.saved) beginBaziEdit();
+    syncMotion();
+  },
+  update: updateBazi,
+  draw: drawBazi
+});
 
 readSlip();
 readGua();
+readBazi();
 game.start("counter");
