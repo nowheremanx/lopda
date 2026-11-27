@@ -152,7 +152,7 @@ function MorningStory() {
       return;
     }
     if (S.day === 7 && !seen("day7")) {
-      S.ap = 3;
+      S.ap = apMax();
       await game.say(["今晚山神宴。", "镇上的人都会来。三道菜，别砸了招牌。", "山神也会来。也可能，只是来喝一口汤。", "今天多给你一个时辰。"]);
       mark("day7");
       return;

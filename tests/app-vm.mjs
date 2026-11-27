@@ -20,9 +20,11 @@ export function boot(file, opt = {}) {
     getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
     measureText: () => ({ width: 12 }), fillText() {}, clearRect() {}
   };
+  /* every element's listeners by event type: the canvas's pointer listeners are how pointer() taps the screen */
+  const elListeners = {};
   const el = () => ({
     style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
-    addEventListener() {}, appendChild() {}, setPointerCapture() {},
+    addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); }, appendChild() {}, setPointerCapture() {},
     getContext: () => ctx2d, getBoundingClientRect: () => ({ left: 0, top: 0, width: 160, height: 144 })
   });
   class KeyboardEvent { constructor(type, o = {}) { this.type = type; this.key = o.key; this.repeat = false; } preventDefault() {} }
@@ -48,7 +50,13 @@ export function boot(file, opt = {}) {
   const names = Object.keys(g);
   const run = new Function(...names, body + "\n;return { get: function (name) { return eval(name); } };");
   const ctx = run(...names.map((n) => g[n]));
-  return { ctx, frame: g.__frame, hashes };
+  /* pointer(type, x, y, w, h): a "pointerdown" / "pointerup" at screen pixel x, y of a w x h game screen
+     (the fake canvas is 160 x 144 css px, so the point is scaled to it) */
+  const pointer = (type, x, y, w = 160, h = 144) => {
+    const e = { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
+    (elListeners[type] || []).forEach((f) => f(e));
+  };
+  return { ctx, frame: g.__frame, hashes, pointer };
 }
 
 export function mulberry32(seed) {
