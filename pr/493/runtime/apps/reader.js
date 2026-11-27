@@ -243,12 +243,24 @@ function closeBook(){
   mode(false); renderSheet(); renderLow(); $("rd-help").hidden=true; renderShelf();
 }
 function chapterTitle(ch){
-  var t=R.book.chapters[ch].title;
+  var t=LP.noEmoji(R.book.chapters[ch].title);
   return t ? t : R.book.chapters.length>1 ? tr("reader.part",{n:ch+1}) : R.meta[R.id].title;
+}
+/* a book's emoji on the four-tone LCD: the handheld's font has no such glyph, so each run of them prints as one box, the way an
+   old device shows a character it lacks (issue #399). Every place in a book is an offset into its text (the page, the
+   quotes, the underlines), so the box keeps the emoji's length: one box and word joiners, which take no room. A run
+   is an emoji when it has a code point past U+1F000 (faces, flags, skin tones) or a joiner or emoji selector; plain
+   BMP symbols books use (the copyright sign, stars, notes) stay as the font draws them */
+var EMO_RUN=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]+/gu;
+function boxEmoji(s){
+  return s.replace(EMO_RUN,function(run){
+    if(!/[\u{1F000}-\u{10FFFF}\u{FE0F}\u{200D}\u{20E3}]/u.test(run)) return run;
+    return "\u25A1"+new Array(run.length).join("\u2060");
+  });
 }
 /* text with its emphasis and links: cut at every range edge, each piece wrapped in <em> and/or <a> */
 function fill(e,pa){
-  var s=pa.s, em=pa.em||[], ln=pa.ln||[], cuts=[0,s.length], k;
+  var s=boxEmoji(pa.s), em=pa.em||[], ln=pa.ln||[], cuts=[0,s.length], k;
   for(k=0;k+1<em.length;k+=2) cuts.push(em[k],em[k+1]);
   for(k=0;k+4<ln.length;k+=5) cuts.push(ln[k],ln[k+1]);
   cuts=cuts.filter(function(v,i,a){ return v>=0 && v<=s.length && a.indexOf(v)===i; }).sort(function(a,b){ return a-b; });
@@ -262,8 +274,9 @@ function fill(e,pa){
 function picture(e,pa){
   var im=(R.book.images||[])[pa.img];
   e.className="img";
-  if(!im || im.bad){ e.textContent=pa.alt ? "["+pa.alt+"]" : tr("reader.image"); e.className="img bad"; return; }
-  var img=document.createElement("img"); img.alt=pa.alt||""; img.width=im.w; img.height=im.h;
+  var alt=LP.noEmoji(pa.alt);
+  if(!im || im.bad){ e.textContent=alt ? "["+alt+"]" : tr("reader.image"); e.className="img bad"; return; }
+  var img=document.createElement("img"); img.alt=alt; img.width=im.w; img.height=im.h;
   img.setAttribute("data-w",im.w); img.setAttribute("data-h",im.h);
   var key=pa.img, id=R.id;
   if(R.urls[key]) img.src=R.urls[key];
@@ -760,23 +773,23 @@ function renderSheet(){
   sh.appendChild(title);
   var keys=el("div"), keyset=null;
   if(R.sheet==="menu"){
-    var ul=el("ul","lcd-menu");
+    var ul=el("ul","lcd-menu rd-fit");
     menuItems().forEach(function(it,i){
       var li=el("li",i===R.mpick?"on":""); li.appendChild(el("span","",it.label)); if(it.val) li.appendChild(el("small","",it.val));
       li.onclick=function(){ R.mpick=i; menuPick(it.k); };
       ul.appendChild(li);
     });
-    sh.appendChild(ul);
+    sh.appendChild(ul); sh.appendChild(moreCue());
     sh.appendChild(track());
   } else if(R.sheet==="toc"){
-    var tu=el("ul","lcd-menu rd-toc");
+    var tu=el("ul","lcd-menu rd-toc rd-fit");
     tocList().forEach(function(it,i){
       var li=el("li",i===R.tpick?"on":""); li.style.paddingLeft=(10+12*(it.d||0))+"px";
       li.appendChild(el("span","",it.title));
       li.onclick=function(){ R.tpick=i; tocGo(it); };
       tu.appendChild(li);
     });
-    sh.appendChild(tu);
+    sh.appendChild(tu); sh.appendChild(moreCue());
   } else if(R.sheet==="notes"){
     var list=marksSorted(), nu=el("ul","lcd-menu rd-notes");
     if(!list.length) sh.appendChild(el("p","hint",tr("reader.nonotes")));
@@ -792,7 +805,7 @@ function renderSheet(){
     });
     sh.appendChild(nu);
   } else if(R.sheet==="font"){
-    var rows=fontRows(), fu=el("ul","lcd-menu rd-fonts");
+    var rows=fontRows(), fu=el("ul","lcd-menu rd-fonts rd-fit");
     R.fpick=clamp(R.fpick,0,rows.length-1);
     rows.forEach(function(r,i){
       var li=el("li",i===R.fpick?"on":""); li.appendChild(el("span","",r.label));
@@ -800,7 +813,7 @@ function renderSheet(){
       li.onclick=function(){ if(R.fpick!==i) R.farmed=null; R.fpick=i; fontA(); };
       fu.appendChild(li);
     });
-    sh.appendChild(fu);
+    sh.appendChild(fu); sh.appendChild(moreCue());
     var cur=rows[R.fpick];
     sh.appendChild(el("p","hint",R.fbusy || (R.farmed && cur.k===R.farmed ? tr("reader.fontarmed",{name:cur.label}) : tr("reader.fonthint"))));
     keyset={
@@ -835,7 +848,28 @@ function renderSheet(){
   LP.softkeys(keys,keyset);
   sh.appendChild(keys);
   /* only now, with the keys below it, does the list have its final height: keep the highlighted row in view */
+  fitRows(sh);
   var on=sh.querySelector(".lcd-menu li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:R.sheet==="toc" ? "center" : "nearest"});
+  var fit=sh.querySelector(".lcd-menu.fit"); if(fit && fit.onscroll) fit.onscroll();   // the arrows now, not on the next scroll event
+}
+/* a list taller than its window (the menu has eleven rows; a small phone shows four and a half, issue #400) shows
+   whole rows only, never a half row that looks like a drawing fault, and stops on a row when swiped; the arrows under
+   it say there is more above or below, as on a handheld's menu window */
+function moreCue(){ var c=el("p","rd-more"); c.appendChild(el("span","","\u25B2")); c.appendChild(el("span","","\u25BC")); return c; }
+function fitRows(sh){
+  var ul=sh.querySelector(".lcd-menu.rd-fit"), cue=ul && ul.nextSibling;
+  if(!ul || !cue || cue.className!=="rd-more") return;
+  ul.style.flex=""; ul.style.height=""; ul.classList.remove("fit"); cue.hidden=false;
+  var rows=ul.children, box=ul.clientHeight;
+  if(!rows.length || ul.scrollHeight<=box+1){ cue.hidden=true; return; }
+  var gap=parseFloat(getComputedStyle(ul).rowGap)||0, pitch=rows[0].offsetHeight+gap;
+  var n=Math.max(1,Math.floor((box+gap)/pitch));
+  ul.style.flex="none"; ul.style.height=(n*pitch-gap)+"px"; ul.classList.add("fit");
+  var mark=function(){
+    cue.children[0].style.visibility=ul.scrollTop>1 ? "visible" : "hidden";
+    cue.children[1].style.visibility=ul.scrollTop<ul.scrollHeight-ul.clientHeight-1 ? "visible" : "hidden";
+  };
+  ul.onscroll=mark; mark();
 }
 /* the progress bar under the menu: drag (or tap) anywhere on it to go there */
 function track(){
@@ -867,7 +901,7 @@ function menuPick(k){
 /* the book's own contents, or one row per chapter when it has none */
 function tocList(){
   var t=R.book.toc;
-  if(t && t.length) return t.map(function(x){ return {title:x.title||chapterTitle(x.ch), ch:x.ch|0, p:x.p|0, d:x.d|0}; });
+  if(t && t.length) return t.map(function(x){ return {title:LP.noEmoji(x.title)||chapterTitle(x.ch), ch:x.ch|0, p:x.p|0, d:x.d|0}; });
   return R.book.chapters.map(function(c,i){ return {title:chapterTitle(i), ch:i, p:0, d:0}; });
 }
 function tocGo(it){ closeSheet(); whole(function(){ goTo(clamp(it.ch,0,R.book.chapters.length-1),{p:it.p, c:0}); }); sfx("ok"); }
@@ -1109,7 +1143,7 @@ LP.builtin({id:"reader", label:"app.reader", icon:function(){ return ICON; }, vi
     $("screen").classList.remove("rd-eink");
     var f=$("rd-flash"); if(f) f.hidden=true; $("screen").classList.remove("rd-neg"); R.flashing=false;
   },
-  padLayout:function(){ if(visible() && R.book) setTimeout(relayout,0); },
+  padLayout:function(){ if(visible() && R.book) setTimeout(function(){ relayout(); if(R.sheet) fitRows($("rd-sheet")); },0); },
   lang:function(){ if(!visible()) return; if(R.book){ footer(); renderSheet(); renderLow(); SEL.drawMenu(); if(R.sheet==="help") openHelp(); } else renderShelf(); },
   ready:function(){
     var base=S.db.doc("data/users/local/reader");

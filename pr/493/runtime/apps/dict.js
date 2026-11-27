@@ -24,6 +24,7 @@ var MAX_HISTORY=50, MAX_WORDS=2000, MAX_CAND=40, MAX_LEVELS=10, LINE=24;   // LI
 var D={
   set:{order:[BUILTIN], disabled:[], history:[], words:[]},   // data/users/local/dict: book order, disabled ids, history, word book [{w, t}]
   meta:{},                  // imported book id -> {name, words, syns, added}
+  importing:{},             // ids whose files are being written in this session: never swept
   books:{},                 // id -> loaded book (stardict.js), or a promise while loading
   lemma:null,               // ECDICT word forms: form -> lemma
   refs:null, loading:null, loaded:false, loadErr:null,
@@ -119,10 +120,12 @@ function remember(word){
   D.set.history=[word].concat(D.set.history.filter(function(w){ return w!==word; })).slice(0,MAX_HISTORY);
   saveSet();
 }
-function inBook(word){ return D.set.words.some(function(x){ return x.w===word; }); }
+/* a word is in the book whatever its case: the reader passes the word as the book spells it (Time at the start of a
+   sentence, time in the middle), and setWord / inBookMany compare the same way, so all ways in agree (issue #308) */
+function inBook(word){ return D.set.words.some(function(x){ return sameWord(x.w,word); }); }
 function toggleWord(word){
   if(D.refs && !D.loaded){ toast(tr("dict.loading")); sfx("err"); return; }   /* the book is not read yet: no change that would not be kept */
-  if(inBook(word)){ D.set.words=D.set.words.filter(function(x){ return x.w!==word; }); toast(tr("dict.removed")); sfx("tap"); }
+  if(inBook(word)){ D.set.words=D.set.words.filter(function(x){ return !sameWord(x.w,word); }); toast(tr("dict.removed")); sfx("tap"); }
   else { D.set.words=[{w:word, t:Date.now()}].concat(D.set.words).slice(0,MAX_WORDS); toast(tr("dict.added")); sfx("ok"); }
   saveSet();
 }
@@ -324,7 +327,7 @@ function entryKeys(){
   } else if(D.review){
     keyset={
       select:null,
-      start:{label:tr(inBook(word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }},
+      start:{label:tr(inBook(e.word)?"sk.saved":"sk.addword"),fn:function(){ dictButton("start",true); dictButton("start",false); }},
       b:key("b","sk.back"),
       a:{label:tr(e.shown?"sk.nextword":"sk.reveal"),fn:function(){ dictButton("a",true); dictButton("a",false); }}
     };
@@ -455,6 +458,18 @@ function step(k){
   var n=D.set.words.length; if(!n){ closeSheet(); return; }
   var i=(D.review.i+k+n)%n; D.review.i=i; D.wpick=i; sfx("move");
   var r=D.review; openEntry(D.set.words[i].w,"words",true); D.review=r;
+}
+/* START while reviewing takes the card out of the pile: the word as the book stores it (not its lemma: the entry of
+   running may show run), and then the next card, which now sits where the removed one was. The count and the next
+   word stay right, and the last card closes the review (issue #307) */
+function reviewRemove(){
+  var w=D.entry.word, r=D.review;
+  var at=D.set.words.slice(0,r.i).filter(function(x){ return !sameWord(x.w,w); }).length;   // the card after it, once it is out
+  toggleWord(w);
+  if(inBook(w)){ renderSheet(); return; }   // not read yet, or it was not in the book and went in: nothing moved
+  var n=D.set.words.length; if(!n){ closeSheet(); return; }
+  r.i=at>=n ? 0 : at; D.wpick=r.i;
+  openEntry(D.set.words[r.i].w,"words",true); D.review=r;
 }
 function reviewA(){
   if(!D.entry.shown){ D.entry.shown=true; sfx("tap"); renderSheet(); return; }
@@ -601,6 +616,23 @@ function group(files){
     g.stem=s; return g;
   });
 }
+/* the parts of a book whose import never finished: the files are written before the book's document, and a page iOS
+   kills in between runs no catch, so nothing would ever list or delete them, and every backup would carry them (issue
+   #310). Once the documents are read, a dict/<id>/ file with no document of that id is taken away. Not while a restore
+   is half done (its two databases may not match yet), and never a book being imported now */
+function sweep(known){
+  if(!P.files.keys) return;
+  var half=P.restorePending ? P.restorePending() : Promise.resolve(false);
+  half.then(function(on){
+    if(on) return;
+    return P.files.keys("dict/").then(function(ks){
+      ks.forEach(function(k){
+        var id=k.split("/")[1];
+        if(id && !known[id] && !D.importing[id]) P.files.del(k).then(null,function(){});
+      });
+    });
+  }).then(null,function(){});
+}
 function bytesOf(f){ return f.arrayBuffer().then(function(b){ return new Uint8Array(b); }); }
 function importOne(g){
   D.busy=tr("dict.importing",{name:g.stem}); renderSheet();
@@ -610,6 +642,7 @@ function importOne(g){
     var name=LP.noEmoji(bk.name)||g.stem;
     for(var k in D.meta) if(D.meta[k].name===name && D.meta[k].words===bk.info.wordcount) throw new Error(tr("dict.dup",{name:name}));
     var id=uid(), ix=bk.index, blob=new Blob([bk.data]);
+    D.importing[id]=true;
     /* the search keys are rebuilt on load; storing them would double the index */
     var stored={info:bk.info, index:{words:ix.words, off:ix.off, len:ix.len, head:ix.head}};
     var meta={name:name, words:bk.info.wordcount, syns:bk.info.synwordcount||0, added:Date.now()};
@@ -716,7 +749,7 @@ function dictButton(b,down){
       if(b==="a") reviewA();
       else if(b==="left"||b==="right") step(b==="left"?-1:1);
       else if(b==="up"||b==="down") scrollEntry(b==="up"?-1:1);
-      else if(b==="start"){ toggleWord(w); renderSheet(); }
+      else if(b==="start") reviewRemove();
       else if(b==="b") closeSheet();
       return;
     }
@@ -801,7 +834,7 @@ LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"
   padLayout:function(){ if(!$("v-dict").hidden) setTimeout(refitEntry,0); },
   pause:function(){ hush(); },
   ready:function(){
-    var base=S.db.doc("data/users/local/dict");
+    var base=S.db.doc("data/users/local/dict"), known={};
     D.refs={set:base, books:base.collection("books")};
     Promise.all([
       base.get().then(function(sn){
@@ -810,7 +843,7 @@ LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"
         if(D.set.order.indexOf(BUILTIN)<0) D.set.order.unshift(BUILTIN);
       }),
       D.refs.books.get().then(function(q){
-        q.docs.forEach(function(doc){ var m=own(doc.data()); if(m && m.name) D.meta[doc.id]=m; });
+        q.docs.forEach(function(doc){ known[doc.id]=true; var m=own(doc.data()); if(m && m.name) D.meta[doc.id]=m; });
       })
     ]).then(function(){
       order().forEach(function(id){ if(D.set.order.indexOf(id)<0) D.set.order.push(id); });
@@ -818,6 +851,7 @@ LP.builtin({id:"dict", label:"app.dict", icon:function(){ return ICON; }, view:"
       D.set.disabled=D.set.disabled.filter(function(id){ return order().indexOf(id)>=0; });
       D.loaded=true;
       if(!$("v-dict").hidden){ renderSheet(); update(); }
+      sweep(known);
     }).catch(function(){});
   }});
 })();
