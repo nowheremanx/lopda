@@ -796,7 +796,7 @@ LP.ai={
    sealed, and whoever holds the key reads every negative's place: so the key stays inside the runtime, never through
    PAD, pad-shim, the sandboxed app iframe or any postMessage. The ring is one document of the user's own; the camera's
    place switch makes the first key (ensure), and a restore only ever adds keys to it. */
-var DKP="data/users/local/darkroom-key", DK={text:"", count:0, shown:false};
+var DKP="data/users/local/darkroom-key", DK={text:"", count:0, shown:false, err:false};
 var DKPENDING=null, G=window.LopdaGeotag;
 /* read the document fresh every time: a restore may have replaced it since the page opened */
 function keyDoc(){
@@ -866,16 +866,17 @@ LP.darkroomKey={
 function keyMask(text){ return "••••-••••-…-"+text.slice(-4); }
 function paintKey(){
   var on=!!DK.text;
-  $("set-key-state").textContent=on ? (DK.shown ? DK.text : keyMask(DK.text)) : tr("key.none");
+  /* a key that cannot be read now is not a missing key (issue #417) */
+  $("set-key-state").textContent=on ? (DK.shown ? DK.text : keyMask(DK.text)) : tr(DK.err ? "key.readfail" : "key.none");
   $("set-key-show").textContent=tr(DK.shown ? "key.hide" : "key.show");
   $("set-key-show-row").hidden=!on;
   $("set-key-old").hidden=!(on && DK.count>1);
-  if(on && DK.count>1) $("set-key-old").textContent=tr("key.old",{n:DK.count-1});
+  if(on && DK.count>1) $("set-key-old").textContent=DK.count===2 ? tr("key.old1") : tr("key.old",{n:DK.count-1});
 }
 function loadKey(){
   return LP.darkroomKey.info().then(function(i){
-    DK.text=i ? i.text : ""; DK.count=i ? i.count : 0; DK.shown=false; paintKey();
-  },function(){ DK.text=""; DK.count=0; DK.shown=false; paintKey(); });
+    DK.text=i ? i.text : ""; DK.count=i ? i.count : 0; DK.shown=false; DK.err=false; paintKey();
+  },function(){ DK.text=""; DK.count=0; DK.shown=false; DK.err=true; paintKey(); });
 }
 function selectKeyText(){
   var el=$("set-key-state"), sel=window.getSelection && window.getSelection();
@@ -905,7 +906,7 @@ function useKey(){
     $("set-key-result").textContent=tr(r==="added" ? "key.added" : "key.same");
     sfx("ok");
     return loadKey();
-  },function(){ $("set-key-result").textContent=tr("key.bad"); sfx("err"); }).then(function(){ b.disabled=false; });
+  },function(){ $("set-key-result").textContent=tr("key.savefail"); sfx("err"); }).then(function(){ b.disabled=false; });
 }
 $("set-key-use").onclick=useKey;
 $("set-key-input").addEventListener("keydown",function(e){ if(e.key==="Enter"){ e.preventDefault(); useKey(); } });
@@ -945,10 +946,12 @@ function sizeText(bytes){
   var kb=Math.max(1,Math.round((bytes||0)/1024));
   return kb<1024 ? kb+" KB" : kb<10240 ? (kb/1024).toFixed(1)+" MB" : Math.round(kb/1024)+" MB";
 }
+/* calendar days on this phone's clock, not 24-hour periods: last night's backup is 昨天 in the morning (issue #418) */
+function dayNo(t){ var d=new Date(t); return Math.round(new Date(d.getFullYear(),d.getMonth(),d.getDate()).getTime()/DAY); }
 function renderLast(){
-  var t=BS.last, n=Math.floor((Date.now()-t)/DAY);
-  $("set-backup-last").textContent=!t ? tr("bk.never") : n<1 ? tr("bk.today") : tr("bk.days",{n:n});
-  $("set-backup-state").textContent=!t ? tr("bk.row.never") : n<1 ? tr("bk.row.today") : tr("bk.row.days",{n:n});
+  var t=BS.last, n=t ? Math.max(0,dayNo(Date.now())-dayNo(t)) : 0;
+  $("set-backup-last").textContent=!t ? tr("bk.never") : n<1 ? tr("bk.today") : n===1 ? tr("bk.yesterday") : tr("bk.days",{n:n});
+  $("set-backup-state").textContent=!t ? tr("bk.row.never") : n<1 ? tr("bk.row.today") : n===1 ? tr("bk.row.yesterday") : tr("bk.row.days",{n:n});
 }
 /* the dialog under the 全部数据 row: a message, a warning line, buttons [{label, go, main}] (a click: the release of a tap) */
 function box(msg,buttons,warn){
@@ -1054,8 +1057,9 @@ function doRestore(bk){
     LP.each("restore");
     P.dumpAll().then(detach).then(function(old){
       return P.replaceAll({docs:docs, files:bk.files}).then(function(){
+        /* the page paints the line before it goes: a reload in the same turn would never show it (issue #283) */
         box(tr("rs.done")); sfx("ok");
-        location.reload();
+        setTimeout(function(){ location.reload(); },800);
       },function(e){
         if(window.console) console.error("Lo-PDA restore failed, writing the old data back", e);
         return P.replaceAll(old).then(function(){ sfx("err"); okBox(tr("rs.failed")); },function(e2){

@@ -67,8 +67,15 @@ var chains={};
 /* one write at a time per document; resolves true when it landed */
 function put(ref,data){
   var k=ref.path;
-  chains[k]=(chains[k]||Promise.resolve()).then(function(){ return ref.set(data); }).then(function(){ return true; },function(e){ toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")})); return false; });
+  chains[k]=(chains[k]||Promise.resolve()).then(function(){ return ref.set(data); }).then(function(){ return true; },function(e){ toast(saveFail(e)); return false; });
   return chains[k];
+}
+/* a failed write in words the player can act on: a full phone says where to make room (issue #284) */
+function saveFail(e){
+  var c=e&&e.code;
+  if(c==="quota_exceeded") return tr("common.savefull");
+  if(c==="unavailable"||c==="timeout") return tr("common.savelater");
+  return tr("common.savefail",{code:c||tr("common.unknown")});
 }
 function fmt(ts){ var d=new Date(ts||0); return (d.getMonth()+1)+"/"+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
 function pad2(n){ return String(n).padStart(2,"0"); }
@@ -679,7 +686,7 @@ if(/[?&]debug\b/.test(location.search)) window.LOPDA_DEBUG={setButton:setButton,
 /* what the built-ins and boot.js use */
 var share={
   noEmoji:noEmoji, glyphOf:glyphOf, own:own, uid:uid, toast:toast, put:put, fmt:fmt, pad2:pad2,
-  TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveBlob:saveBlob, saveErr:saveErr, sha256hex:sha256hex,
+  TONES:TONES, BAYER:BAYER, saveCanvas:saveCanvas, saveBlob:saveBlob, saveErr:saveErr, saveFail:saveFail, sha256hex:sha256hex,
   upsert:upsert, dropLocal:dropLocal, pending:pending, refresh:refresh, onData:onData,
   setStatus:setStatus, tickClock:tickClock, show:show, keepAwake:keepAwake,
   /* {want, calls}: what was asked last and how many asks so far, so an overlay that borrows the lock (the snap
@@ -691,6 +698,31 @@ var share={
   resetConfirm:resetConfirm, padRoute:padRoute, setButton:setButton, releaseButtons:releaseButtons, showPad:showPad
 };
 for(var k in share) LP[k]=share[k];
+
+/* ---------- a phone turned sideways in a browser tab (issue #335). Installed to the home screen the manifest keeps it
+   upright; in a tab Safari turns the page, the LCD is left about 266 px tall and the hardware screens lose their keys.
+   The handheld has no landscape layout, so it asks to be held upright, as the device was. Only a phone counts: the screen
+   itself is landscape (a keyboard that shortens the page is not), its short side is phone-sized and it is touch. ---------- */
+(function(){
+  var note=$("rotate"); if(!note) return;
+  function sideways(){
+    var o=screen.orientation && screen.orientation.type;
+    var land=o ? o.indexOf("landscape")===0 : Math.abs(window.orientation||0)===90;
+    var touch=!!(window.matchMedia && window.matchMedia("(pointer:coarse)").matches);
+    var side=Math.min(screen.width||0,screen.height||0);
+    return land && touch && side>0 && side<500 && window.innerWidth>window.innerHeight;
+  }
+  function check(){
+    var on=sideways();
+    if(note.hidden===!on) return;
+    note.hidden=!on;
+    if(on) releaseButtons();   /* a finger on a key when the phone turned must not hold it down */
+  }
+  window.addEventListener("resize",check);
+  window.addEventListener("orientationchange",function(){ setTimeout(check,250); });
+  if(screen.orientation && screen.orientation.addEventListener) screen.orientation.addEventListener("change",check);
+  check();
+})();
 
 /* ---------- the phone's keyboard. iOS does not shrink the page for it: the keyboard and its bar cover the bottom of the
    screen, and the whole handheld can be dragged up under the finger. While a text field has the keyboard, the device is

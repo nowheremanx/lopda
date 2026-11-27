@@ -145,7 +145,7 @@
 
       "common.delete": "删除", "common.cancel": "取消", "common.confirm": "确认{what}", "common.unknown": "未知",
       "common.save": "保存", "common.ready": "{name} 已准备好。", "common.saving": "保存中…",
-      "common.savefail": "存档失败：{code}", "common.readfail": "读档失败：{msg}", "common.reading": "读取中…",
+      "common.savefail": "存档失败：{code}", "common.savefull": "存档失败：存储空间满了。去 设置 → 程序存档 清掉一些再试。", "common.savelater": "存档失败：存储暂时打不开，过一会儿再试。", "common.readfail": "读档失败：{msg}", "common.reading": "读取中…",
       "common.dpad": "方向键", "common.pwa": "加到主屏，书和词典才不会被系统清掉。",
 
       "sk.select": "选字", "sk.menu": "菜单", "sk.shelf": "书架", "sk.lookup": "查词",
@@ -179,7 +179,7 @@
       "store.share": "分享", "store.share.copied": "链接已复制，点开就进这个程序",
       "link.fetching": "正在打开链接里的程序…", "link.unknown": "没找到链接里的程序，先回到主屏。",
       "link.offline": "连不上商店，链接里的程序打不开。", "link.trial": "这是浏览器里的试玩。加到主屏幕，存档才会一直留着。",
-      "store.downloading": "下载中…", "store.retry": "重试", "store.badhash": "校验不通过，文件和目录对不上",
+      "store.downloading": "下载中…", "store.retry": "重试", "store.reinstall": "重新安装", "store.updatefailed": "更新失败：{msg}。原来的版本还在。", "store.http": "服务器回了 {status}", "store.nonet": "连不上网络", "store.badhash": "校验不通过，文件和目录对不上",
       "store.nostore": "存不进本机", "store.installed": "已安装 {name}。", "store.updated": "已更新 {name}。",
       "store.failed": "安装失败：{msg}", "store.removefail": "卸载失败", "store.timeout": "一分钟没下完", "store.stopped": "已停止", "store.removedmid": "{name} 已卸载，这次更新没有装回去。",
       "store.perm.files": "可导入、导出文件",
@@ -189,7 +189,7 @@
       "store.perm.camera": "会用相机拍照（每次由你按快门）",
       "store.perm.wordbook": "会读写你的生词本",
       "store.perm.link": "会和另一台掌机连线（声音传数据，麦克风一直开着）",
-      "store.perm.short.files": "文件", "store.perm.short.motion": "倾斜", "store.perm.short.mic": "话筒",
+      "store.perm.short.files": "文件", "store.perm.short.motion": "倾斜", "store.perm.short.mic": "麦克风",
       "store.perm.short.notes": "记事", "store.perm.short.camera": "相机", "store.perm.short.wordbook": "生词本", "store.perm.short.link": "连线",
 
       "sense.motion": "「{name}」要用倾斜感应。", "sense.mic": "「{name}」要用麦克风，只听音量和音高，不录音。",
@@ -256,10 +256,10 @@
       "key.old": "另有 {n} 把旧钥匙，仍会用来解开旧胶卷。",
       "key.other": "输入另一台机器的钥匙", "key.ph": "XXXX-XXXX-…-CCCC", "key.use": "使用",
       "key.added": "已换用这把钥匙；旧钥匙都留着。", "key.same": "这把钥匙已经在用。",
-      "key.bad": "钥匙不对：检查有没有打错。",
+      "key.bad": "钥匙不对：检查有没有打错。", "key.readfail": "钥匙现在读不出来：存储打不开，过一会儿再进这一页。", "key.savefail": "没存进去：存储打不开，过一会儿再试。", "key.old1": "另有 1 把旧钥匙，仍会用来解开旧胶卷。",
       "bk.label": "全部数据", "bk.go": "备份", "rs.go": "恢复", "bk.ok": "好",
       "bk.row.never": "未备份 ›", "bk.row.today": "今天 ›", "bk.row.days": "{n} 天前 ›",
-      "bk.never": "还没有备份过。备份会把整台掌机的数据存成一个文件。", "bk.today": "上次备份：今天", "bk.days": "上次备份：{n} 天前",
+      "bk.never": "还没有备份过。备份会把整台掌机的数据存成一个文件。", "bk.today": "上次备份：今天", "bk.yesterday": "上次备份：昨天", "bk.row.yesterday": "昨天 ›", "bk.days": "上次备份：{n} 天前",
       "bk.reading": "正在整理全部数据…", "bk.ready": "备份全部数据，约 {size}。", "bk.big": "文件很大：保存要一会儿，手机上要留出足够的空间。",
       "bk.nodb": "这台浏览器的存储打不开，现在没法备份或恢复。手机空间满了、或开着无痕模式时会这样；处理好后重开 Lo-PDA。", "bk.save": "保存", "bk.saved": "备份已保存", "bk.failed": "备份失败：有数据读不出来", "bk.toolarge": "数据超过 4 GB，没法存成一个备份文件",
       "bk.saves": "程序存档也在备份里；卸载程序不会删掉存档。",
@@ -448,7 +448,7 @@
 
       "cam.boot.slot": "扩展槽 B 检测中", "cam.boot.found": "发现外设", "cam.boot.lens": "LP-CAM 点阵镜头 rev.2",
       "cam.boot.shake": "握手 9600 bps", "cam.boot.fw": "固件", "cam.boot.film": "胶卷",
-      "cam.boot.filmof": "{name}{stock} {n}/{size}", "cam.boot.nofilm": "未装", "cam.boot.done": "连接完成。",
+      "cam.boot.filmof": "{name} {stock} {n}/{size}", "cam.boot.nofilm": "未装", "cam.boot.done": "连接完成。",
       "cam.boot.skip": "轻点跳过",
 
       "cam.load.title": "装胶卷", "cam.load.rolls": "胶卷", "cam.load.go": "装入", "cam.load.exp": "{n} 张",
@@ -490,7 +490,7 @@
       "dk.step": "{step} {n}/{size}", "dk.step.dev": "显影", "dk.step.fix": "定影", "dk.step.dry": "晾干",
       "dk.newer": "这卷是新版冲洗店冲的，升级以后才能看。",
       "dk.print.title": "出片 · 第 {n} 张", "dk.p.single": "单张", "dk.p.all": "全部单张", "dk.p.card": "印样", "dk.p.strip": "胶片条",
-      "dk.print.place": "单张印相含拍摄地点", "dk.print.ready": "{n} 张单张已准备好。", "dk.printnone": "这卷没有可出片的照片。",
+      "dk.print.placeboth": "单张和全部单张都含拍摄地点", "dk.print.placeall": "全部单张里，记了地点的照片含拍摄地点", "dk.print.ready": "{n} 张单张已准备好。", "dk.printnone": "这卷没有可出片的照片。",
       "dk.printing": "出片中…", "dk.printing.n": "出片中… {n}/{all}", "dk.printed": "照片存好了。", "dk.printed.n": "{n} 张照片存好了。",
       "dk.comparing": "七种片对比中…", "dk.nocompare": "这卷没有能对比的照片。",
 
@@ -511,7 +511,7 @@
       "cart.dual": "放好了。这是双模卡带，会按黑白模式运行。", "cart.placed": "放好了。",
       "cart.badfile": "读不了这个文件：{msg}", "cart.reading": "读卡…", "cart.norom": "卡带数据找不到了",
       "cart.nopower": "开不了机：{msg}", "cart.badrom": "这盘卡带读不出来",
-      "cart.saved": "存好了（覆盖上一份）。", "cart.loadgo": "确认读档", "cart.restored": "回到 {when} 的存档。",
+      "cart.saved": "存好了（覆盖上一份）。", "cart.loadgo": "确认读档", "cart.ejectgo": "确认退卡", "rotate.note": "Lo-PDA 只能竖着拿。把手机竖过来。", "cart.restored": "回到 {when} 的存档。",
       "cart.loadfail": "存档读不进去。",
       "cart.speed": "速度", "cart.slower": "慢一点", "cart.faster": "快一点", "cart.speedreset": "回到原速",
 
@@ -1151,7 +1151,7 @@
 
       "common.delete": "Delete", "common.cancel": "Cancel", "common.confirm": "{what}?", "common.unknown": "unknown",
       "common.save": "Save", "common.ready": "{name} is ready.", "common.saving": "Saving…",
-      "common.savefail": "Save failed: {code}", "common.readfail": "Read failed: {msg}", "common.reading": "Reading…",
+      "common.savefail": "Save failed: {code}", "common.savefull": "Not saved: storage is full. Free some in Settings → App saves, then try again.", "common.savelater": "Not saved: storage isn't available right now. Try again soon.", "common.readfail": "Read failed: {msg}", "common.reading": "Reading…",
       "common.dpad": "D-pad", "common.pwa": "Add to Home Screen so the system keeps your books and dictionaries.",
 
       "sk.select": "Select", "sk.menu": "Menu", "sk.shelf": "Shelf", "sk.lookup": "Lookup",
@@ -1185,7 +1185,7 @@
       "store.share": "Share", "store.share.copied": "Link copied: it opens this program",
       "link.fetching": "Opening the program in the link…", "link.unknown": "Couldn't find the program in that link.",
       "link.offline": "Can't reach the store to open that link.", "link.trial": "Playing in the browser. Add to Home Screen so your saves stay.",
-      "store.downloading": "Loading…", "store.retry": "Retry", "store.badhash": "checksum mismatch",
+      "store.downloading": "Loading…", "store.retry": "Retry", "store.reinstall": "Reinstall", "store.updatefailed": "Update failed: {msg}. The old version is still there.", "store.http": "the server answered {status}", "store.nonet": "no connection", "store.badhash": "checksum mismatch",
       "store.nostore": "can't store it here", "store.installed": "{name} installed.", "store.updated": "{name} updated.",
       "store.failed": "Install failed: {msg}", "store.removefail": "Remove failed", "store.timeout": "not done in a minute", "store.stopped": "stopped", "store.removedmid": "{name} was removed, so this update was not put back.",
       "store.perm.files": "Can import and export files",
@@ -1239,7 +1239,7 @@
 
       "set.title": "Settings", "set.on": "On", "set.off": "Off", "set.volume": "Volume",
       "set.voldown": "Volume down", "set.volup": "Volume up",
-      "set.soundnote": "Speaker follows the silent switch; headphones, this only. Music keeps playing.",
+      "set.soundnote": "The speaker follows the silent switch; headphones follow only this volume. Music from other apps keeps playing.",
       "set.ui": "System sounds", "set.uinote": "Keys and prompts; games and apps keep theirs.",
       "set.lang": "Language", "set.about": "About", "set.version": "Lo-PDA {v} · spec lopda/1",
       "set.backup": "Backup and restore", "set.saves": "App saves", "set.saves.none": "None", "set.saves.nodb": "No storage",
@@ -1262,10 +1262,10 @@
       "key.old": "{n} older keys are kept to open older rolls.",
       "key.other": "Key from another handheld", "key.ph": "XXXX-XXXX-...-CCCC", "key.use": "Use",
       "key.added": "Now using this key; the old keys are kept.", "key.same": "This key is already in use.",
-      "key.bad": "That is not a valid key: check for typos.",
+      "key.bad": "That is not a valid key: check for typos.", "key.readfail": "The key can't be read right now: storage isn't available. Open this page again in a moment.", "key.savefail": "Not saved: storage isn't available. Try again in a moment.", "key.old1": "1 older key is kept to open older rolls.",
       "bk.label": "All data", "bk.go": "Back up", "rs.go": "Restore", "bk.ok": "OK",
       "bk.row.never": "No backup ›", "bk.row.today": "Today ›", "bk.row.days": "{n} days ago ›",
-      "bk.never": "No backup yet. A backup saves everything on this handheld as one file.", "bk.today": "Last backup: today", "bk.days": "Last backup: {n} days ago",
+      "bk.never": "No backup yet. A backup saves everything on this handheld as one file.", "bk.today": "Last backup: today", "bk.yesterday": "Last backup: yesterday", "bk.row.yesterday": "Yesterday ›", "bk.days": "Last backup: {n} days ago",
       "bk.reading": "Gathering all data…", "bk.ready": "Back up all data, about {size}.", "bk.big": "A large file: saving takes a while, and the phone needs room for it.",
       "bk.nodb": "This browser's storage cannot be opened, so nothing can be backed up or restored. A full phone or a private window does this; fix that, then reopen Lo-PDA.", "bk.save": "Save", "bk.saved": "Backup saved", "bk.failed": "Backup failed: some data could not be read", "bk.toolarge": "Over 4 GB of data: too much for one backup file",
       "bk.saves": "App saves are in the backup too; removing an app keeps them.",
@@ -1499,7 +1499,7 @@
       "dk.step": "{step} {n}/{size}", "dk.step.dev": "DEVELOPER", "dk.step.fix": "FIXER", "dk.step.dry": "DRYING",
       "dk.newer": "A newer darkroom developed this roll. Update to see it.",
       "dk.print.title": "PRINT · FRAME {n}", "dk.p.single": "Single print", "dk.p.all": "All singles", "dk.p.card": "Contact sheet", "dk.p.strip": "Film strip",
-      "dk.print.place": "The single print shows where it was taken", "dk.print.ready": "{n} prints are ready.", "dk.printnone": "This roll has no frames to print.",
+      "dk.print.placeboth": "The single print and all singles show where they were taken", "dk.print.placeall": "All singles: frames with a place show where they were taken", "dk.print.ready": "{n} prints are ready.", "dk.printnone": "This roll has no frames to print.",
       "dk.printing": "Printing…", "dk.printing.n": "Printing… {n}/{all}", "dk.printed": "Print saved.", "dk.printed.n": "{n} prints saved.",
       "dk.comparing": "Comparing 7 stocks…", "dk.nocompare": "No frames on this roll to compare.",
 
@@ -1520,7 +1520,7 @@
       "cart.dual": "On the shelf. Dual-mode cart: runs in black and white.", "cart.placed": "On the shelf.",
       "cart.badfile": "Can't read this file: {msg}", "cart.reading": "Reading…", "cart.norom": "cart data missing",
       "cart.nopower": "Won't start: {msg}", "cart.badrom": "can't read this cart",
-      "cart.saved": "Saved (over the last one).", "cart.loadgo": "Load?", "cart.restored": "Back to the save from {when}.",
+      "cart.saved": "Saved (over the last one).", "cart.loadgo": "Load?", "cart.ejectgo": "Eject?", "rotate.note": "Lo-PDA is held upright. Turn your phone back.", "cart.restored": "Back to the save from {when}.",
       "cart.loadfail": "Couldn't load the save.",
       "cart.speed": "Speed", "cart.slower": "Slower", "cart.faster": "Faster", "cart.speedreset": "Back to normal speed",
 
