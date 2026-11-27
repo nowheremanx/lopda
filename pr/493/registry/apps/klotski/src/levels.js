@@ -22,17 +22,17 @@ var KLOTSKI_DATA = {
       rows: ["BBCC", "HNAA", "HOAA", "IPQR", "I@@S"] },
 
     /* ---- 2 stars: two holes and a corridor ---- */
-    { id: "k07", diff: 2, par: 24, name: { zh: "左右", en: "Sides" },
+    { id: "k07", diff: 2, par: 24, name: { zh: "左右", en: "Left, Right" },
       rows: ["NAAO", "HAAI", "H@@I", "JPQK", "JRSK"] },
     { id: "k08", diff: 2, par: 24, name: { zh: "似远实近", en: "Far Near" },
       rows: ["AABB", "AACC", "@@NO", "HIPJ", "HIQJ"] },
-    { id: "k09", diff: 2, par: 26, name: { zh: "单兵", en: "Lone" },
+    { id: "k09", diff: 2, par: 26, name: { zh: "单兵", en: "Lone Soldier" },
       rows: ["HINO", "HIJK", "AAJK", "AALP", "@QL@"] },
     { id: "k10", diff: 2, par: 29, name: { zh: "小路", en: "Trail" },
       rows: ["NOPQ", "RAAS", "TAAU", "VWXY", "@BB@"] },
-    { id: "k11", diff: 2, par: 31, name: { zh: "前呼后拥", en: "Front" },
+    { id: "k11", diff: 2, par: 31, name: { zh: "前呼后拥", en: "Entourage" },
       rows: ["NOAA", "BBAA", "CCDD", "EEFF", "@@PQ"] },
-    { id: "k12", diff: 2, par: 33, name: { zh: "双桥", en: "Twin" },
+    { id: "k12", diff: 2, par: 33, name: { zh: "双桥", en: "Twin Bridges" },
       rows: ["NAA@", "OAA@", "BBCC", "DDEE", "FFPQ"] },
 
     /* ---- 3 stars: the real thing ---- */
@@ -42,19 +42,19 @@ var KLOTSKI_DATA = {
       rows: ["@H@I", "NHJI", "OPJK", "AAQK", "AABB"] },
     { id: "k15", diff: 3, par: 39, name: { zh: "比翼横空", en: "Wings" },
       rows: ["BBAA", "CCAA", "DDEE", "N@OH", "P@QH"] },
-    { id: "k16", diff: 3, par: 43, name: { zh: "四将", en: "Four" },
+    { id: "k16", diff: 3, par: 43, name: { zh: "四将", en: "Four Generals" },
       rows: ["NHIO", "PHIJ", "AAKJ", "AAKQ", "@@BB"] },
     { id: "k17", diff: 3, par: 45, name: { zh: "一横易解", en: "One Bar" },
       rows: ["NAAO", "HAAI", "HPQI", "JBBK", "J@@K"] },
-    { id: "k18", diff: 3, par: 46, name: { zh: "勇闯五关", en: "Five" },
+    { id: "k18", diff: 3, par: 46, name: { zh: "勇闯五关", en: "Five Passes" },
       rows: ["NAAO", "PAAQ", "BBCC", "DDEE", "@FF@"] },
 
     /* ---- 4 stars: long corridors ---- */
     { id: "k19", diff: 4, par: 60, name: { zh: "雨声", en: "Rain" },
       rows: ["HAAN", "HAAO", "IBBJ", "IK@J", "PK@Q"] },
-    { id: "k20", diff: 4, par: 60, name: { zh: "双门", en: "Double" },
+    { id: "k20", diff: 4, par: 60, name: { zh: "双门", en: "Double Gate" },
       rows: ["NOPQ", "AAHI", "AAHI", "BBJK", "@@JK"] },
-    { id: "k21", diff: 4, par: 68, name: { zh: "四面八方", en: "Ways" },
+    { id: "k21", diff: 4, par: 68, name: { zh: "四面八方", en: "All Sides" },
       rows: ["@BB@", "NCCO", "HAAI", "HAAI", "PDDQ"] },
     { id: "k22", diff: 4, par: 73, name: { zh: "四面楚歌", en: "Siege" },
       rows: ["HNOI", "HAAI", "PAAJ", "KBBJ", "K@@Q"] },
@@ -64,7 +64,7 @@ var KLOTSKI_DATA = {
       rows: ["HAAI", "HAAI", "NOPQ", "JBBK", "J@@K"] },
 
     /* ---- 5 stars: the masters ---- */
-    { id: "k25", diff: 5, par: 92, name: { zh: "兵分三路", en: "Three" },
+    { id: "k25", diff: 5, par: 92, name: { zh: "兵分三路", en: "Three Routes" },
       rows: ["NAAO", "HAAI", "HBBI", "JPQK", "J@@K"] },
     { id: "k26", diff: 5, par: 100, name: { zh: "指挥若定", en: "Command" },
       rows: ["HAAI", "HAAI", "NBBO", "JPQK", "J@@K"] },
