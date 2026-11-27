@@ -597,7 +597,7 @@
       document.getElementById("ot").textContent = earned ? TXT.levelDone : TXT.over;
       var results = [];
       if (stars[levelNo - 1] >= 1 && levelNo < 10) results.push({ label: TXT.next, fn: function () { levelNo++; transition(showLevelCard); } });
-      results.push({ label: TXT.levelAgain, fn: function () { transition(function () { start("level"); }); } });
+      results.push({ label: TXT.levelAgain, fn: function () { transition(function () { start("level"); }); }, wide: results.length === 0 });
       results.push({ label: TXT.levels, fn: function () { transition(showLevels); }, wide: true });
       setButtons(results);
     } else if (MODE === "60") {
