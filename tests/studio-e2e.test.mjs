@@ -3870,7 +3870,8 @@ test("studio: on a question sheet the keyboard's A answers it and START does not
   await p.keyboard.press("x");
   await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 1);
   assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /副本/, "A was the question's yes");
-  await p.keyboard.press("z");
+  /* B steps back through the library (folder, folders) until the sheet closes */
+  for (let i = 0; i < 4 && !(await p.isHidden("#studio-sheet")); i++) { await p.keyboard.press("z"); await p.waitForTimeout(80); }
   await p.waitForSelector("#studio-sheet", { state: "hidden" });
   await p.keyboard.press("Enter");
   await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "true");
