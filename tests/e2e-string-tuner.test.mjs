@@ -47,7 +47,7 @@ const fakePad = ([lang, micAnswer, saved]) => {
     on(kind, fn) { (handlers[kind] = handlers[kind] || []).push(fn); },
     off() {},
     isDown() { return false; },
-    mic: { start() { window.__log.push("mic:start"); return Promise.resolve(micAnswer); }, stop() { window.__log.push("mic:stop"); } }
+    mic: { start() { window.__log.push("mic:start"); return micAnswer === "wait" ? new Promise(() => {}) : Promise.resolve(micAnswer); }, stop() { window.__log.push("mic:stop"); } }
   };
 };
 
@@ -60,7 +60,7 @@ async function open(t, { size = SMALL, lang = "zh", mic = "on", saved = null, st
   await p.addInitScript(fakePad, [lang, mic, saved]);
   await p.goto(`${base}/registry/apps/string-tuner/index.html`);
   await p.waitForFunction(() => document.getElementById("tname").textContent.length > 0);
-  if (start) { await p.tap("#splash"); await p.waitForTimeout(80); }
+  if (start) await p.waitForSelector("#splash", { state: "hidden", timeout: 3000 });
   return { p, errors };
 }
 /* a tap, then a frame for the screen to follow */
@@ -73,24 +73,26 @@ async function hear(p, hz, n = 8) {
   }
 }
 
-test("string-tuner: the start screen shows the box art and opens the mic only on a tap", { skip, timeout: 60000 }, async (t) => {
+test("string-tuner: the start screen shows the box art while the mic opens, at least a second, and needs no tap of its own", { skip, timeout: 60000 }, async (t) => {
   for (const size of [SMALL, LARGE]) {
     const { p, errors } = await open(t, { size, start: false });
-    await p.waitForTimeout(200);
-    assert.deepEqual(await p.evaluate(() => window.__log), [], "no mic before the tap");
+    assert.deepEqual(await p.evaluate(() => window.__log), ["mic:start"], "the mic is asked for at once");
     const r = await p.evaluate(() => {
-      const a = document.getElementById("art").getBoundingClientRect(), g = document.getElementById("go").getBoundingClientRect();
-      return { w: a.width, whole: a.width % 160 === 0, inside: a.top >= 0 && g.bottom <= innerHeight && a.right <= innerWidth, go: g.height >= 44 };
+      const a = document.getElementById("art").getBoundingClientRect();
+      return { w: a.width, whole: a.width % 160 === 0, inside: a.top >= 0 && a.bottom <= innerHeight && a.right <= innerWidth };
     });
-    assert.ok(r.whole && r.inside && r.go && r.w >= 160, JSON.stringify(r));
-    assert.equal(await p.textContent("#go"), "点一下，开话筒");
-    await p.tap("#art");
-    await p.waitForTimeout(80);
-    assert.deepEqual(await p.evaluate(() => window.__log), ["sfx:tap", "mic:start"]);
-    assert.equal(await p.isVisible("#splash"), false);
+    assert.ok(r.whole && r.inside && r.w >= 160, JSON.stringify(r));
+    assert.equal(await p.isVisible("#splash"), true);
+    await p.waitForTimeout(500);
+    assert.equal(await p.isVisible("#splash"), true, "still up before a second");
+    await p.waitForSelector("#splash", { state: "hidden", timeout: 1500 });
     assert.equal(await p.isVisible("#meter"), true);
     assert.deepEqual(errors, []);
   }
+  /* while the runtime waits for its tap-to-allow bar, the picture stays */
+  const { p } = await open(t, { mic: "wait", start: false });
+  await p.waitForTimeout(1500);
+  assert.equal(await p.isVisible("#splash"), true);
 });
 
 test("string-tuner: everything fits at 331x473 and 386x738, every control is 44 px or more, and nothing scrolls", { skip, timeout: 60000 }, async (t) => {
@@ -112,7 +114,7 @@ test("string-tuner: everything fits at 331x473 and 386x738, every control is 44 
 
 test("string-tuner: the mic opens at once; a sharp A shows A2 and its cents, an in-tune low E an octave up lights the lamp", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t);
-  assert.deepEqual(await p.evaluate(() => window.__log), ["sfx:tap", "mic:start"]);
+  assert.deepEqual(await p.evaluate(() => window.__log), ["mic:start"]);
   assert.equal(await p.textContent("#msg"), "拨一根弦");
   await hear(p, 110 * Math.pow(2, 14 / 1200));
   assert.equal(await p.textContent("#note"), "A2");
