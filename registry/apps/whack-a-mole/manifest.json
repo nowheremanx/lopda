@@ -22,12 +22,12 @@
     "................",
     "................"
   ],
-  "version": "4.1.0",
-  "description": "60 秒冲分，或无尽生存。戴头盔的砸两下，冒火花的雷别碰。",
+  "version": "4.2.0",
+  "description": "十关闯关、60 秒冲分或无尽生存。头盔两下，金鼠加分，避开地雷。",
   "i18n": {
     "en": {
       "name": "Mole Bop",
-      "description": "60s score attack or endless survival. Helmets take two hits; mines are a no-go."
+      "description": "10 levels, 60s score attack or endless survival. Helmets, gold moles and mines."
     }
   },
   "author": "Haowei Wu",
