@@ -331,7 +331,7 @@ test("sensor: tilt, shake and sound events reach PAD.on listeners; malformed one
   const a = app({ sensors: true }), log = [];
   a.PAD.on("tilt", (t) => log.push(["tilt", t.x, t.y, t.heading]));
   a.PAD.on("shake", () => log.push(["shake"]));
-  const snd = (s) => log.push(["sound", s.level, s.pitch]);
+  const snd = (s) => log.push("hz" in s ? ["sound", s.level, s.pitch, s.hz] : ["sound", s.level, s.pitch]);
   a.PAD.on("sound", snd);
   a.fromRuntime({ pad: 1, op: "tilt", x: 0.5, y: -0.25, heading: 90 });
   a.fromRuntime({ pad: 1, op: "tilt", x: 0, y: 0, heading: null });
@@ -340,10 +340,13 @@ test("sensor: tilt, shake and sound events reach PAD.on listeners; malformed one
   a.fromRuntime({ pad: 1, op: "shake" });
   a.fromRuntime({ pad: 1, op: "sound", level: 0.5, pitch: 440 });
   a.fromRuntime({ pad: 1, op: "sound", level: 0, pitch: "x" });
+  a.fromRuntime({ pad: 1, op: "sound", level: 0.5, pitch: 82, hz: 82.41 });
+  a.fromRuntime({ pad: 1, op: "sound", level: 0.5, pitch: null, hz: 82.41 });
+  a.fromRuntime({ pad: 1, op: "sound", level: 0.5, pitch: 82, hz: "x" });
   a.fromRuntime({ pad: 1, op: "shake" }, {});                       /* not from the parent */
   a.PAD.off("sound", snd);
   a.fromRuntime({ pad: 1, op: "sound", level: 1, pitch: null });
-  assert.deepEqual(log, [["tilt", 0.5, -0.25, 90], ["tilt", 0, 0, null], ["shake"], ["sound", 0.5, 440], ["sound", 0, null]]);
+  assert.deepEqual(log, [["tilt", 0.5, -0.25, 90], ["tilt", 0, 0, null], ["shake"], ["sound", 0.5, 440], ["sound", 0, null], ["sound", 0.5, 82, 82.41], ["sound", 0.5, null], ["sound", 0.5, 82]]);
 });
 
 test("sensor: the tilt's absolute flat reading passes through when valid, undefined on older runtimes", () => {
