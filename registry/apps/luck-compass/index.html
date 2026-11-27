@@ -2689,7 +2689,9 @@ function pageLayout(g, dt, info) {
     return out;
   }
   var yi = termLines(info.yi, 84), ji = termLines(info.ji, 84);
-  var boxH = Math.max(31, 15 + Math.max(yi.length, ji.length) * 12);
+  /* the seal takes the top 16 px, each line of terms 13 px (the font is 12 px high), then 4 px of margin */
+  var BOX_LINE = 13, boxH = 16 + Math.max(yi.length, ji.length) * BOX_LINE + 4;
+  layout.boxLine = BOX_LINE;
   layout.boxes.push({ x: left, y: y, w: 94, h: boxH, title: "宜", lines: yi });
   layout.boxes.push({ x: 114, y: y, w: 94, h: boxH, title: "忌", lines: ji });
   y += boxH + 5;
@@ -2803,7 +2805,7 @@ function drawAlmanacPage(g, offset, scroll, bottom) {
     g.rect(box.x + 3, by + 2, 18, 13, g.INK);
     g.text(box.title, box.x + 12, by + 2, { align: "center", color: g.PAPER });
     for (var bl = 0; bl < box.lines.length; bl++)
-      g.text(fitPageText(g, box.lines[bl], box.w - 6), box.x + box.w / 2, by + 16 + bl * 12,
+      g.text(fitPageText(g, box.lines[bl], box.w - 6), box.x + box.w / 2, by + 17 + bl * layout.boxLine,
         { align: "center", color: g.INK });
   }
   var boxBottom = 119 + layout.boxes[0].y - 83 + layout.boxes[0].h - shift;

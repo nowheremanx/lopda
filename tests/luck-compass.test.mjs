@@ -809,3 +809,17 @@ function todayKeyForTest() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
+
+test("宜 / 忌 boxes hold every term line inside their frame for every day of 2020-2030", () => {
+  const { app } = bootApp("zh", false);
+  const A = app.ctx.get("ALMANAC"), g = app.ctx.get("game").g, pageLayout = app.ctx.get("pageLayout");
+  for (let t = Date.UTC(2020, 0, 1); t < Date.UTC(2031, 0, 1); t += 86400000) {
+    const d = new Date(t), y = d.getUTCFullYear(), m = d.getUTCMonth() + 1, day = d.getUTCDate();
+    const layout = pageLayout(g, { y, m, d: day, week: d.getUTCDay() }, A.day(y, m, day));
+    for (const box of layout.boxes) {
+      const lastBottom = 17 + (box.lines.length - 1) * layout.boxLine + 12;
+      assert.ok(lastBottom <= box.h - 2, `${y}-${m}-${day} ${box.title}: ${box.lines.length} lines in ${box.h} px`);
+      for (const line of box.lines) assert.ok(g.measure(line) <= box.w - 6, `${y}-${m}-${day}: ${line}`);
+    }
+  }
+});
