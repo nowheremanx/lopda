@@ -184,55 +184,55 @@ var Solver = (function () {
       sizeNow: "重开 {n}×{n}", watch: "看它解", prev: "上一张", start: "开始", nextPic: "下一张",
       use: "用这张", retake: "重拍", moves: "{n} 步", best: "最佳 {n}", helped: "助", noRecord: "用了提示，不计记录",
       intro: "拍一张，或挑一张。", nocam: "这台掌机不能拍照，用内置图片玩。",
-      nophoto: "没拿到照片，用内置图片玩。", taking: "拍照中…", saved: "上次那盘还在这里。",
+      nophoto: "没拿到照片，用内置图片玩。", taking: "拍照中…", saved: "上次那盘还在这里。", mainSaved: "上次那盘还在，按 B 回去接着拼；开新的一局会换掉它。",
       look: "就用这张吗？", won: "拼好了！{n} 步。", wonArcade: "拼好了！{n} 步，剩 {t}。",
       record: "新纪录！", unlocked: "下一局是 4×4。", trick: "4×4 有窍门：试试怎么玩。",
-      solved: "拼好了！", timeUpAt: "时间到。已拼好 {k}/{n}", left: "剩 {t}", picture: "图 {i}/{n}",
+      solved: "拼好了！", timeUpAt: "时间到。已拼好 {k}/{n}。", left: "剩 {t}", bestLeft: "最佳剩 {t}", bestLeftMsg: "最佳剩 {t}。", picture: "图 {i}/{n}",
       normal: "普通", arcade: "街机", locked: "这台掌机不能拍照。",
       kTitle: "方向键 选　A 确定　B 主菜单", kMain: "方向键 选　A 确定",
-      kMainBack: "方向键 选　A 确定　B 返回", kGallery: "←→ 换图　↑↓ 难度　A 开始　B 返回",
+      kMainBack: "方向键 选　A 确定　B 上次那盘", kGallery: "←→ 换图　↑↓ 难度　A 开始　B 返回",
       kPreview: "A 用这张　B 重拍", kCut: "A 跳过",
       kPlay: "方向键 推　A 看原图　START 菜单　SELECT 提示", kMenu: "方向键 选　A 确定　B 返回",
-      kLesson: "方向键 推　SELECT 提示　START 退出", kLessonDone: "A 下一课　START 退出", kSolved: "A 继续", kWon: "方向键 选　A 确定", kLost: "方向键 选　A 确定",
+      kLesson: "方向键 推　SELECT 提示　START 退出", kLessonDone: "A 下一课　START 退出", kSolved: "A 继续", kWon: "方向键 选　A 确定　B 主菜单", kLost: "方向键 选　A 确定　B 主菜单", kDemo: "START 退出",
       lessonDone: "做到了！", lessonN: "第 {n} 课",
       lesson1: "方向键把空格旁边的块推进空格。箭头指着第一步：先推 5 号块，再推 8 号块；按 SELECT 可再看。",
       lesson2: "把 1 号块送到左上角。编号就在每块左上角，按 SELECT 可以再看箭头。",
       lesson3: "一行最后两块：把 3 号块放到 2 号块下面，再一起转进去。",
       lesson4: "一行拼好就别再动它。最后两行按列来。先看一遍。",
       demoEnd: "看完了：拼好一行，再拼下一行。",
-      stage3: ["第 1 行：送 1 号块", "第 1 行：最后两块一起", "第 1 列：3 和 6 一起", "最后 2×2：转到位"],
+      stage3: ["第 1 行：送 1 号块", "第 1 行：最后两块一起", "第 1 列：4 和 7 一起", "最后 2×2：转到位"],
       stage4: ["第 1 行：送 1 号块", "第 1 行：送 2 号块", "第 1 行：最后两块一起", "第 2 行：送 5 号块",
         "第 2 行：送 6 号块", "第 2 行：最后两块一起", "最后两行：9、13 一起", "最后两行：10、14 一起",
         "最后 2×2：转到位"],
       pics: { lake: "山湖", lighthouse: "灯塔", city: "夜城", dunes: "沙丘", pines: "松林", blossom: "花见" },
-      quitLesson: "退出教程", nextLesson: "下一课", backMain: "回主菜单" },
+      quitLesson: "退出教程", nextLesson: "下一课", backMain: "回主菜单", watchAgain: "再看一遍" },
     en: { title: "SNAPTILE", snap: "Take a photo", gallery: "Built-in pictures", modeLabel: "Mode",
       howto: "How to play", mainMenu: "Main menu", cont: "Continue", resume: "Resume", next: "Next puzzle", again: "Play again",
       sizeNow: "Restart {n}×{n}", watch: "Watch it solve", prev: "Previous", start: "Start", nextPic: "Next",
       use: "Use this", retake: "Retake", moves: "{n} moves", best: "best {n}", helped: "aid", noRecord: "Hints used: not recorded",
       intro: "Snap one, or pick one.", nocam: "No camera here: playing with the built-in pictures.",
-      nophoto: "No photo: playing with the built-in pictures.", taking: "Camera…", saved: "Your last puzzle is here.",
+      nophoto: "No photo: playing with the built-in pictures.", taking: "Camera…", saved: "Your last puzzle is here.", mainSaved: "Your last puzzle is kept: B goes back to it. A new one replaces it.",
       look: "Use this one?", won: "Solved in {n} moves!", wonArcade: "Solved in {n} moves, {t} left!",
       record: "New record!", unlocked: "Next one is 4×4.", trick: "4×4 has a trick: try How to play.",
-      solved: "Solved!", timeUpAt: "Time up. {k}/{n} in place.", left: "{t} left", picture: "Picture {i}/{n}",
+      solved: "Solved!", timeUpAt: "Time up. {k}/{n} in place.", left: "{t} left", bestLeft: "best {t}", bestLeftMsg: "Best: {t} left.", picture: "Picture {i}/{n}",
       normal: "Normal", arcade: "Arcade", locked: "No camera on this handheld.",
       kTitle: "Arrows pick  A ok  B main menu", kMain: "Arrows pick  A ok",
-      kMainBack: "Arrows pick  A ok  B back", kGallery: "←→ picture  ↑↓ size  A start  B back",
+      kMainBack: "Arrows pick  A ok  B last puzzle", kGallery: "←→ picture  ↑↓ size  A start  B back",
       kPreview: "A use  B retake", kCut: "A skip",
       kPlay: "D-pad slide  A peek  START menu  SELECT hint", kMenu: "Arrows pick  A ok  B back",
-      kLesson: "D-pad slide  SELECT hint  START leave", kLessonDone: "A next  START leave", kSolved: "A continue", kWon: "Arrows pick  A ok", kLost: "Arrows pick  A ok",
+      kLesson: "D-pad slide  SELECT hint  START leave", kLessonDone: "A next  START leave", kSolved: "A continue", kWon: "Arrows pick  A ok  B main menu", kLost: "Arrows pick  A ok  B main menu", kDemo: "START leave",
       lessonDone: "Done!", lessonN: "Lesson {n}",
       lesson1: "The arrows push the piece next to the gap into it. The arrow marks the first move: push tile 5 up, then tile 8 left. Press SELECT to see it again.",
       lesson2: "Bring tile 1 to the top-left corner. Each number sits in its tile's top-left corner; SELECT shows the arrow again.",
       lesson3: "The last two in a row: put tile 3 under tile 2, then turn them in together.",
       lesson4: "Once a row is done, leave it alone. The last two rows go column by column. Just watch.",
       demoEnd: "That is the idea: one row, then the next.",
-      stage3: ["Row 1: bring tile 1", "Row 1: last two together", "Column 1: 3 and 6 together", "Last 2×2: turn it home"],
+      stage3: ["Row 1: bring tile 1", "Row 1: last two together", "Column 1: 4 and 7 together", "Last 2×2: turn it home"],
       stage4: ["Row 1: bring tile 1", "Row 1: bring tile 2", "Row 1: last two together", "Row 2: bring tile 5",
         "Row 2: bring tile 6", "Row 2: last two together", "Last rows: 9 and 13 together", "Last rows: 10 and 14 together",
         "Last 2×2: turn it home"],
       pics: { lake: "Lake", lighthouse: "Lighthouse", city: "Night city", dunes: "Dunes", pines: "Pines", blossom: "Blossom" },
-      quitLesson: "Leave lesson", nextLesson: "Next lesson", backMain: "Main menu" }
+      quitLesson: "Leave lesson", nextLesson: "Next lesson", backMain: "Main menu", watchAgain: "Watch again" }
   }[LANG];
   function tx(key, n) { return String(TXT[key]).replace(/\{n\}/g, n); }
   function fmt(s, vars) { return s.replace(/\{(\w+)\}/g, function (_, k) { return vars[k] === undefined ? "" : vars[k]; }); }
@@ -1126,10 +1126,14 @@ var Solver = (function () {
   function stopDemo() {
     if (!S.demo) return;
     clearTimeout(S.demo.timer); S.demo = null; S.note = "";
-    if (S.mode === "tutorial" && S.screen === "lesson" && !S.lessonDone && LESSONS[S.lesson].demo !== undefined) {
-      S.lessonDone = true; S.doneText = TXT.demoEnd; sfx("ok");
-    }
     draw();
+  }
+  /* The lesson's demo is the lesson: a key or a tap does not stop it (that used to count it as watched after a
+     second), only START leaves it, and coming back plays it again from the start. */
+  function lessonDemo() { return !!S.demo && S.mode === "tutorial" && S.screen === "lesson"; }
+  function demoLesson() { return S.mode === "tutorial" && LESSONS[S.lesson].demo !== undefined; }
+  function backFromMenu() {
+    if (S.menuFrom === "lesson" && demoLesson() && !S.lessonDone) startLesson(S.lesson); else go(S.menuFrom);
   }
   function hint() {
     if (S.lessonDone || (S.screen !== "play" && S.screen !== "lesson")) return;
@@ -1228,7 +1232,10 @@ var Solver = (function () {
       if (S.mode === "tutorial") return [["resume", TXT.resume], ["quit", TXT.quitLesson]];
       return [["resume", TXT.resume], ["size", tx("sizeNow", S.n === 3 ? 4 : 3)], ["watch", TXT.watch], ["mainmenu", TXT.mainMenu]];
     }
-    if (S.screen === "lesson" && S.lessonDone) return [["nextlesson", S.lesson < LESSONS.length - 1 ? TXT.nextLesson : TXT.backMain]];
+    if (S.screen === "lesson" && S.lessonDone) {
+      var on = [["nextlesson", S.lesson < LESSONS.length - 1 ? TXT.nextLesson : TXT.backMain]];
+      return demoLesson() ? on.concat([["rewatch", TXT.watchAgain]]) : on;
+    }
     if (S.screen === "solved") return S.anim && S.anim.done ? [["goon", TXT.cont]] : [];
     if (S.screen === "won") return [["next", TXT.next], ["mainmenu", TXT.mainMenu]];
     if (S.screen === "lost") return [["again", TXT.again], ["mainmenu", TXT.mainMenu]];
@@ -1237,20 +1244,23 @@ var Solver = (function () {
   function infoText() {
     var sc = S.screen, aid = S.helped ? "  " + TXT.helped : "";
     if (S.mode === "tutorial") return tx("lessonN", S.lesson + 1) + "  " + tx("moves", S.moves);
-    if (sc === "main") return S.nextN + "×" + S.nextN + "  " + (S.arcade ? TXT.arcade : TXT.normal);
+    if (sc === "main") return S.nextN + "×" + S.nextN + "  " + (S.arcade ? TXT.arcade + bestLeftText(S.nextN) : TXT.normal);
     if (sc === "gallery") return S.nextN + "×" + S.nextN + "  " + fmt(TXT.picture, { i: S.galleryIndex + 1, n: BUILTINS.length })
       + "  " + picName(BUILTINS[S.galleryIndex]);
     if (sc === "title") return S.n + "×" + S.n + "  " + tx("moves", S.moves) + aid;
     if (sc === "cut") return S.n + "×" + S.n + "  " + (S.gameArcade ? TXT.arcade : TXT.normal);
     if (sc !== "play" && sc !== "menu" && sc !== "solved" && sc !== "won" && sc !== "lost") return "";
     var out = S.n + "×" + S.n + "  " + tx("moves", S.moves);
-    if (S.gameArcade) out += "  " + fmt(TXT.left, { t: clockText(S.left) });
+    if (S.gameArcade) out += "  " + fmt(TXT.left, { t: clockText(S.left) });   /* no room for the best here: main, won and lost show it */
     else { var best = S.best[String(S.n)]; if (best) out += "  " + tx("best", best); }
     return out + aid;
   }
+  /* the arcade's best is the most time left on a win; shown where the normal game shows its best moves */
+  function bestLeftText(n) { var t = S.bestTime[String(n)]; return t ? "  " + fmt(TXT.bestLeft, { t: clockText(t) }) : ""; }
   function wonText() {
     var s = S.gameArcade ? fmt(TXT.wonArcade, { n: S.moves, t: clockText(S.left) }) : tx("won", S.moves);
     if (S.record || S.timeRecord) s += " " + TXT.record;
+    else if (S.gameArcade && !S.helped && S.bestTime[String(S.n)]) s += " " + fmt(TXT.bestLeftMsg, { t: clockText(S.bestTime[String(S.n)]) });
     if (S.unlockedNow) s += " " + TXT.unlocked;
     if (S.showTrick) s += " " + TXT.trick;
     if (S.helped) s += " " + TXT.noRecord;   /* a hinted game never counts, so say it rather than leave the best looking beaten */
@@ -1261,6 +1271,7 @@ var Solver = (function () {
     if (sc === "title") return "kTitle";
     if (sc === "main") return S.hasSave ? "kMainBack" : "kMain";
     if (sc === "lesson" && S.lessonDone) return "kLessonDone";
+    if (sc === "lesson" && S.demo) return "kDemo";
     return ({ gallery: "kGallery", preview: "kPreview", cut: "kCut", play: "kPlay", menu: "kMenu",
       lesson: "kLesson", solved: "kSolved", won: "kWon", lost: "kLost" })[sc] || "";
   }
@@ -1282,7 +1293,7 @@ var Solver = (function () {
     var sc = S.screen;
     document.getElementById("info").textContent = infoText();
     if (sc === "title") msg(S.hasSave ? TXT.saved : TXT.intro, false);
-    else if (sc === "main") msg(S.mainNote || TXT.intro, false);
+    else if (sc === "main") msg(S.mainNote || (S.hasSave ? TXT.mainSaved : TXT.intro), false);   /* one save: say so before a new game replaces it */
     else if (sc === "gallery") msg(picName(BUILTINS[S.galleryIndex]), false);
     else if (sc === "preview") msg(TXT.look, false);
     else if (sc === "cut") msg("", false);
@@ -1291,7 +1302,8 @@ var Solver = (function () {
     else if (sc === "lesson") msg(S.lessonDone ? S.doneText : (S.note || lessonText()), S.lessonDone);
     else if (sc === "solved") msg(S.anim && S.anim.done ? TXT.solved : "", false);
     else if (sc === "won") msg(wonText(), false);
-    else if (sc === "lost") msg(fmt(TXT.timeUpAt, { k: inPlace(), n: S.n * S.n }), true);
+    else if (sc === "lost") msg(fmt(TXT.timeUpAt, { k: inPlace(), n: S.n * S.n - 1 }) + (S.bestTime[String(S.n)]   /* the gap is not a piece */
+      ? " " + fmt(TXT.bestLeftMsg, { t: clockText(S.bestTime[String(S.n)]) }) : ""), true);
     var fk = footerKey();
     document.getElementById("ft").textContent = fk ? TXT[fk] : "";
     S.items = menuItems();
@@ -1325,7 +1337,7 @@ var Solver = (function () {
     else if (id === "howto") { sfx("tap"); startLesson(0); }
     else if (id === "cont") { sfx("tap"); continueGame(); }
     else if (id === "mainmenu") { sfx("tap"); go("main"); }
-    else if (id === "resume") { sfx("tap"); go(S.menuFrom); }
+    else if (id === "resume") { sfx("tap"); backFromMenu(); }
     else if (id === "size") { sfx("tick"); S.nextN = S.n === 3 ? 4 : 3; S.arcade = S.gameArcade; startGame(); }
     else if (id === "watch") { sfx("tap"); go("play"); startDemo(); }
     else if (id === "use") { sfx("ok"); S.pic = S.shot; S.picKey = ""; S.src = S.previewFrom; S.note = ""; startGame(); }
@@ -1337,6 +1349,7 @@ var Solver = (function () {
     else if (id === "again") { sfx("tap"); S.nextN = S.n; S.arcade = S.gameArcade; startGame(); }
     else if (id === "quit") { sfx("tap"); endTutorial(); }
     else if (id === "nextlesson") { sfx("tap"); nextLesson(); }
+    else if (id === "rewatch") { sfx("tap"); startLesson(S.lesson); }
     else if (id === "goon") { sfx("tap"); go("won"); }
   }
 
@@ -1363,18 +1376,20 @@ var Solver = (function () {
     PAD.on("press", function (b) {
       if (S.busy) return;
       if (S.screen === "cut") { if (b === "a" || b === "b" || b === "start" || b === "select") skipIntro(); return; }
+      if (lessonDemo()) { if (b === "start") { S.menuFrom = "lesson"; sfx("tap"); go("menu"); } return; }
       if (S.demo) { stopDemo(); return; }
       var sc = S.screen, dir = b === "up" || b === "down" || b === "left" || b === "right";
       if (sc === "play" || sc === "lesson") {
         if (sc === "lesson" && S.lessonDone) {
           if (b === "a") choose();
-          else if (b === "start") { S.menuFrom = "lesson"; sfx("tap"); go("menu"); }
+          else if (dir) moveSel(b);
+          else if (b === "start" || b === "b") { S.menuFrom = "lesson"; sfx("tap"); go("menu"); }
           return;
         }
         if (dir) push(b);
         else if (b === "a") { S.peek = true; paint(); }
         else if (b === "select") hint();
-        else if (b === "start") { S.menuFrom = sc; sfx("tap"); go("menu"); }
+        else if (b === "start" || (b === "b" && sc === "lesson")) { S.menuFrom = sc; sfx("tap"); go("menu"); }   /* a lesson is not a game: B leaves it too */
         return;
       }
       if (sc === "solved") { if (b === "a") { if (S.anim.done) choose(); else endAnim(); } return; }
@@ -1405,12 +1420,13 @@ var Solver = (function () {
       if (sc === "menu") {
         if (dir) moveSel(b);
         else if (b === "a") choose();
-        else if (b === "b") { sfx("tap"); go(S.menuFrom); }
+        else if (b === "b") { sfx("tap"); backFromMenu(); }
         return;
       }
       if (sc === "won" || sc === "lost") {
         if (dir) moveSel(b);
         else if (b === "a") choose();
+        else if (b === "b") { sfx("tap"); go("main"); }   /* B goes back, as on every other screen with a menu */
       }
     });
     PAD.on("release", function (b) { if (b === "a" && S.peek) { S.peek = false; paint(); } });
@@ -1427,6 +1443,7 @@ var Solver = (function () {
   var touch = null, swallow = false, SWIPE = 12;
   cv.addEventListener("pointerdown", function (e) {
     if (S.screen === "cut") { skipIntro(); return; }
+    if (lessonDemo()) return;
     if (S.demo) { stopDemo(); return; }
     if (S.screen !== "play" && S.screen !== "lesson") return;
     if (S.screen === "lesson" && S.lessonDone) return;
@@ -1469,6 +1486,7 @@ var Solver = (function () {
       arcade: S.arcade, gameArcade: S.gameArcade, left: S.left, arcadeTotal: S.arcadeTotal,
       best: S.best[String(S.n)] || 0, bestTime: S.bestTime[String(S.n)] || 0,
       gallery: S.galleryIndex, pictures: BUILTINS.map(picName), fuse: document.getElementById("fuse").className,
+      msg: document.getElementById("msg").textContent, ft: document.getElementById("ft").textContent,
       intro: S.intro ? { phase: S.intro.ms < 300 ? "cut" : S.intro.ms < 600 ? "drop" : "mix", ms: S.intro.ms, gap: S.gap, total: S.intro.total } : null,
       attract: S.attract ? { index: S.attract.index, n: S.attract.n, phase: S.attract.phase, moves: S.attract.i, plan: S.attract.plan.length, moving: !!S.attract.anim } : null };
   } };
