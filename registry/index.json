@@ -705,7 +705,7 @@
       ],
       "version": "1.6.0",
       "released": "2026-10-19",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "学习平假名和片假名（含浊音、半浊音），听发音，四选一小测，每天复习到期假名。",
       "i18n": {
         "zh": {
@@ -720,8 +720,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/kana-cards/index.html",
-      "sha256": "0b6cf46d96b02f3b00ea04016adfcb37d7923f7128ffdb41943bcb9919f72677",
-      "bytes": 46615
+      "sha256": "9a391f4b99b3738795ebdebdeec68324ebd9995fd7bca7c7b7290f0d593a88d8",
+      "bytes": 46671
     },
     {
       "spec": "lopda/1",

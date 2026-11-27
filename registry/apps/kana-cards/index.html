@@ -48,8 +48,9 @@
   #reference button.m34 { background: #7d8a58; color: #1f2a14; }
   #reference button.m5 { background: #1f2a14; color: #a3ad7e; }
   #reference button.selected { background: #1f2a14; color: #a3ad7e; border-width: 4px; }
-  /* on a mastered (ink) cell the selection is a paper ring, so the cell is still readable as ink */
-  #reference button.m5.selected { box-shadow: inset 0 0 0 3px #a3ad7e; }
+  /* mastered cells are ink too, so the cursor always adds a paper ring inside its border:
+     the selected cell never looks like just another mastered one */
+  #reference button.selected { box-shadow: inset 0 0 0 3px #a3ad7e; }
   /* the list's cut edge: four rows of ink dither on the paper, denser towards the edge */
   .cue { display: none; position: absolute; left: 0; right: 0; height: 4px; z-index: 2; pointer-events: none; background-repeat: no-repeat; background-size: 100% 1px; }
   .cue.show { display: block; }
