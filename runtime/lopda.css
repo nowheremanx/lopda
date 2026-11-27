@@ -254,7 +254,7 @@ textarea::placeholder{color:var(--ink-2)}
 .finder .live-tag{position:absolute;left:10px;top:8px;font-family:var(--f-pix);font-size:16px;background:var(--ink);color:var(--lcd);padding:0 4px;letter-spacing:.1em}
 .finder{cursor:pointer}
 /* settings */
-.settings{padding:14px;display:flex;flex-direction:column;gap:14px;max-width:420px}
+.settings{padding:14px;display:flex;flex-direction:column;gap:14px}
 .set-row{display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--ink-2);padding-bottom:12px;font-size:16px}
 .set-row .btn{padding:6px 14px;min-width:56px}
 /* the short settings menu: one row per setting, the long parts behind a row. Its buttons are 44 px like every .btn;
