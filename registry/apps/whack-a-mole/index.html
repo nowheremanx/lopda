@@ -16,7 +16,11 @@
   #ov.title-view { gap: 4px; }
   #ov h1 { margin: 0; font-size: 26px; letter-spacing: 2px; }
   #op { margin: 0; font-size: 15px; line-height: 1.45; white-space: pre-line; }
-  #title-slot { width: 160px; height: 160px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; letter-spacing: 3px; }
+  #title-slot { position: relative; width: 160px; height: 160px; flex: none; }
+  #title-art { display: block; width: 160px; height: 160px; border: 0; image-rendering: pixelated; }
+  /* the name sits on the picture's flat dark corner (about 74 x 46 of its 160 x 160) */
+  #title-name { position: absolute; left: 6px; top: 5px; width: 72px; height: 44px; display: flex; align-items: center; justify-content: center;
+    color: #a3ad7e; font-size: 20px; font-weight: bold; line-height: 20px; letter-spacing: 1px; text-align: center; white-space: pre-line; }
   #btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 280px; flex: none; }
   #btns.level-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   #btns button { min-height: 44px; padding: 8px 6px; font-size: 15px; }
@@ -38,7 +42,7 @@
   <div id="stage">
     <canvas id="c" width="120" height="150"></canvas>
     <div id="ov">
-      <div id="title-slot">打地鼠</div>
+      <div id="title-slot"><canvas id="title-art" width="160" height="160"></canvas><div id="title-name"></div></div>
       <h1 id="ot">打地鼠</h1>
       <p id="op"></p>
       <div id="btns"></div>
@@ -223,13 +227,24 @@
     for (var i = 0; i < 3; i++) s += i < n ? "*" : "-";
     return s;
   }
+  /* the title picture: the owner's garden at dusk, reduced to the four tones, 160 x 160, packed 2 bits a pixel
+     (0 ink, 1 dark, 2 mid, 3 paper); written with putImageData only */
+  var TITLE_PIC = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFVVVVVVVVVVVVVVVVVVVVVVVVP////////////////////////wAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqqqqqqqq8AAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqqqqqqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqqqqqqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqqqqqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqqqqqqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqqqqqqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqqqqqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqqqqqqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqqqqqqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqqqqqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqqqqqqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqqqqqqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqqqqqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqqqAKqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqqP8qqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqL/KqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqoEAAKqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqoKoIqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqgP/wKqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqqqi/IqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqqqqosOKqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqqivKqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqqgAAACAAqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqoAv8AAD/IqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqKL/8m//RiqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqqqqqqqqqsCv/wv/4AqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqqqqqqqqqq4Jn8vqWKqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqgAf/wAKqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqqgqqiqqqKqqqL/8KqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqriqjyqo4qqqC//SqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqi6qj/Ko+yqqiv/0qqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqo+qo7yqPsqqoq/+KqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqgLsAO8AC7CqqKuniqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqiy7XzvP4uwqqiqo4qqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqoY61o7hVPsKqoiCAKqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqgPoAO0AD7Cqqrgi6qqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqi3qjtKo+iqqqoiqqqqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVUqqqqqovwA7wAPsKqqqIqqqqqrAAAFVVVVVVVVVVVVVVVVVVVVVVVVKqqqqqP+vO8vj7CqqqiKqqqqqwAABVVVVVVVVVVVVVVVVVVVVVVVVT/////y7BTvFQ7gaq64ACqrqqsAAAVVVVVVVVVVVVVVVVVVVVVVVVU/////0+wA7yCO4uqqoH8Cu6qqAAAFVVVVVVVVVVVVVVVVVVVVVVVVP////3L7dO41yuO67oF/oOrvugAABVVVVVVVVVVVVVVVVVVVVVVVVT////7S6ejqLorx2roFbqjqeuoAAAVVVVVVVVVVVVVVVVVVVVVVVVU/////tAWqAHrQCnroFq6uOqq6AAAAAAAAAAAAAAAAAAAAAAAAAAAAP/////u6quq66ruC4Fumr5P+7gAADu+677r/////////////////////////////////AIFpqq6j//4AAA+67rrv/////////////////////////////////CgJqam6qP/+AAAP6rqqv/////////////////////////////////ygF+qqqrg//gAAD6qqqr/////////////////////////////////8QFpaqpa+D/4AAA+66rr//////////////////////////////////AJpqqql+k/+AAAO77ruv/////////////////////////////////wF6qqqlVpP/gAAD6qqqv/////////////////////////////////8FqaqqVlVT/4AAA+qrqq/////////////////////////////////8FpaqqWlVT/+AAAO77rq/////////////////////////////////8FqaqqWlVT//gAAD7rquv/////////////////////////////////FqaqqWlVQ//4AAA7qqur/////////////////////////////////BaqqqWlVU//+AAAPqrqq///////////////////////f/////////CaaqqWpVU///gAAD7rquv//////////////////////1/////////6qaqqWpUUP//4AAA7quuv////////////////////////////////yWaqqWpQAP//+AAAPqqqq///////////////////////f/////A/f8qWqqWpQoP///gAAD6qqqv///////////////////8P/3/8///yP//KqaqmlUqg///4AAA7ruuv///////////////1///wM///8T//+j//yqpqWlUKqD//+AAAPuuq6///////////////5f//Auj//og///Ev/8qqmWlVBqoP//gAADuq6q/////qq///////+qV//DK4PqqA/6fgP//SqqWlVQGmg//4AAA7quq7///7///////+///P//KiuI+v///r//q/8KqllVUAaaD/+AAAPuu+u///+////////v//E9/yoKAP////+//7//wqqVVUMBpoP/gAADu+6uv///////////7//wf/8AgAD/X///v/////CqpVUPwGWg/4AAA+6qqr///////////6///P/8v//4P9///+/////4KqlUP/AaaD+AAAPqqqq///7/Wqqpf/+v////8AFVVA////////+vqgqpUP/8BpoPgAADu6quv//79apVWqP/v/////BVaqqD////+//qvXqAqkP//wGmg4AAA+6uuv//+9aVVVVp/7//P//BVqqoA/P///v+qfHFaDoP///AaaCAAAO6qq7//+/ZVAAFWn7//I//BgCqq8DP///7+lcDAVUAP///8BqogAAD7ruq///vaUAAAFZ9//9j/xo/KqPw8////un8MAAFq+////8GqoAAA7vuu///v6lAAAAKff//AP8q8yqj8f////3p8MAABWvv////gaqAAAKuuq///7/qgAAAq/r/////Wv9oCfL////++wAAAAV/6////+BqgAACuq6r/////qoABqv7/////Fq9oMEKP////6qQIAAC//v////8FoAAAqqqr/////+6qqq/6/////yqqvw+qT//x/++oAoGSAP+/////wWAAAKuuq///v///////+////z8qqr//6pP/yr/v6iI/8Cj/v/////BgAACu66///7////////v/1/8/Kqq/j6qT/8K/6//AP/wj///////8IAAAqqq///7////////b/9f//CqqvAOqk//9//f/wj/8A//v/////yAAAKqq///7////////3/////waqqPwqpP/f//2/wCA8gD/7//////gAACuu7//+////////+/////8VqqgAKqT////+v8/iA+s//v/////4AAAq67///v////////v////AFqqqqqqkA//+v7/PAoK6P/7/////+AAAK6rv//v///////////1/wBqqqqqqpAP/qv+vywCCuAP/v/////gAACuq///7/yqqqp///////FGqqqv/+qUaP6v/roKIggAAI7/////4AAAq6///+/qpVVqm/+////FRqqq///6VCo///+6pSIkpKKPv////+AAAK7///+/alVVVaX/v///6gaoq////VQKv////6qKArwiD7/////gAACqr///v6VUABVZ/n///z6Fqiv///5UCoP//+//yI//Aj//////4AAAqr///v2VAAAAVn6///yugGov///6kBaj///v/8KP/wg/7////+AAAK7///7+lAAAABp+//P1qUAKiv//qkBpZf//7/8vw/wAP+/////gAACr///7/qQAAAAqfv/19aQqAAqqplAAWlXAP+v/L+Px6o/7////4AAArv//+/+pAAAAqvb/8PWkqqAJAAUAqVVVxf/3/yqj8v+P+////+AAAK///+v/6qqqqqv3////Vr+qgGqgKqqlX///9/8qo/K+j/7////gAACn///v//+qqqq/5////1a6qoGqqiqqmV////r/L6P8/r//////4AAAr///v///6qq//+v////WqqpWqqoKqpV////+/yqToCoL/7///+AAAL///7/////////r///f/VqqX6qqWqpV9f///rVKgCoFqD/v///gAAC///+/////////7/////9VVWqqqqVVf/////52qAimqqJP7///4AAAv///v////////+///////9VqqqpVf//////+f6iAj/ACf+///+AAAL///v/////////////////9VVWpX////////3/8IJ/ygoD7///gAAC///7/////////r/////////9VVf////////+//wg/8Ioo+///4AAAv//7//+qqv///7/////////////////////////AD/ygI/v//+AAAL//7//qqqqr//+/////////////////////////6UP/II/+///gAAC//+/+qlVWqr//v//////////////////////f/yrj/+I//v//4AAAv//v+pVVVVqv/r//////////////////////3/8qo/8CP/+//+AAAL//7+lVQAFVa/7/wA///8kAI////////8pAP/v/7aP/II//v//gAAC//7+lUAAAFWv1/AAHz/8oPyj///////8YAgP69Bui/H/D////4AAAv/+/ZUAAAAFq9fKKoXP/IuqJP//////wgKgE/ugJgXz/o//v/+AAAL///2kAAAABavvPK+go/AP6ls//////AgP6hD76kApcv+P////gAAC//v9pAAAAAKnrDP7WCPIMMKrD/////w2o/8IOf/aqnKfj//v/4AAAv/v/qoAAAAqr7zS2LogPL8Kog/////8sqy/DD3////8/4//+/+AAAL/7/+qqQAKqv984sK6Iz9vK6IP/////PLuOjz+/////P4P//v/gAAC/7///qqqqqv/fyBKviPLGiqiP/////8p7ogz/v////y+D//+/4AAAv+//////////3+Kg/SL8tCvGP//////DiqLw/9//8CUqigv/v+AAAL///////////6/gqACi+K6pLy//////4eAK4r/f//qmQCmp///gAAC///////////+/6CoKieoOgqBf/////6CqLoq/3/+qqqKlqv//4AAAvr//////////f/qAACv6iYKCf//////qCigq/9//qqqlqv//7+AAAL7//////////X/6qq///6qlqv//////+qqqr//n/////////+/gAAC+//////////1/////////////////////////9//////////v4AAAu//////////+v/////////////////////////v/////////++AAAKv/////////9v/////////////////////////+//////////rgAACv//////////b//////////9VVVX///////////v/////////+4AAAr///6qr////1//////////VqqqqV//////////6////2qr///qAAAK//9aqqX///1/////////9aqqqqql//////////v///WqqVv/+gAAC//1qqqqVf/+f////////1aqlVVqqm/////////7//1aqqql//4AAAv+alVVVal//v/wA/////WpVVVVVVal////ygA////mpVVVWqf+AAAL/alVVVVaX/7/wqgP///WpVVVVVVWqX///CgAg/7/mlVVVVWr/gAAC/alVVVVVpf+/wQAoP//WpVVVVVVVap///CD/Ev+/2lVVVVVaf4AAAv2lVAAFVWn9/wB/oj//1pVVQAAFVVqX//OC/4I/v9lVUAAVVp+AAAL+lQAAAAVp/fMI+6BD/xpVUAAAAAFWpf/P6Dvyj69pUAAAAFWfgAAC9lQAAAAAWv3LGj7oLP8qVQAAAAAAVan/zStLsI+tqUAAAAAFp4AAAvZAAAAAAGr9yxqLqPT9ppAAAAAAABpaf88qoLCP3akAAAAAAaeAAAL2gAAAAACq9csaoIDn/aakAAAAAAAamn/CK+gCD9eqAAAAAAKngAAC/qgAAAACqvn+iug+j/1alqQAAAAapqW//JKqpT/r6oAAAAAqr4AAAv6qAAAAKqvr/KPouk/9WpqlQAABqqlZ//S4UqC/9/qoAAAAqr+AAAL/qqgABqq/6/AoAukP/1paqlalVWqlVf/lPwKgv/r+qoAAKqr/gAACv+qqqqqr/+vqKoqoK//VapWqpqpaqF//6oKKin/7/+qqqqqr/oAAAq//qqqqr//r6qqiCqv//VVWqlqqVZf///6qgKr//v/+qqqq//qAAAK7////////3/6oAKqv///9RqlWqlX/////qqqv//7////////ugAACrv///////1//qqqqv/////VVValP////////////f///////u4AAAqq////////f/+qqr//////9VVVV/////////////7///////66AAAK6q+//7//7q//v++vv/+/7u+/7u++7++/7/+/7/+6vu++/7/quQAAC7rq77ru77q6uu+66u+677u6776677u67ru677u67q+677rvuu0AAArqurruu7ruru+677q67rrq6rrq67rq77ru77ru77p66rrvuuq5AAAKqqquuqrqtbu6qrrqrrqqurquqqrquqrqqqrqqrrqWrqquqqqqQAACqrqqrqq6qWuuqq66qq6qru6qrqq6rqq6qqq6qq6qmq6qrqquu0AAArqurrqurrpuuq677u66rrq7rrq6rrq7rrp6rru6rqa6rrquu65AAALuurvutrvtuu677ru77rvu7rvv7rvu7rvu7ruurrvl7rvuu+67QAAACC4iCBAuASCILDguLggsNLguCoguAIguODgsCAggNIgiiAA4IkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  function drawTitleArt() {
+    var c = document.getElementById("title-art"), x = c.getContext("2d"), img = x.createImageData(160, 160);
+    var raw = atob(TITLE_PIC), rgb = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
+    for (var i = 0; i < 160 * 160; i++) {
+      var t = (raw.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3, o = i * 4;
+      img.data[o] = rgb[t][0]; img.data[o + 1] = rgb[t][1]; img.data[o + 2] = rgb[t][2]; img.data[o + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+  }
   function showTitle() {
     playing = false; dying = false; MODE = "60"; screen = "title";
     document.getElementById("ot").classList.add("hide");
     document.getElementById("op").classList.add("hide");
     document.getElementById("ov").classList.add("title-view");
     document.getElementById("title-slot").classList.remove("hide");
-    document.getElementById("title-slot").textContent = TXT.title;
     document.getElementById("bests").classList.remove("hide");
     showBests(); setBest();
     setButtons([
@@ -646,6 +661,9 @@
     var aw = st.clientWidth - 22, ah = st.clientHeight - hud.offsetHeight - 30;
     var k = Math.min(aw / W, ah / H); if (k >= 2) k = Math.floor(k); k = Math.max(1, k);
     cv.style.width = Math.round(W * k) + "px"; cv.style.height = Math.round(H * k) + "px";
+    /* the title picture grows to 1.5x when the board leaves room for it and the three buttons */
+    var big = W * k >= 300 && H * k >= 430;
+    document.getElementById("title-slot").style.zoom = big ? 1.5 : 1;
   }
 
   cv.addEventListener("pointerdown", function (e) {
@@ -669,7 +687,8 @@
   };
 
   $t("sc", "score", 0); $t("cb", "combo", 0); $t("bs", "best", 0); $t("ot", "title");
-  document.getElementById("title-slot").textContent = TXT.title;
+  drawTitleArt();
+  document.getElementById("title-name").textContent = TXT.title.replace(" ", "\n");
   PAD.load("best60").then(function (v) { best60 = +v || 0; showBests(); setBest(); });
   PAD.load("bestEndless").then(function (v) { bestEndless = +v || 0; });
   PAD.load("bestEndlessTime").then(function (v) { bestEndlessTime = +v || 0; showBests(); setBest(); });
