@@ -190,12 +190,14 @@ var Tuner = (function () {
   var lastHeard = 0, okSince = 0, lampOn = false, toneUntil = 0;
   var mic = "off";         /* off | asking | on | denied | none */
   var needle = 0, needleTo = 0, live = false, dirty = true;
+  var lvl = 0;             /* the mic's loudness 0-1, drawn small in the meter's corner so the player sees it hears */
 
   function now() { return Date.now(); }
 
   function onSound(s) {
     if (mic !== "on" || listOpen) return;
     var t = now();
+    if (s.level !== lvl) { lvl = s.level || 0; dirty = true; }
     if (t < toneUntil) return;                       /* our own reference tone is playing: not the string */
     var f = typeof s.hz === "number" ? s.hz : (typeof s.pitch === "number" ? s.pitch : null);
     if (f === null) return;                          /* silence, breath, noise: the staleness timer handles it */
@@ -239,6 +241,10 @@ var Tuner = (function () {
     for (d = -Tuner.IN_TUNE; d <= Tuner.IN_TUNE; d += 0.25) line(d / 50 * SPAN, R + 3, R + 7, lampOn ? 0 : 2, false);
     /* "-" and "+" marks at the ends, drawn as pixels so they stay four-tone */
     for (var i = 0; i < 5; i++) { px(8 + i, 8, 0); px(148 + i, 8, 0); px(150, 6 + i, 0); }
+    /* the input level, bottom left: an empty box when silent, filling as the mic hears more */
+    for (var lx = 0; lx < 32; lx++) { px(5 + lx, H - 7, 2); px(5 + lx, H - 2, 2); }
+    for (var ly = H - 7; ly <= H - 2; ly++) { px(4, ly, 2); px(37, ly, 2); }
+    for (lx = 0; lx < Math.round(lvl * 31); lx++) for (ly = H - 6; ly <= H - 3; ly++) px(5 + lx, ly, mic === "on" ? 1 : 2);
     /* the needle: ink while it hears a string, dark when the sound has died */
     line(needle / 50 * SPAN, 6, R - 2, live ? 0 : 1, true);
     for (var y = -2; y <= 2; y++) for (var x = -3; x <= 3; x++) px(PX + x, H - 3 + y, 0);
@@ -331,7 +337,7 @@ var Tuner = (function () {
       mic = r === "on" ? "on" : r === "denied" ? "denied" : "none"; dirty = true;
     }, function () { mic = "none"; dirty = true; });
   }
-  function stopMic() { if (PAD.mic) PAD.mic.stop(); mic = "off"; live = false; dirty = true; }
+  function stopMic() { if (PAD.mic) PAD.mic.stop(); mic = "off"; live = false; lvl = 0; dirty = true; }
 
   /* ---- the tuning list ---- */
   var listOpen = false;

@@ -10,7 +10,7 @@
  *     shaker(now) -> fn(acc) -> true when it is a shake, limiter(hz, now, later) -> fn(send, value),
  *     level(samples) -> 0..1, pitch(samples, sampleRate) -> Hz (integer) or null,
  *     hz(samples, sampleRate) -> {pitch, hz}: pitch as above from the newest WINDOW*2 samples, hz the same note to 0.01 Hz
- *     measured over every sample given (a tuner needs it: 1 Hz is 21 cents at 82 Hz; decisions.md section 74)
+ *     measured over every sample given, and down to -60 dB where pitch stops at -40 (a tuner needs it: 1 Hz is 21 cents at 82 Hz; decisions.md section 74)
  *   host(env) -> the runtime's one set of sensors. env:
  *     window, document, navigator     the page's (fakes in the tests)
  *     context(make)   the runtime's AudioContext (core.js audio())      session(type)   set navigator.audioSession.type
@@ -76,10 +76,10 @@ function pitch(s,rate){
   var hz=rawPitch(s,rate);
   return hz===null ? null : Math.round(hz);
 }
-function rawPitch(s,rate){
+function rawPitch(s,rate,gate){
   var n=Math.min(WINDOW,s.length);
   var lo=Math.max(2,Math.floor(rate/PITCH_HI)), hi=Math.min(Math.floor(rate/PITCH_LO),s.length-n);
-  if(hi<=lo || rms(s,n)<0.01) return null;
+  if(hi<=lo || rms(s,n)<(gate||0.01)) return null;
   var r=new Float32Array(hi+2), e0=0, i, k;
   for(i=0;i<n;i++) e0+=s[i]*s[i];
   /* from lag 1, so a pitch near the top of the range still sees the curve dip before its peak */
@@ -122,7 +122,11 @@ function peak(s,L,w,n){
       over, so noise moves it m times less. */
 function hz(s,rate){
   var tail=s.length>WINDOW*2 ? s.subarray(s.length-WINDOW*2) : s;
-  var f=rawPitch(tail,rate);
+  var f=rawPitch(tail,rate), quiet=false;
+  /* pitch() ignores anything under -40 dB, but a guitar a metre from a phone is often quieter than that (owner's iPhone,
+     2026-11-27: the tuner heard nothing). The curve is normalised, so only that gate stands in the way: hz looks down to
+     -60 dB, and then comes alone, with pitch still null as before */
+  if(f===null){ f=rawPitch(tail,rate,0.001); quiet=true; }
   if(f===null) return {pitch:null, hz:null};
   var best=f, P=rate/f, w=Math.max(2,Math.round(0.1*P)), n=s.length-Math.ceil(P)-w-2, p1, p2;
   if(n>=WINDOW && (p1=peak(s,Math.round(P),w,n))!==null){
@@ -132,7 +136,7 @@ function hz(s,rate){
     if(m>1 && n>=WINDOW && (p2=peak(s,L,w2,n))!==null) best=rate*m/p2;
   }
   best=Math.round(best*100)/100;
-  return {pitch:Math.round(f), hz:best>=PITCH_LO && best<=PITCH_HI ? best : Math.round(f)};
+  return {pitch:quiet ? null : Math.round(f), hz:best>=PITCH_LO && best<=PITCH_HI ? best : Math.round(f)};
 }
 
 /* ---------- the runtime's sensors: one app at a time, only while it is in front ---------- */

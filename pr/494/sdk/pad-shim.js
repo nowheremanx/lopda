@@ -430,9 +430,9 @@ function lopdaPadShim(opts) {
     else if (d.op === "shake" && SENSORS) emit("shake");
     else if (d.op === "sound" && SENSORS && num(d.level, 0, 1))
     {
-      /* hz (runtime 1.7.0+): the same note to 0.01 Hz, only beside a pitch; older runtimes never send it */
+      /* hz (runtime 1.7.0+): the note to 0.01 Hz, also for a note too quiet for pitch; older runtimes never send it */
       var snd = { level: d.level, pitch: num(d.pitch, 1, 20000) ? d.pitch : null };
-      if (snd.pitch !== null && num(d.hz, 1, 20000)) snd.hz = d.hz;
+      if (num(d.hz, 1, 20000)) snd.hz = d.hz;
       emit("sound", snd);
     }
     else if (d.op === "button") setButton(String(d.b), !!d.down);

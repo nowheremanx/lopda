@@ -615,8 +615,9 @@
         "......0000......",
         "................"
       ],
-      "version": "1.0.0",
+      "version": "1.0.1",
       "released": "2026-11-27",
+      "updated": "2026-11-27",
       "description": "给吉他和尤克里里调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。",
       "i18n": {
         "zh": {
@@ -634,8 +635,8 @@
         "mic"
       ],
       "path": "apps/string-tuner/index.html",
-      "sha256": "3ceac977d1993fe148535246ff76164bffb56aa859558bcc5381bf2286fa42ef",
-      "bytes": 23055
+      "sha256": "e3ddf1c0ce38b6d66caae5efab115f6a6a5e59dd03bb585d382556775c3e336a",
+      "bytes": 23627
     },
     {
       "spec": "lopda/1",
