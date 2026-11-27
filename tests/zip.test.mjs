@@ -115,6 +115,15 @@ test("read: our own zip back, entry by entry", async () => {
   assert.deepEqual(plain(list.map((e) => e.method)), [0, 0, 0, 0]);
 });
 
+test("list: each entry's time back from its MS-DOS time and date, to the even second; none for no date or before 1980", () => {
+  const t = new Date(2024, 4, 17, 9, 41, 37).getTime();
+  const z = Z.write([{ name: "a.md", data: "a", time: t }, { name: "b.md", data: "b", time: new Date(1975, 0, 1).getTime() }]);
+  const [a, b] = Z.list(z);
+  assert.equal(a.time, new Date(2024, 4, 17, 9, 41, 36).getTime());
+  assert.equal(b.time, 0, "dosTime's 1980-01-01 00:00 stands for an earlier date: unknown");
+  assert.equal(Z.fromDos(0, 0), 0);
+});
+
 test("read: stored and deflated entries, data descriptors, a name without the UTF-8 flag, folders", async () => {
   const z = foreignZip([
     { name: "notes/", data: "" },

@@ -62,7 +62,8 @@ function glyphOf(a){ return noEmoji(a.glyph) || Array.from(noEmoji(a.name))[0] |
 function own(snapData){ return snapData ? JSON.parse(JSON.stringify(snapData)) : null; }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
 var toastTimer;
-function toast(msg){ var t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(function(){ t.hidden=true; },2600); }
+/* ms: how long it stays up, 2.6 s unless a longer message asks for more */
+function toast(msg,ms){ var t=$("toast"); t.textContent=msg; t.hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(function(){ t.hidden=true; },ms>0 ? ms : 2600); }
 var chains={};
 /* one write at a time per document; resolves true when it landed */
 function put(ref,data){

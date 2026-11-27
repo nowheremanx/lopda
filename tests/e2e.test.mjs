@@ -5,7 +5,7 @@
 import { test as nodeTest, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, utimes } from "node:fs/promises";
 import { readdirSync } from "node:fs";
 import { join, extname, normalize } from "node:path";
 import { ROOT, tempDir, runScript } from "./helpers.mjs";
@@ -2168,6 +2168,15 @@ test("reader: imports TXT in GBK and UTF-8 and an EPUB, splits chapters, keeps t
   assert.equal((await shelf(p))[0], "Tiny Epub");
   await p.click("#rd-del");
   assert.equal((await shelf(p)).length, 5);
+  assert.match(await p.textContent("#rd-note"), /Tiny Epub/);
+  /* while armed, a tap on another book picks it instead of opening it (issue #402); a tap back picks Tiny Epub again */
+  const second = (await shelf(p))[1];
+  await p.click("#rd-list li:not(.label) >> nth=1");
+  assert.ok(await p.isHidden("#rd-book"), "the armed tap opens no book");
+  assert.ok(await p.isVisible("#rd-list li.on:nth-child(2)"), "the second row is picked");
+  assert.ok((await p.textContent("#rd-note")).includes(second), "the note names the book now picked");
+  assert.deepEqual((await shelf(p)).slice(0, 2), ["Tiny Epub", second], "the shelf order is unchanged");
+  await p.click("#rd-list li:not(.label) >> nth=0");
   assert.match(await p.textContent("#rd-note"), /Tiny Epub/);
   await p.click("#rd-del");
   await p.waitForFunction(() => document.querySelectorAll("#rd-list li:not(.label)").length === 4);
@@ -5036,9 +5045,14 @@ test("pet: the props - a date pick shows its flag and opens nothing, a word pick
   await key("b");
   assert.ok(await p.isHidden("#pet-panel"));
 
-  /* a tap on the flag opens nothing either, and the pick is not used */
+  /* a tap on the flag only asks 去看看 (issue #375: a short tap does what the long press does); B says no, and the pick is
+     not used */
   await tapProp();
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /万年历/, "the tap asks before it goes anywhere");
   assert.ok(await p.isHidden("#v-cal"), "a tap on the flag opens no calendar");
+  await key("b");
+  assert.ok(await p.isHidden("#pet-panel"));
   assert.equal((await save()).today.used, false, "so the date pick is never used");
 
   /* word: a tap elsewhere in the room opens nothing; a tap on the card turns it over */
@@ -5882,6 +5896,25 @@ test("pet: a long press on a room thing asks 去看看 and A goes there, B stays
   await hold(30, 110);
   await p.waitForFunction((n) => LOPDA_DEBUG.pet.save().today.pats > n, pats, { timeout: 5000 });
   assert.ok(await p.isHidden("#pet-panel"), "an empty spot asks nothing");
+
+  /* a short tap (issue #375): on the picture it asks the same question; on the empty floor nothing; on the pet a pat */
+  const tap = async (rx, ry) => {
+    const box = await p.locator("#pet-cv").boundingBox();
+    await p.mouse.click(box.x + rx * box.width / 162, box.y + ry * box.height / 120);
+    await p.waitForTimeout(150);
+  };
+  await tap(61, 58);
+  await p.waitForSelector("#pet-panel:not([hidden])");
+  assert.match(await p.locator("#pet-panel").innerText(), /去看看冲洗店？/, "a tap asks too, and goes nowhere by itself");
+  await key("b");
+  const pats2 = (await save()).today.pats;
+  await tap(30, 110);
+  assert.ok(await p.isHidden("#pet-panel"));
+  assert.equal((await save()).today.pats, pats2, "a tap on the empty floor is no pat");
+  const pet = await p.evaluate(() => LOPDA_DEBUG.pet.spot().pet);
+  await tap(pet.x + pet.w / 2, pet.y + pet.h / 2);
+  await p.waitForFunction((n) => LOPDA_DEBUG.pet.save().today.pats > n, pats2, { timeout: 5000 });
+  assert.ok(await p.isHidden("#pet-panel"), "a tap on the pet pats it and asks nothing");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -7660,8 +7693,18 @@ test("notes: pinned notes come first; 置顶 and 取消置顶 from the editor's 
 
 test("notes: delete goes to the trash in one press; restore; purge twice; the trash empties itself after 30 days", { skip, timeout: 60000 }, async (t) => {
   const n = await notesPage(t);
+  /* a new note with nothing typed is simply gone: no word about a trash it never went to (issue #358) */
+  await n.open();
+  await n.key("down", "a");
+  await n.p.locator("#v-note:not([hidden])").waitFor();
+  await n.key("start", "down", "down", "a");
+  await n.p.locator("#v-notes:not([hidden])").waitFor();
+  assert.ok(!/回收站/.test(await n.p.textContent("#toast")), "no 已移到回收站 for a note that was never stored");
+  assert.deepEqual(await n.docs(), []);
+  await n.p.click("#home-key");
   await n.p.evaluate(async () => {
     for (const body of ["一", "二", "三"]) await LP.S.refs.notes.doc().set({ body, updated: Date.now() });
+    await LP.refresh("notes");
   });
   await n.open();
   const del = async (title) => {
@@ -7832,6 +7875,17 @@ test("notes: a deflated zip from another program imports; a broken one says so",
   assert.deepEqual((await n.docs()).map((d) => d.body), ["Obsidian 笔记\n#x 内容"]);
   await n.p.setInputFiles("#notes-file", join(dir, "broken.zip"));
   await n.p.waitForFunction(() => /导入失败：zip: no end of central directory/.test(document.getElementById("toast").textContent));
+  /* a loose .md with no front matter keeps the file's own time, not the moment of the import (issue #360); its emoji are
+     left out, and the summary says so (issue #361) */
+  const when = new Date(2025, 2, 1, 8, 30);
+  await writeFile(join(dir, "旧笔记.md"), "旧笔记\n去年春天😀的事");
+  await utimes(join(dir, "旧笔记.md"), when, when);
+  await n.p.setInputFiles("#notes-file", join(dir, "旧笔记.md"));
+  await n.p.waitForFunction(() => /导入 1 篇.*emoji/.test(document.getElementById("toast").textContent));
+  const old = (await n.docs()).find((d) => /^旧笔记/.test(d.body));
+  assert.equal(old.body, "旧笔记\n去年春天的事");
+  assert.ok(Math.abs(old.created - when.getTime()) < 2000, `created is the file's time: ${new Date(old.created).toISOString()}`);
+  assert.equal(old.updated, old.created);
   assert.deepEqual(notBlocked(n.errors), []);
 });
 
@@ -8019,6 +8073,7 @@ test("calendar: a diary marks its day; the day sheet lists it and earlier years;
   await p.locator("#v-note:not([hidden])").waitFor();
   assert.ok(await p.isVisible("#note-read"), "an earlier day opens to read");
   assert.equal(await p.textContent("#note-read"), "10月1日 周四 · 八月廿一\n国庆，去爬山。");
+  assert.equal(await p.textContent("#note-back"), "◂ 返回", "the bar's back key says it goes back, not to a list (issue #359)");
   await c.key("b");
   await c.backOn(1);
   /* a 那年今日 row inside that visit, then B: still back to the calendar */
@@ -8038,9 +8093,30 @@ test("calendar: a diary marks its day; the day sheet lists it and earlier years;
   assert.ok(await p.isVisible("#v-home"));
   await c.open();
   await p.click("#notes-list li:has-text('10月1日 周四') button");
+  assert.equal(await p.textContent("#note-back"), "◂ 列表");
   await c.key("b");
   assert.ok(await p.isVisible("#v-notes"), "a diary opened from the notes list goes back to the list");
   assert.equal((await c.docs()).length, 4, "only looking writes nothing");
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
+test("calendar: ▲▼ scroll a day sheet with many years of diaries, to either end, and leave the day alone", { skip, timeout: 60000 }, async (t) => {
+  const c = await diaryCal(t, { viewport: { width: 375, height: 617 } });
+  const { p } = c;
+  await c.cal();
+  for (let y = 2010; y <= 2025; y++) await c.diary(`10月1日 · ${y}\n那一年的国庆。`, `${y}-10-01`);
+  await c.reload();
+  await c.day(1);
+  const top = () => p.$eval("#cal-sheet .cal-lines", (e) => e.scrollTop);
+  const room = await p.$eval("#cal-sheet .cal-lines", (e) => e.scrollHeight - e.clientHeight);
+  assert.ok(room > 0, "sixteen years run past the sheet");
+  await c.key("down");
+  assert.ok((await top()) > 0, "▼ scrolls down (issue #289)");
+  for (let i = 0; i < 25; i++) await c.key("down");
+  assert.ok(Math.abs((await top()) - room) <= 1, "to the end, and it stops there");
+  assert.match(await p.textContent("#cal-sheet .sheet-title"), /10月1日/, "▲▼ do not move the day");
+  for (let i = 0; i < 25; i++) await c.key("up");
+  assert.equal(await top(), 0);
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
