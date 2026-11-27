@@ -41,14 +41,36 @@ jobs:
       - run: node --test tests/e2e.test.mjs
         env:
           E2E_SHARD: ${{ matrix.shard }}/4
-  # main's ruleset requires a check named "e2e"; the shards report as "e2e (k/4)", so this one
-  # job passes only when every shard passed (a failed or cancelled shard fails it).
+  e2e-apps:
+    # The per-app browser tests (tests/e2e-*.test.mjs) and Tape4's (tests/studio-e2e.test.mjs).
+    # The plain `node --test` job above picks them up too but skips them, having no Playwright.
+    # One file at a time inside each job, as a local run of one file would go: the link tests
+    # time real audio between two pages, and a busy runner makes those flaky.
+    name: e2e (${{ matrix.group }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [apps, studio]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm i --no-save playwright && npx playwright install --with-deps chromium
+      - if: matrix.group == 'apps'
+        run: node --test --test-concurrency=1 tests/e2e-*.test.mjs
+      - if: matrix.group == 'studio'
+        run: node --test tests/studio-e2e.test.mjs
+  # main's ruleset requires a check named "e2e"; the shards report as "e2e (k/4)" and the app
+  # groups as "e2e (apps)" / "e2e (studio)", so this one job passes only when every one of them
+  # passed (a failed or cancelled job fails it).
   e2e:
-    needs: e2e-shard
+    needs: [e2e-shard, e2e-apps]
     if: always()
     runs-on: ubuntu-latest
     steps:
-      - run: test "${{ needs.e2e-shard.result }}" = success
+      - run: test "${{ needs.e2e-shard.result }}" = success && test "${{ needs.e2e-apps.result }}" = success
   registry:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

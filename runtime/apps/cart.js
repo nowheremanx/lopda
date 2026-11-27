@@ -14,7 +14,7 @@ var TONES=LP.TONES, SND=LP.SND, audio=LP.audio, own=LP.own, toast=LP.toast, put=
    are run as black-and-white carts, and Super Game Boy colouring is switched off, so the screen
    only ever shows the four tones. */
 var GB={mod:null, loading:null, launch:0, e:0, rom:0, joy:0, raf:0, last:0, left:0, paused:false,
-  cart:null, save:null, ctx:null, img:null, gain:null, aStart:0, dirty:false, timer:0, tenths:10};
+  cart:null, save:null, ctx:null, img:null, gain:null, aStart:0, dirty:false, poll:false, timer:0, tenths:10};
 var GB_TICKS=4194304, GB_AUDIO_FRAMES=4096, GB_LEVEL=2.4;
 /* the speed knob, in tenths: 0.5x to 1.5x, like the pitch control of a tape deck. Faster also means higher, as on
    tape: the sound is played back at the same rate the game runs, so it never falls behind or breaks up. Beyond 1.5x
@@ -231,7 +231,10 @@ function gbStart(c,rom,save){
   GB.ctx.fillStyle="rgb("+TONES[3].join(",")+")"; GB.ctx.fillRect(0,0,160,144);
   gbConnect();
   GB.aStart=0; GB.last=0; GB.left=0; GB.paused=false; GB.dirty=false; gbSpeed(10);
-  GB.timer=setInterval(function(){ if(GB.dirty) gbSaveSram(); },1500);
+  /* MBC2 + battery (0x147 = 0x06): binjgb writes its built-in RAM without raising the "updated" flag, so its RAM is read
+     and compared on every save point instead (issue #294) */
+  GB.poll=data[0x147]===0x06;
+  GB.timer=setInterval(function(){ if(gbRamDue()) gbSaveSram(); },1500);
   $("cart-lib").hidden=true; $("cart-play").hidden=false; $("cart-tools").hidden=false; $("v-cart").classList.add("locked"); $("v-cart").scrollTop=0;
   $("cart-title").textContent=c.name; $("cart-state").textContent="";
   resetCartLoad(); showPad(true); cartLayout();
@@ -275,26 +278,29 @@ function gbAudio(){
 }
 var GB_JOY={up:"_set_joyp_up",down:"_set_joyp_down",left:"_set_joyp_left",right:"_set_joyp_right",a:"_set_joyp_A",b:"_set_joyp_B",start:"_set_joyp_start",select:"_set_joyp_select"};
 function gbJoy(b,down){ if(GB.e && GB_JOY[b]) GB.mod[GB_JOY[b]](GB.e,down?1:0); }
-function gbSaveSram(){
-  if(!GB.e) return; GB.dirty=false;
+function gbRamDue(){ return GB.dirty || GB.poll; }
+/* the cartridge RAM into GB.save.sram; true when it changed */
+function gbReadSram(){
+  if(!GB.e) return false; GB.dirty=false;
   var m=GB.mod, s=gbWithFile(m._ext_ram_file_data_new(GB.e),function(fd,buf){ m._emulator_write_ext_ram(GB.e,fd); return b64(buf); });
-  if(!s) return;
-  GB.save.sram=s; if(S.db) put(S.refs.cartsave.doc(GB.cart.id),GB.save);
+  if(!s || s===GB.save.sram) return false;
+  GB.save.sram=s; return true;
 }
+function gbSaveSram(){ if(gbReadSram() && S.db) put(S.refs.cartsave.doc(GB.cart.id),GB.save); }
 function gbPause(on){
   if(!GB.e) return;
   GB.paused=on; GB.last=0; GB.aStart=0;
-  if(on){ releaseButtons(); if(GB.dirty) gbSaveSram(); }
+  if(on){ releaseButtons(); if(gbRamDue()) gbSaveSram(); }
 }
 function gbStop(){
   if(!GB.e) return;
-  if(GB.dirty) gbSaveSram();
+  if(gbRamDue()) gbSaveSram();
   var m=GB.mod; cancelAnimationFrame(GB.raf); clearInterval(GB.timer);
   if(GB.gain){ try{ GB.gain.disconnect(); }catch(e){} GB.gain=null; }
   /* emulator_delete frees the ROM copy too (binjgb: file_data_delete(&e->file_data)); freeing it again here corrupted the
      heap, and the next start could get its ROM copy overlapped by another buffer: a blank screen until a reload */
   m._emulator_delete(GB.e); m._joypad_delete(GB.joy);
-  GB.e=0; GB.joy=0; GB.rom=0; GB.cart=null;
+  GB.e=0; GB.joy=0; GB.rom=0; GB.cart=null; GB.poll=false;
   releaseButtons(); LP.keepAwake(false);
 }
 function gbSpeed(t){
@@ -310,7 +316,8 @@ $("cart-save").onclick=function(){
   if(!GB.e) return;
   var m=GB.mod, s=gbWithFile(m._state_file_data_new(GB.e),function(fd,buf){ m._emulator_write_state(GB.e,fd); return b64(buf); });
   GB.save.state=s; GB.save.stateAt=Date.now();
-  if(GB.dirty){ gbSaveSram(); } else if(S.db) put(S.refs.cartsave.doc(GB.cart.id),GB.save);
+  if(gbRamDue()) gbReadSram();
+  if(S.db) put(S.refs.cartsave.doc(GB.cart.id),GB.save);
   toast(tr("cart.saved")); sfx("ok"); resetCartLoad();
 };
 function resetCartLoad(){ var b=$("cart-load"); delete b.dataset.armed; b.textContent=tr("cart.load"); b.disabled=!(GB.save&&GB.save.state); }

@@ -405,9 +405,10 @@ function newScript(focus){
   return s;
 }
 function openScript(id){
-  /* a script being revised is opened as the job's own object, so the save guard (revising) still holds and
-     the editor shows the answer arriving, never a second copy that could be edited and then overwritten */
-  if(G.job && G.mode==="revise" && G.s && G.s.id===id){ M.current=G.s; M.dirty=false; show("script-edit"); return; }
+  /* a script being generated or revised is opened as the job's own object: the editor shows the answer arriving
+     (read-only while it writes), the revise save guard still holds, and there is never a second copy that could be
+     saved over the finished answer (issue #405) */
+  if(G.job && G.s && G.s.id===id){ M.current=G.s; M.dirty=false; show("script-edit"); return; }
   loadScript(id).then(function(s){
     if(!s){ toast(tr("common.readfail",{msg:tr("common.unknown")})); return; }
     M.current=s; M.dirty=false;
@@ -718,6 +719,12 @@ function generate(){
     var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e,"scripts")}),
       here=M.current===s && !$("v-script-edit").hidden;
     end();
+    /* what came in is kept like any edit (decisions.md section 34): leaving the editor saves it, by ◂ or by HOME alike;
+       if the editor was already left while it wrote, that leave is now, so it is saved at once (issue #406) */
+    if(String(s.body||"").trim()){
+      if(here) M.dirty=true;
+      else { s.name=deriveName(s.body,s.name); saveScript(s); }
+    }
     if(here) setHint(why); else toast(why);
     sfx("err");
   });
@@ -1220,7 +1227,8 @@ LP.scripts._test={
   keepVersions:keepVersions, loadVersions:loadVersions, deleteVersions:deleteVersions,
   loadAsk:loadAsk, saveAskNow:saveAskNow, clearAsk:clearAsk,
   replaceBody:replaceBody, deleteScript:deleteScript,
-  revising:revising, saveCurrent:saveCurrent, state:M, stream:G
+  revising:revising, saveCurrent:saveCurrent, state:M, stream:G,
+  generate:generate, openScript:openScript, flushSource:flushSource
 };
 
 init();

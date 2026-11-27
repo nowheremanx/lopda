@@ -136,6 +136,8 @@ var dataHooks={notes:[],apps:[]};
 function upsert(kind,obj){
   var arr=S[kind], i=arr.findIndex(function(x){ return x.id===obj.id; });
   if(i<0) arr.push(obj); else arr[i]=obj;
+  /* removed only hides the stale copy of something deleted in this session; put back (reinstalled), it is live again (issue #323) */
+  delete removed[kind][obj.id];
 }
 function dropLocal(kind,id){ S[kind]=S[kind].filter(function(x){ return x.id!==id; }); removed[kind][id]=true; }
 function applyRemote(kind,docs){
