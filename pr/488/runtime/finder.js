@@ -41,6 +41,14 @@ function ditherLuma(lum,w,h,exposure,contrast){
   }
   return out;
 }
+/* one luma value with the finder's contrast (1.3 per step, about the middle) and exposure (a gamma, 1.35 per step) and
+   nothing else: no stretch, no sharpening, no dither. The snap's full-frame grey page (the four-track's score pages)
+   goes through it, so the + and − the player set in the finder reach the picture they hand over (#438) */
+function adjustLuma(v,exposure,contrast){
+  if(contrast) v=0.5+(v-0.5)*Math.pow(1.3,contrast);
+  v=Math.max(0,Math.min(1,v));
+  return exposure ? Math.pow(v,1/Math.pow(1.35,exposure)) : v;
+}
 /* -> lumaFrom(src, sw, sh, w, h, mirror): the centred crop of a video (or image) scaled to w x h, mirrored for a front lens,
    as luma. Each grabber draws on a canvas of its own */
 function grabber(){
@@ -58,5 +66,5 @@ function grabber(){
 /* the sizes PAD.camera.snap gives an app (SPEC.md 6.6): the camera's two film formats */
 var SIZES={small:{w:128, h:112}, large:{w:256, h:224}};
 
-window.LopdaFinder={BAYER:BAYER, crop:crop, luma:luma, ditherLuma:ditherLuma, grabber:grabber, SIZES:SIZES};
+window.LopdaFinder={BAYER:BAYER, crop:crop, luma:luma, ditherLuma:ditherLuma, adjustLuma:adjustLuma, grabber:grabber, SIZES:SIZES};
 })();
