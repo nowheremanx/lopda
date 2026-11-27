@@ -210,7 +210,7 @@ test("photo puzzle: an arcade time-up says how many pieces were home, the hole n
   assert.equal((await st(f)).gameArcade, true);
   await waitScreen(f, "lost", 10000);
   assert.equal((await st(f)).left, 0);
-  assert.equal(await msg(f), "时间到。已拼好 6/9");
+  assert.equal(await msg(f), "时间到。已拼好 6/8。");
   assert.deepEqual(await labels(f), ["再来一局", "主菜单"]);
   assert.deepEqual(errors, []);
 });
