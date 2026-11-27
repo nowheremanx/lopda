@@ -165,3 +165,95 @@ test("the foe bar is ink for the HP left and paper for the HP lost", async () =>
   assert.deepEqual(half.slice(0, fw).filter((c) => c !== INK), [], `the ${fw} pixels of HP left are ink`);
   assert.deepEqual(half.slice(fw).filter((c) => c !== PAPER), [], `the ${146 - fw} pixels lost are paper`);
 });
+
+/* ---- touch on the menus and the skip question, and disabled rows (DeepSeek review #459 #460) ---- */
+
+const MID = "125,138,88";    // #7d8a58
+
+async function tapGame() {
+  let last = null;
+  const app = boot(APP, { seed: 7, onPut: (img) => { last = img; } });
+  const yieldNow = app.ctx.get("__yield");
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await yieldNow(); } };
+  const send = app.ctx.get("dispatchEvent"), KE = app.ctx.get("KeyboardEvent");
+  const press = async (key) => { send(new KE("keydown", { key: key })); await run(1); send(new KE("keyup", { key: key })); await run(1); };
+  const tap = async (x, y) => { app.pointer("pointerdown", x, y); await run(1); app.pointer("pointerup", x, y); await run(1); };
+  const menu = () => { const s = app.ctx.get("Battle.S()"); return s && s.menu ? s.menu : null; };
+  const px = (x, y) => { const o = (y * 160 + x) * 4; return last.data[o] + "," + last.data[o + 1] + "," + last.data[o + 2]; };
+  await run(5);
+  return { app, run, press, tap, menu, px, get: app.ctx.get };
+}
+
+test("a tap on a battle command runs that command, not the one under the arrow (#459)", async () => {
+  const z = await tapGame();
+  z.get("ZT.fight(0, 0)");
+  let n = 0;
+  for (; n < 2000 && !(z.menu() && z.menu().kind === "cmd"); n++) await z.run(1);
+  assert.equal(z.menu().kind, "cmd");
+  assert.equal(z.menu().i, 0, "the arrow is on 攻击");
+  await z.tap(70, 108);                       // 法术
+  for (n = 0; n < 50 && z.menu().kind === "cmd"; n++) await z.run(1);
+  assert.equal(z.menu().kind, "list", "the tap on 法术 opens the spell list");
+  await z.tap(80, 50);                        // above the list window: back
+  for (n = 0; n < 50 && z.menu().kind !== "cmd"; n++) await z.run(1);
+  assert.equal(z.menu().kind, "cmd", "a tap above the list is B");
+  await z.tap(130, 120);                      // the Lv / 五行 panel: nothing
+  await z.run(5);
+  assert.equal(z.menu().kind, "cmd", "a tap outside the commands does nothing");
+  await z.tap(20, 108);                       // 攻击
+  for (n = 0; n < 50 && z.menu().kind === "cmd"; n++) await z.run(1);
+  assert.equal(z.menu().kind, "target", "the tap on 攻击 picks a target next");
+});
+
+test("spells the hero can't pay for are dark and struck through, never mid on paper (#460)", async () => {
+  const z = await tapGame();
+  z.get("ZT.fight(1, 0)");
+  let n = 0;
+  for (; n < 2000 && !(z.menu() && z.menu().kind === "cmd"); n++) await z.run(1);
+  z.get("Battle.S()").b.hero.mp = 0;
+  await z.press("ArrowRight");                // 法术
+  await z.press("x");
+  for (n = 0; n < 50 && z.menu().kind !== "list"; n++) await z.run(1);
+  assert.equal(z.menu().kind, "list");
+  assert.ok(z.menu().items.every((it) => it.off), "with no 法力 every spell is off");
+  await z.run(2);
+  const mids = [];
+  for (let y = 104; y < 142; y++) for (let x = 13; x < 156; x++) if (z.px(x, y) === MID) mids.push(x + "," + y);
+  assert.deepEqual(mids, [], "no mid pixels in the rows");
+  await z.tap(40, 108);                       // a row that is off: err, the list stays
+  await z.run(3);
+  assert.equal(z.menu().kind, "list", "a tap on an off row does not cast it");
+});
+
+test("the field menu and the skip question take taps (#459)", async () => {
+  const z = await tapGame();
+  z.get("ZT.goto('road', { entered: true })");
+  await z.run(60);
+  assert.equal(z.get("ZT").state().map, "road");
+  await z.press("Enter");
+  assert.equal(z.get("fm").kind, "main", "START opens the field menu");
+  await z.tap(120, 31);                       // 状态
+  assert.equal(z.get("fm").kind, "status", "a tap on 状态 opens it");
+  await z.tap(80, 60);
+  assert.equal(z.get("fm").kind, "main", "a tap on the status page goes back");
+  await z.tap(120, 18);                       // 物品
+  assert.equal(z.get("fm").kind, "items");
+  await z.tap(80, 70);                        // between the windows: back
+  assert.equal(z.get("fm").kind, "main");
+  await z.tap(30, 100);                       // outside the menu window: closed
+  assert.equal(z.get("fm"), null, "a tap outside the field menu closes it");
+
+  const Cut = z.get("Cut");
+  let done = false;
+  Cut.play("test-skip", async (T) => { await T.wait(30); }).then(() => { done = true; });
+  await z.run(3);
+  await z.press("Enter");
+  assert.equal(Cut.state().asking, true, "START asks 跳过这段剧情？");
+  await z.tap(110, 50);                       // 「B 否」
+  assert.equal(Cut.state().asking, false, "a tap on 否 answers no");
+  assert.equal(done, false, "the cutscene goes on");
+  await z.press("Enter");
+  await z.tap(40, 50);                        // 「A 是」
+  for (let i = 0; i < 10 && !done; i++) await z.run(1);
+  assert.equal(done, true, "a tap on 是 skips the cutscene");
+});
