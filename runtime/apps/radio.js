@@ -278,8 +278,17 @@ function onLinkEvent(ev){
   if(ev.type==="message"){ onMessage(ev.data); return; }
   if(ev.type!=="close") return;
   var reason=ev.reason||"lost";
+  /* the session gives up on a message only by ending the link (five tries, decisions.md section 46), and its promise
+     settles after this close: mark what was still on its way as not sent now, and say once, here, that it can go
+     again with a tap after the next pairing (issue #386) */
+  var unsent=0, i;
+  for(i=0;i<R.log.length;i++){
+    var e=R.log[i];
+    if(e.dir==="out" && e.pending){ e.pending=false; e.lost=true; e.dropped=true; if(e.payload) unsent++; }
+  }
   if(R.wasOpen){ R.wasOpen=false; pushLog({dir:"sys", at:Date.now(), kind:"close"}); }
-  R.closeMsg=tr(reason==="home" && R.pending ? "radio.open.cancelled" : "radio.close."+reason);
+  else if(unsent) persistLog();
+  R.closeMsg=tr(reason==="home" && R.pending ? "radio.open.cancelled" : unsent && reason==="lost" ? "radio.close.unsent" : "radio.close."+reason);
   if(!R.quiet) toast(R.closeMsg);
   if(R.page==="link" || R.page==="write" || R.page==="draw"){
     setPage("menu");
@@ -317,13 +326,15 @@ function queueSend(entry, payload){
   while(R.log.length>MAX_LOG) R.log.shift();
   renderLink();
   LP.link.send(payload).then(function(v){
-    entry.pending=false;
-    if(v!=="sent") entry.lost=true;
+    var told=entry.dropped;            /* the close already said so (onLinkEvent) */
+    entry.pending=false; entry.dropped=false;
+    entry.lost=v!=="sent";
     persistLog();
     if(R.page==="link") renderLink();
     if(v==="big") toast(tr("radio.send.big"));
-    else if(v!=="sent") toast(tr("radio.send.failed"));
+    else if(v!=="sent" && !told) toast(tr("radio.send.failed"));
   },function(){
+    entry.dropped=false;
     entry.pending=false;
     entry.lost=true;
     persistLog();
