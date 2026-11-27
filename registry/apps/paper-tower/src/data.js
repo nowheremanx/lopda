@@ -130,7 +130,7 @@ PT.DATA = (function () {
     9: { art: "ferryman", name: L("渡墨人", "Ink Ferryman"), lines: [
       L("墨海下面没有底，只有沉下去的页。", "Under the Ink Sea there is no bottom, only sunken pages."),
       L("墨海的怪会先手、会吸血。先打弱的，再看损耗。", "The Ink Sea monsters strike first or drain. Take the weak ones first, and read the cost."),
-      { text: L("圣水在守卫室里。门口那只残页魂，打不打由你。", "The holy water is in the guard room. Whether to fight the wraith at its door is your call."),
+      { text: L("圣水在守卫室里。门口那只墨魇，打不打由你。", "The holy water is in the guard room. Whether to fight the Ink Nightmare at its door is your call."),
         while: { tile: [8, 8, "W"] } },
       { text: L("三根灯芯在三、七、十一页的折缝里。", "Three wicks wait in the folds of pages three, seven and eleven."),
         while: { wicksBelow: 3 } },

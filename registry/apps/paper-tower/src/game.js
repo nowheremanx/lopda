@@ -632,7 +632,7 @@ async function helpPages() {
     t("爬上十二页，把灯点回来。蠹王在灯座上。", "Climb twelve pages and light it again. The Bookworm King sits on the lamp stand."),
     t("方向键走。A 说话、开门、打怪。START 或 B 打开菜单。", "Arrows walk. A talks, opens and fights. START or B opens the menu."),
     t("SELECT 摸身边的折缝；也能直接撞可疑的墙。", "SELECT feels for a seam beside you; bumping a suspicious wall works too."),
-    t("走进怪物会开战。左上角写着这一战会损耗多少。", "Walking into a monster starts a fight. The corner shows what it will cost."),
+    t("走进怪物会开战。右上角写着这一战会损耗多少。", "Walking into a monster starts a fight. The corner shows what it will cost."),
     t("守门的怪是排好的：墨滴、纸虫、有甲的钉书虫、先手的灰蛾……先看损耗，再决定打不打。", "The gatekeepers come in order: ink drops, paper mites, armored staples, first-striking moths... Read the cost before you swing."),
     t("有些小房间门口站着怪，里面是宝物。先看损耗，再决定进不进。", "Some small rooms keep a monster at the door and treasure inside. Read the cost before you enter."),
     t("菜单里的「道具」能用炸弹和圣水。炸弹对守页的怪无效。", "The Items entry spends bombs and holy water. Bombs do not work on keepers."),
@@ -1063,7 +1063,10 @@ game.scene("ending", {
     endingRank = rankOf(S);
     await game.say([
       t("你踩上灯座。蠹王化成一小撮墨灰，落在纸上。", "You step onto the lamp stand. The King crumbles into a pinch of ink ash."),
-      t("三根灯芯一起点着了。纸塔轻轻响了一声，像合上一本书。", "Three wicks catch together. The tower makes one soft sound, like a book closing."),
+      /* the lamp lights from what was carried: three wicks, fewer, or only the match (the keeper's line below follows it) */
+      many ? t("三根灯芯一起点着了。纸塔轻轻响了一声，像合上一本书。", "Three wicks catch together. The tower makes one soft sound, like a book closing.")
+        : S.wicks > 0 ? t("你带来的灯芯点着了。纸塔轻轻响了一声，像合上一本书。", "The wicks you brought catch. The tower makes one soft sound, like a book closing.")
+        : t("你划着那根火柴，凑到灯上。纸塔轻轻响了一声，像合上一本书。", "You strike the match and hold it to the lamp. The tower makes one soft sound, like a book closing."),
       t("守灯人从灯影里走出来。她说，塔不必再折了。", "The lamp keeper steps out of the shadow. She says the tower need not fold again."),
       t("你把最后一封信放在灯下。收信人写着：下一个爬上来的人。", "You leave the last letter under the lamp. It is addressed to whoever climbs next.")
     ], { name: t("长明灯", "The Everlamp") });

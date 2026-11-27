@@ -706,3 +706,33 @@ test("the fight's own HP number is paper on a flat ink band, not mid on the dith
   assert.ok(rects.some((r) => r.c === g.INK && r.y <= hp.y && r.y + r.h >= hp.y + 14 && r.x <= hp.x - half && r.x + r.w >= hp.x + half),
     "on an ink band as wide as the number");
 });
+
+test("the walker spends its purse at page 10 and still cannot empty the gold shop; what is left is earned above it (#370)", () => {
+  const spent = [];
+  const nf = R.nextFloor;
+  R.nextFloor = function (S) { if (S.floor === 10) spent.push(S.gold); return nf.apply(this, arguments); };
+  try {
+    for (const o of [{}, { seams: false }]) {
+      const r = walk(o), S = r.S;
+      S.floor = 10;
+      const left = D.SHOPS[10].stock.reduce((a, _, i) => a + R.stockLeft(S, i), 0);
+      assert.ok(left > 0, `${JSON.stringify(o)}: the gold shop was emptied`);
+    }
+    assert.ok(spent.every((g) => g < 200), `gold on leaving page 10: ${spent}`);
+  } finally { R.nextFloor = nf; }
+});
+
+for (const [wicks, line] of [[3, /三根灯芯一起点着了/], [1, /你带来的灯芯点着了/], [0, /火柴/]]) {
+  test(`the lamp's second line matches the ${wicks} wick(s) carried (#367)`, async () => {
+    const t = bootTower("zh");
+    const said = [], say = t.game.say;
+    t.game.say = (text, o) => { said.push(text); return say.call(t.game, text, o); };
+    await startPlay(t);
+    t.app.ctx.get("S").wicks = wicks;
+    said.length = 0;
+    t.game.go("ending", null, { fade: false });
+    await t.run(5);
+    assert.match(said[0][1], line);
+    if (wicks < 3) assert.doesNotMatch(said[0][1], /三根/);
+  });
+}
