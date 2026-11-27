@@ -8210,8 +8210,8 @@ const runSnapApp = async (p, perms = ["camera"]) => {
   assert.fail("the test app did not start");
 };
 const allEnded = (p) => p.evaluate(() => window.__streams.length > 0 && window.__streams.every((s) => s.getTracks().every((x) => x.readyState === "ended")));
-/* the viewfinder is up and showing the camera: the lens tag appears with the first stream */
-const finderLive = (p) => p.waitForFunction(() => !document.getElementById("snap").hidden && document.getElementById("snap-lens").dataset.live === "1", null, { timeout: 10000 });
+/* the viewfinder is up with a stream (the lens tag says 开启中 until the first picture, then the lens: data-live) */
+const finderLive = (p) => p.waitForFunction(() => !document.getElementById("snap").hidden && document.getElementById("snap-lens").dataset.stream === "1", null, { timeout: 10000 });
 
 test("camera snap: the dialog first; A opens the viewfinder; the shutter hands the app a 128x112 four-tone picture and ends the stream", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await snapPage(t);
@@ -8440,7 +8440,8 @@ test("camera snap: a stream that never gives a picture is restarted once, then t
   f.evaluate(() => { snap(); });
   await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
   await finderLive(p);
-  await press(p, "a");   /* no picture yet: the shutter does nothing */
+  assert.equal(await p.textContent("#snap-lens"), "开启中", "no picture yet: the tag says the camera is starting (#437)");
+  await press(p, "a");   /* no picture yet: the shutter only ticks */
   assert.equal((await R(f)).results.length, 0);
   await until(p, async () => (await R(f)).results.length === 1, "null after the watchdog");
   assert.equal((await R(f)).results[0], null);
