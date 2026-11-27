@@ -165,6 +165,14 @@ test("tones: each chord tone carries its interval above the root, in stacking or
   assert.deepEqual([...C.tones(C.parse("C/E"))].map((x) => x.iv), [0, 4, 7], "a bass that is a chord tone is not listed twice");
 });
 
+test("strings: each string of a voicing names its pitch and its degree, low E first, a muted string null", () => {
+  const show = (name, frets) => [...C.strings(C.fr(frets), C.parse(name))].map((x) => (x ? `${C.NAMES[x.pc]}${x.lab}@${x.midi}` : "x")).join(" ");
+  assert.equal(show("C", "x32010"), "x CR@48 E3@52 G5@55 CR@60 E3@64", "an open C is five notes: R 3 5 R 3");
+  assert.equal(show("G", "320003"), "GR@43 B3@47 D5@50 GR@55 B3@59 GR@67");
+  assert.equal(show("Am/G", "3x2210"), "G/@43 x E5@52 AR@57 Cb3@60 E5@64", "the extra bass of a slash chord is marked as the bass");
+  assert.equal(show("C/E", "032010"), "E3@40 CR@48 E3@52 G5@55 CR@60 E3@64", "a bass that is a chord tone keeps its degree");
+});
+
 /* ---------------- the progressions (和弦连接, 1.2.0) ---------------- */
 
 test("progressions: every entry is whole, in both languages, and every chord in it is one the app knows", () => {

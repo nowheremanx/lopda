@@ -100,6 +100,19 @@ var Chords = (function () {
     return out.concat(up);
   }
 
+  /* what each string of a voicing sounds, low E first: null for a muted string, else its pitch and the degree it is in the
+     chord (R, 3, 5, b7, 9...), "/" for a slash chord's extra bass. An open C is x, R, 3, 5, R, 3: five notes, not three. */
+  function strings(frets, c) {
+    var ts = tones(c), out = [];
+    for (var s = 0; s < 6; s++) {
+      if (frets[s] < 0) { out.push(null); continue; }
+      var m = OPEN[s] + frets[s], pc = mod12(m), lab = "";
+      for (var i = 0; i < ts.length; i++) if (ts[i].pc === pc) { lab = ts[i].lab; break; }
+      out.push({ s: s, midi: m, pc: pc, lab: lab });
+    }
+    return out;
+  }
+
   /* ---------------- the hand-written shapes (section 2.3) ---------------- */
   function fr(s) {
     var out = [], i = 0;
@@ -341,7 +354,7 @@ var Chords = (function () {
   return {
     OPEN: OPEN, NAMES: NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
-    parse: parse, name: name, qual: qual, tones: tones, mod12: mod12, fr: fr,
+    parse: parse, name: name, qual: qual, tones: tones, strings: strings, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
     fingerCount: fingerCount, assignFingers: assignFingers, position: position, midiOf: midiOf, fretText: fretText,
     identify: identify

@@ -26,9 +26,10 @@ main{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:10px
 #pic{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
 #qname{font-size:15px;text-align:center;flex:none}
 #line{font-size:15px;text-align:center;flex:none;font-weight:bold;overflow-wrap:anywhere}
-#tones{display:flex;justify-content:center;gap:6px;flex:none;flex-wrap:wrap}
-/* each chord tone is a button that plays it alone */
-.tone{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:44px;padding:2px 4px;line-height:1.15}
+#tones{display:flex;justify-content:center;gap:6px;flex:none}
+/* one cell per string, low E first; a sounding string is a button that plays it alone */
+.tone{display:flex;flex-direction:column;align-items:center;justify-content:center;width:44px;min-width:44px;padding:2px 0;line-height:1.15}
+.tone.mute{min-height:44px;font-size:15px;color:#4a5a32}
 .tone b{font-size:15px}
 .tone span{font-size:13px;color:#4a5a32}
 footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
@@ -226,6 +227,19 @@ var Chords = (function () {
     for (var i = 0; i < Q.iv.length; i++) up.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i], iv: Q.lab[i] === "9" ? Q.iv[i] + 12 : Q.iv[i] });
     up.sort(function (a, b) { return a.iv - b.iv; });
     return out.concat(up);
+  }
+
+  /* what each string of a voicing sounds, low E first: null for a muted string, else its pitch and the degree it is in the
+     chord (R, 3, 5, b7, 9...), "/" for a slash chord's extra bass. An open C is x, R, 3, 5, R, 3: five notes, not three. */
+  function strings(frets, c) {
+    var ts = tones(c), out = [];
+    for (var s = 0; s < 6; s++) {
+      if (frets[s] < 0) { out.push(null); continue; }
+      var m = OPEN[s] + frets[s], pc = mod12(m), lab = "";
+      for (var i = 0; i < ts.length; i++) if (ts[i].pc === pc) { lab = ts[i].lab; break; }
+      out.push({ s: s, midi: m, pc: pc, lab: lab });
+    }
+    return out;
   }
 
   /* ---------------- the hand-written shapes (section 2.3) ---------------- */
@@ -469,7 +483,7 @@ var Chords = (function () {
   return {
     OPEN: OPEN, NAMES: NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
-    parse: parse, name: name, qual: qual, tones: tones, mod12: mod12, fr: fr,
+    parse: parse, name: name, qual: qual, tones: tones, strings: strings, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
     fingerCount: fingerCount, assignFingers: assignFingers, position: position, midiOf: midiOf, fretText: fretText,
     identify: identify
@@ -1032,13 +1046,15 @@ var Progs = (function () {
     $("view").classList.toggle("on", set.view === "neck");
     $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
       (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
-    var tones = Chords.tones(c), row = $("tones");
+    /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
+    var row = $("tones");
     row.innerHTML = "";
-    tones.forEach(function (x) {
+    (v ? Chords.strings(v.frets, c) : []).forEach(function (x) {
+      if (!x) { row.appendChild(el("span", "tone mute", "x")); return; }
       var cell = el("button", "tone");
       cell.appendChild(el("b", "", Chords.NAMES[x.pc]));
       cell.appendChild(el("span", "", x.lab === "/" ? t("bassLab") : x.lab));
-      cell.addEventListener("click", function () { playTone(x); });
+      cell.addEventListener("click", function () { playString(x); });
       row.appendChild(cell);
     });
     paint();
@@ -1062,19 +1078,10 @@ var Progs = (function () {
     sfx("tick");
   }
   function notesOf(v) { return Chords.midiOf(v.frets); }
-  /* one chord tone on its own, so the intervals can be heard: every tone is counted up from the root as the voicing plays
-     it (its lowest root, or the first root above the bass when the voicing leaves the root out), so R, 3, 5, b7, 9 climb
-     in order; a slash chord's extra bass is the voicing's lowest note */
-  function toneMidi(v, x) {
-    var notes = notesOf(v), low = Math.min.apply(null, notes), root = set.cur.root, r = null;
-    if (x.iv === null) return low;
-    notes.forEach(function (n) { if (Chords.mod12(n) === root && (r === null || n < r)) r = n; });
-    if (r === null) r = low + Chords.mod12(root - low);
-    return r + x.iv;
-  }
-  function playTone(x) {
-    var v = current().v;
-    if (!v || !Guitar.play([toneMidi(v, x)], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+  /* one string on its own, at the pitch it sounds in this voicing; strings tapped one after another ring together (at
+     most 8), so the intervals between them can be heard as melody and as harmony */
+  function playString(x) {
+    if (!Guitar.play([x.midi], 0, true)) sfx(Guitar.level() ? "tap" : "err");
   }
   function strum(arp) {
     var v = current().v;
