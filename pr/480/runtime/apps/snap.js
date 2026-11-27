@@ -55,7 +55,7 @@ function render(){
   /* the lens's name once a picture comes; until then the tag says the camera is starting, so a press that cannot
      shoot yet is not met with nothing (issue #437) */
   var live=!!(SN.stream && SN.seen);
-  $("snap-lens").hidden=false; $("snap-lens").dataset.live=live?"1":"";
+  $("snap-lens").hidden=false; $("snap-lens").dataset.live=live?"1":""; $("snap-lens").dataset.stream=SN.stream?"1":"";
   $("snap-lens").textContent=live ? LP.film.lensName(lensNow()) : tr("snap.starting");
 }
 /* the finder as large as the box allows, 8:7, whole CSS pixels */
