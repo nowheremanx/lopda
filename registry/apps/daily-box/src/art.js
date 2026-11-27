@@ -75,6 +75,19 @@ var ART = (function () {
     box: A.box,
     done: A.done,
     dead: A.dead,
+    /* The title's "solved" mark and the calendar's filled stamp: a checked square, drawn. */
+    stamp: [
+      "..000000..",
+      ".01111110.",
+      "0111111110",
+      "0111113110",
+      "0111131110",
+      "0111311110",
+      "0113111110",
+      "0111111110",
+      ".01111110.",
+      "..000000.."
+    ],
     down0: seeThrough(HERO.down0),
     down1: seeThrough(HERO.down1),
     up0: seeThrough(HERO.up0),
