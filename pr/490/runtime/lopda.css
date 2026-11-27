@@ -514,6 +514,8 @@ textarea::placeholder{color:var(--ink-2)}
 .cal-info{flex:none;background:none;border:0;border-top:2px solid var(--ink);padding:6px 8px;font-family:var(--f-lcd);font-size:13px;color:var(--ink);text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .cal-sheet{position:absolute;inset:0;z-index:2;background:var(--lcd);display:flex;flex-direction:column;padding:10px 10px 4px;gap:8px;overflow:hidden}
 .cal-lines{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:6px}
+/* the go-to-date and add-a-date fields: their own height when they fit, a scroll when the panel is short, so the soft keys under them stay on the LCD */
+.cal-scroll{flex:0 1 auto;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px}
 .cal-lines p{margin:0;font-size:15px;line-height:1.4}
 .cal-lines .cal-big{font-size:20px}
 .cal-date{display:flex;align-items:center;gap:8px;border:2px solid var(--ink);padding:6px 8px}
@@ -746,11 +748,12 @@ html.kb .rd-def>.hint{flex:none;white-space:nowrap;overflow:hidden;text-overflow
 #data-clear-all:disabled{color:var(--mid);border-color:var(--mid);background:transparent;box-shadow:none;cursor:default}
 #run-err-msg{white-space:pre-wrap}
 
-/* pet (runtime/apps/pet.js): one hardware screen, the room at 4 px a room pixel, eight 44 px icons, soft keys */
+/* pet (runtime/apps/pet.js): one hardware screen, the room at 2 px a room pixel, five 44 px icons, soft keys */
 .pet-view{display:flex;flex-direction:column;overflow:hidden;padding:0}
 /* the room keeps 4 CSS px a room pixel and is centred in whatever height is left above the icons: the spare height is paper,
-   and the soft keys sit on the very bottom of the LCD like the calendar's and the dictionary's */
-.pet-stage{flex:1;min-height:240px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--lcd)}
+   and the soft keys sit on the very bottom of the LCD like the calendar's and the dictionary's. Below the smallest LCD
+   (331 x 359) pet.js fitRoom scales the room down as one piece instead of cutting its edges */
+.pet-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;background:var(--lcd)}
 .pet-room{position:relative;flex:none;width:324px;height:240px;overflow:hidden}
 .pet-cv{display:block;width:324px;height:240px;image-rendering:pixelated;image-rendering:crisp-edges}
 .pet-panel{position:absolute;inset:0;background:var(--lcd);color:var(--ink);padding:8px 10px;display:flex;flex-direction:column;gap:4px;overflow:hidden;font-size:14px;line-height:1.35}
@@ -781,12 +784,13 @@ html.kb .rd-def>.hint{flex:none;white-space:nowrap;overflow:hidden;text-overflow
 .pet-souvfrom{font-family:var(--f-pix);font-size:14px;line-height:1.3;color:var(--ink-2);overflow-wrap:anywhere}
 .pet-souvtag{margin:2px 0 0;font-size:13px;color:var(--ink);border:1px solid var(--ink);padding:0 4px;align-self:flex-start}
 .pet-souvfoot{display:flex;justify-content:space-between;gap:8px;font-size:14px;color:var(--ink-2)}
-/* the box index: 5 x 5 pictures a page, newest first; the selected tile gets an outer frame */
-.pet-souv-grid{display:grid;grid-template-columns:repeat(5,32px);grid-auto-rows:32px;gap:4px;justify-content:center;align-content:center;padding:2px 0}
-.pet-tile{width:32px;height:32px;padding:0;background:transparent;border:0;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer}
+/* the box index: 5 x 3 pictures a page, newest first. The picture stays 32 px (2 px a souvenir pixel); the button
+   around it is the 44 px target with 8 px between targets (sdk/UI.md 3); the selected tile gets a frame */
+.pet-souv-grid{display:grid;grid-template-columns:repeat(5,44px);grid-auto-rows:44px;gap:8px;justify-content:center;align-content:center;padding:2px 0}
+.pet-tile{width:44px;height:44px;padding:0;background:transparent;border:0;position:relative;display:flex;align-items:center;justify-content:center;cursor:pointer}
 .pet-tile canvas{width:32px;height:32px;image-rendering:pixelated;image-rendering:crisp-edges;border:2px solid var(--ink);box-sizing:border-box;display:block}
-.pet-tile.on{box-shadow:0 0 0 2px var(--ink)}
-.pet-tile-mark{position:absolute;right:4px;bottom:4px;width:4px;height:4px;background:var(--ink);pointer-events:none}
+.pet-tile.on{box-shadow:inset 0 0 0 2px var(--ink)}
+.pet-tile-mark{position:absolute;right:10px;bottom:10px;width:4px;height:4px;background:var(--ink);pointer-events:none}
 .pet-ask{margin-top:4px}
 .pet-askq{margin:0 0 2px;font-size:14px}
 .pet-askrow{display:flex;gap:6px}
