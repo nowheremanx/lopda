@@ -29,7 +29,7 @@
   function sfx(n) { try { PAD.sfx(n); } catch (e) {} }
 
   /* ---------------- state and save (section 5) ---------------- */
-  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", map: false, vol: 2, recent: [] };
+  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
   var saveTimer = 0;
   function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
@@ -40,8 +40,8 @@
       (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
-    if (s.view === "neck" || s.view === "box") set.view = s.view;
-    set.map = s.map === true;
+    if (s.view === "neck" || s.view === "box" || s.view === "map") set.view = s.view;
+    if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
     if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
   }
@@ -74,8 +74,7 @@
     var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    $("view").textContent = set.map ? t("degrees") : set.view === "neck" ? t("neck") : t("box");
-    $("view").classList.toggle("on", set.map || set.view === "neck");
+    $("view").textContent = t(set.view === "map" ? "degrees" : set.view);
     /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
        fret position, which the picture shows anyway; a second row would shrink the picture */
     var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
@@ -100,7 +99,7 @@
     var cur = current(), c = chord();
     if (!cur.v) return;
     var w = wrap.clientWidth, h = wrap.clientHeight;
-    var b = set.map ? Draw.map(cur.v, c) : set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
+    var b = set.view === "map" ? Draw.map(cur.v, c) : set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
     Draw.paint(cv, b, Math.max(1, w), Math.max(1, h));
   }
   function step(d) {
@@ -126,15 +125,15 @@
     if (!Guitar.play(notesOf(v), arp ? 0.18 : 0.012)) sfx(Guitar.level() ? "tap" : "err");
   }
 
-  /* the diagram: a tap opens the degree map; on the map a tap plays the note under the finger (ringing with what was
-     strummed, so a note to add can be heard against the chord), and a tap beside it closes the map. A swipe changes
-     the voicing either way. Strumming is the 扫弦 button's job. */
+  /* the diagram: in every view a tap plays the one note under the finger (string and fret, played or not), ringing with
+     what was strummed, so a note can be found and heard against the chord; a swipe changes the voicing. Strumming is the
+     扫弦 button's job, and the view is the header button's (owner, 1.3.0). */
   function tapPicture(e) {
-    if (!set.map) { toggleMap(); return; }
     var v = current().v, r = cv.getBoundingClientRect();
-    var hit = v && r.width ? Draw.mapAt(v, (e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height) : null;
-    if (!hit) { toggleMap(); return; }
-    if (!Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+    if (!v || !r.width) return;
+    var bx = (e.clientX - r.left) * cv.width / r.width, by = (e.clientY - r.top) * cv.height / r.height;
+    var hit = set.view === "neck" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
+    if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true)) sfx(Guitar.level() ? "tap" : "err");
   }
   (function () {
     var x0 = null, y0 = 0;
@@ -178,12 +177,10 @@
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("tick"); store(); show();
   }
-  /* the header's view button: box and neck; while the degree map is open it reads 度数 and closes it */
-  $("view").addEventListener("click", function () {
-    if (set.map) set.map = false; else set.view = set.view === "neck" ? "box" : "neck";
-    sfx("tick"); store(); show();
-  });
-  function toggleMap() { set.map = !set.map; sfx("tick"); store(); show(); }
+  /* the header's view button cycles the three pictures: box, neck, degree map */
+  var VIEWS = ["box", "neck", "map"];
+  function nextView() { set.view = VIEWS[(VIEWS.indexOf(set.view) + 1) % 3]; sfx("tick"); store(); show(); }
+  $("view").addEventListener("click", nextView);
   $("cname").parentNode.addEventListener("click", function () { openPicker(); });
 
   /* ---------------- the picker (section 3.3) ---------------- */
@@ -449,7 +446,7 @@
     else if (k === "down") stepQual(1);
     else if (k === "a") strum(false);
     else if (k === "start") openPicker();
-    else if (k === "select") toggleMap();
+    else if (k === "select") nextView();
   });
 
   var resizeTimer = 0;

@@ -121,8 +121,9 @@ var Draw = (function () {
     }
     return b;
   }
-  /* which string and fret a point of the map (in buffer pixels) is on, or null */
-  function mapAt(v, bx, by) {
+  /* which string and fret a point of the box or the map (in buffer pixels) is on, or null: the same five frets, and the
+     open strings above the nut when the box starts there */
+  function boxAt(v, bx, by) {
     var frets = v.frets, base = baseFret(frets), rows = rowsOf(frets), s = Math.round((bx - SX) / SS);
     if (s < 0 || s > 5 || Math.abs(bx - (SX + s * SS)) > 7) return null;
     for (var i = 0; i < rows.length; i++) {
@@ -171,6 +172,14 @@ var Draw = (function () {
     return b;
   }
 
+  /* which string and fret a point of the neck is on, or null: the open strings left of the nut, then frets 1 to 15 */
+  function neckAt(bx, by) {
+    var s = Math.round((NY + 5 * NS - by) / NS);
+    if (s < 0 || s > 5 || Math.abs(NY + 5 * NS - s * NS - by) > NS / 2) return null;
+    if (bx < NX - 12 || bx >= NX + 15 * NF) return null;
+    return { s: s, f: bx < NX ? 0 : Math.floor((bx - NX) / NF) + 1 };
+  }
+
   /* the buffer onto the canvas, and the canvas to the biggest whole scale that fits maxW x maxH css pixels */
   function paint(canvas, b, maxW, maxH) {
     if (canvas.width !== b.w) canvas.width = b.w;
@@ -187,5 +196,5 @@ var Draw = (function () {
     return k;
   }
 
-  return { Buf: Buf, box: box, map: map, mapAt: mapAt, neck: neck, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
+  return { Buf: Buf, box: box, map: map, boxAt: boxAt, neckAt: neckAt, neck: neck, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
 })();
