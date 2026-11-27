@@ -23,8 +23,9 @@
   #btns button.wide { grid-column: 1 / -1; }
   #btns button.level-cell { white-space: pre-line; line-height: 15px; padding: 4px 2px; font-size: 15px; }
   #btns button.locked { background: #4a5a32; color: #a3ad7e; }
-  #wipe { position: absolute; z-index: 4; inset: 0; pointer-events: none; background: #1f2a14; transform: translateX(-105%); }
-  #wipe.go { animation: wipe 300ms linear; }
+  #wipe { position: absolute; z-index: 4; inset: 0; pointer-events: none; background: #1f2a14; transform: translateX(-105%); visibility: hidden; }
+  #wipe.go { visibility: visible; animation: wipe 300ms linear; }
+  #hud span:empty { visibility: hidden; }
   @keyframes wipe { 0% { transform: translateX(-105%); } 100% { transform: translateX(105%); } }
   #bests { margin: 0; font-size: 13px; }
   button { font: inherit; font-weight: bold; min-height: 44px; padding: 8px 20px; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; }
