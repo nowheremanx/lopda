@@ -24,12 +24,16 @@ main{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:10px
 /* the picture takes the height that is left; Draw.paint scales it by a whole number to fit */
 #pwrap{flex:1;min-height:110px;display:flex;align-items:center;justify-content:center;touch-action:pan-y;cursor:pointer}
 #pic{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
-#qname{font-size:15px;text-align:center;flex:none}
-#line{font-size:15px;text-align:center;flex:none;font-weight:bold;overflow-wrap:anywhere}
-#tones{display:flex;justify-content:center;gap:6px;flex:none}
+/* every row around the picture has a fixed height, so the space left for it, and so its whole-number scale, is the
+   same for every voicing of every chord: a longer line or a muted string must not shrink the picture (owner, 1.2.0) */
+#qname,#line{font-size:15px;text-align:center;flex:none;height:20px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#line{font-weight:bold}
+#line.tight{font-size:12px}
+#tones{display:flex;justify-content:center;align-items:center;gap:6px;flex:none;height:44px}
 /* one cell per string, low E first; a sounding string is a button that plays it alone */
-.tone{display:flex;flex-direction:column;align-items:center;justify-content:center;width:44px;min-width:44px;padding:2px 0;line-height:1.15}
-.tone.mute{min-height:44px;font-size:15px;color:#4a5a32}
+.tone{display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;width:44px;min-width:44px;
+  height:44px;padding:2px 0;line-height:1.15}
+.tone.mute{font-size:15px;color:#4a5a32}
 .tone b{font-size:15px}
 .tone span{font-size:13px;color:#4a5a32}
 footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
@@ -1107,8 +1111,13 @@ var Progs = (function () {
     $("qname").textContent = EN ? Q.en : Q.zh;
     $("view").textContent = set.map ? t("degrees") : set.view === "neck" ? t("neck") : t("box");
     $("view").classList.toggle("on", set.map || set.view === "neck");
-    $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
-      (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
+    /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
+       fret position, which the picture shows anyway; a second row would shrink the picture */
+    var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
+    line.classList.remove("tight");
+    line.textContent = v ? head + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
+    if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
+    if (line.scrollWidth > line.clientWidth) line.textContent = head;
     /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
     var row = $("tones");
     row.innerHTML = "";

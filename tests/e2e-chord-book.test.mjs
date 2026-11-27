@@ -105,6 +105,36 @@ test("chord-book: opens on C x32010; the box, the notes and the footer fit the s
   }
 });
 
+test("chord-book: the picture keeps one size through every voicing, the map included; the rows around it do not move", { skip, timeout: 120000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    for (const name of ["C", "Ebmaj7"]) {
+      await tap(p, "#chord");
+      await p.locator("#q").fill(name);
+      await tap(p, "#qgo");
+      const n = Number((await text(p, "#line")).match(/ \/ (\d+)/)[1]);
+      const seen = new Set();
+      for (let i = 0; i < n; i++) {
+        for (const map of [false, true]) {
+          if (map) await p.evaluate(() => window.__press("select"));
+          const r = await p.evaluate(() => ({
+            pic: document.getElementById("pic").style.width,
+            line: document.getElementById("line").getBoundingClientRect().height,
+            tones: document.getElementById("tones").getBoundingClientRect().height,
+            cells: [...document.querySelectorAll("#tones .tone")].map((c) => Math.round(c.getBoundingClientRect().height)).join(",")
+          }));
+          seen.add(`${r.pic} ${r.line} ${r.tones} ${r.cells.split(",").every((h) => h === "44")}`);
+          if (map) await p.evaluate(() => window.__press("select"));
+        }
+        await p.evaluate(() => window.__press("right"));
+      }
+      assert.equal(seen.size, 1, `${name} at ${size.width}x${size.height}: one picture size, row heights and 44 px cells: ${[...seen].join(" | ")}`);
+      assert.match([...seen][0], / true$/, "every string cell is 44 px");
+    }
+    assert.deepEqual(errors, []);
+  }
+});
+
 test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch, and all of it is saved", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t);
   await tap(p, "#chord");

@@ -76,8 +76,13 @@
     $("qname").textContent = EN ? Q.en : Q.zh;
     $("view").textContent = set.map ? t("degrees") : set.view === "neck" ? t("neck") : t("box");
     $("view").classList.toggle("on", set.map || set.view === "neck");
-    $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
-      (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
+    /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
+       fret position, which the picture shows anyway; a second row would shrink the picture */
+    var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
+    line.classList.remove("tight");
+    line.textContent = v ? head + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
+    if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
+    if (line.scrollWidth > line.clientWidth) line.textContent = head;
     /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
     var row = $("tones");
     row.innerHTML = "";
