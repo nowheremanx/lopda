@@ -9,7 +9,9 @@ import { read } from "./helpers.mjs";
 const ctx = vm.createContext({ console });
 vm.runInContext(read("registry/apps/chord-book/src/chords.js"), ctx, { filename: "chords.js" });
 vm.runInContext(read("registry/apps/chord-book/src/draw.js"), ctx, { filename: "draw.js" });
+vm.runInContext(read("registry/apps/chord-book/src/progs.js"), ctx, { filename: "progs.js" });
 const C = ctx.Chords;
+const P = ctx.Progs;
 const D = ctx.Draw;
 const mod = (n) => ((n % 12) + 12) % 12;
 const pcs = (frets) => C.midiOf(frets).map(mod);
@@ -161,4 +163,61 @@ test("tones: each chord tone carries its interval above the root, in stacking or
   assert.deepEqual([...C.tones(C.parse("Csus2"))].map((x) => x.iv), [0, 2, 7], "a sus2's 2 stays a second");
   assert.deepEqual([...C.tones(C.parse("Am/G"))].map((x) => x.iv), [null, 0, 3, 7]);
   assert.deepEqual([...C.tones(C.parse("C/E"))].map((x) => x.iv), [0, 4, 7], "a bass that is a chord tone is not listed twice");
+});
+
+/* ---------------- the progressions (和弦连接, 1.2.0) ---------------- */
+
+test("progressions: every entry is whole, in both languages, and every chord in it is one the app knows", () => {
+  const ids = new Set();
+  for (const p of P.LIST) {
+    assert.ok(!ids.has(p.id), `${p.id} once`); ids.add(p.id);
+    assert.ok(p.key === "maj" || p.key === "min", `${p.id} key`);
+    assert.ok(p.zh && p.en && p.why.zh && p.why.en, `${p.id} has both languages`);
+    assert.equal(p.rn.length, p.ch.length, `${p.id}: one numeral per chord`);
+    for (const [deg, q] of p.ch) {
+      assert.ok(deg >= 0 && deg < 12, `${p.id} degree`);
+      assert.ok(C.qual(q), `${p.id}: ${q} is a quality`);
+    }
+  }
+});
+
+test("progressions: every quality at every root belongs to at least one, and every chord in it has a shape", () => {
+  for (const c of every()) {
+    const r = P.forChord(c);
+    assert.ok(r.length > 0, `${C.name(c)} has a progression`);
+    for (const x of r) {
+      assert.equal(x.names.length, x.chords.length);
+      for (const ch of x.chords) assert.ok(C.voicings(ch).length > 0, `${x.p.id} in ${x.keyName}: ${C.name(ch)} has a shape`);
+    }
+  }
+});
+
+test("progressions: spelled by the key, the chord you came from where the key allows it", () => {
+  const first = (n, id) => P.forChord(C.parse(n)).find((x) => x.p.id === id);
+  assert.equal(first("C", "pop").names.join(" "), "C G Am F");
+  assert.equal(first("Am", "andalusian").names.join(" "), "Am G F E");
+  /* Eb minor, not D# minor: the flat key keeps the user's own spelling, and its sixth is Cb, not B */
+  assert.equal(first("Ebm", "andalusian").keyName, "Eb");
+  assert.equal(first("Ebm", "andalusian").names.join(" "), "Ebm Db Cb Bb");
+  /* the passing diminished chord between I and ii is a raised I, so it is G#dim7 in G, not Abdim7 */
+  assert.equal(first("G", "dim-passing").names.join(" "), "G G#dim7 Am D");
+  /* a slash chord matches by its bass where a progression has one: C/E is the canon's I/3 */
+  const canon = first("C/E", "canon");
+  assert.equal(canon.exact, true);
+  assert.equal(canon.names[canon.at], "C/E");
+  assert.equal(canon.names.join(" "), "C G/B Am Em/G F C/E F G");
+  /* where none has its bass, the chord counts without it, after the exact ones */
+  const am = P.forChord(C.parse("Am/G"));
+  assert.ok(am.length > 0 && am.every((x) => !x.exact));
+  /* the chord you came from is listed first among the exact ones as the key's own chord */
+  const c = P.forChord(C.parse("C"));
+  assert.equal(c[0].at, 0);
+  assert.equal(C.name(c[0].chords[c[0].at]), "C");
+});
+
+test("progressions: the other chords are played near the hand's fret, the commonest shape on a tie", () => {
+  const g = C.voicings(C.parse("G"));
+  assert.equal(P.nearVoicing(g, 0), g[0]);
+  const near7 = P.nearVoicing(g, 7);
+  assert.ok(Math.abs(near7.pos - 7) <= Math.abs(g[0].pos - 7));
 });

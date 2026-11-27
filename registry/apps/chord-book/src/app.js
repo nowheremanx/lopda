@@ -10,14 +10,18 @@
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
     listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
-    bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"]
+    bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
+    progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
+    role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}"
   } : {
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
     listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
-    bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"]
+    bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
+    progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
+    role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}"
   };
   function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
@@ -243,6 +247,92 @@
   $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(); } });
   $("tofind").addEventListener("click", function () { picker.classList.remove("open"); pick = null; openFinder(); });
 
+  /* ---------------- the progressions (和弦连接, version 1.2) ---------------- */
+  var progs = $("progs"), gl = null, gfocus = 0, gkeyed = false, seq = { timer: 0, card: -1, i: -1 };
+  function openProgs() {
+    var c = chord();
+    gl = Progs.forChord(c);
+    gfocus = 0; gkeyed = false;
+    $("gtitle").textContent = t("progTitle", { c: Chords.name(c) });
+    buildProgs();
+    progs.classList.add("open");
+    $("glist").scrollTop = 0;
+    sfx("tap");
+  }
+  function closeProgs() { stopSeq(); progs.classList.remove("open"); gl = null; show(); }
+  /* the voicing each chord of a progression is played with: the one in view for the chord you came from, the nearest
+     common one to its fret position for the others, so the hand would stay in one place */
+  function voicingFor(r, i) {
+    var v = current().v;
+    if (i === r.at && r.exact && v) return v;
+    return Progs.nearVoicing(Chords.voicings(r.chords[i]), v ? v.pos : 0);
+  }
+  function buildProgs() {
+    var box = $("glist"); box.innerHTML = "";
+    gl.forEach(function (r, n) {
+      var p = r.p, card = el("div", "card" + (gkeyed && n === gfocus ? " focus" : ""));
+      var head = el("div", "ghead");
+      head.appendChild(el("b", "", EN ? p.en : p.zh));
+      head.appendChild(el("span", "", t(p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName })));
+      card.appendChild(head);
+      card.appendChild(el("div", "grn", p.rn.join(" - ")));
+      var chips = el("div", "chips grid4");
+      r.chords.forEach(function (x, i) {
+        var b = choice(r.names[i], seq.card === n && seq.i === i, function () { jumpTo(r, i); });
+        if (i === r.at) b.className += " me";
+        chips.appendChild(b);
+      });
+      card.appendChild(chips);
+      var row = el("div", "grow"), here = Chords.name(chord()), rn = p.rn[r.at];
+      row.appendChild(el("div", "grole", !r.exact ? t("loose", { c: Chords.name({ root: chord().root, q: chord().q, bass: null }), rn: rn }) :
+        r.names[r.at] !== here ? t("spelled", { c: here, s: r.names[r.at], rn: rn }) : t("role", { c: here, rn: rn })));
+      row.appendChild(choice(seq.card === n ? t("stopIt") : t("play"), false, function () { playProg(n); }, "gplay"));
+      card.appendChild(row);
+      card.appendChild(el("p", "why", EN ? p.why.en : p.why.zh));
+      box.appendChild(card);
+    });
+  }
+  function stopSeq() { clearTimeout(seq.timer); seq = { timer: 0, card: -1, i: -1 }; }
+  /* one strum per chord, a second apart; the chord sounding is filled. A second tap on Play stops it. */
+  function playProg(n) {
+    var again = seq.card === n;
+    stopSeq(); Guitar.stop();
+    if (again) { buildProgs(); return; }
+    var r = gl[n];
+    if (!Guitar.level()) { sfx("err"); return; }
+    function at(i) {
+      if (!gl || document.hidden) { stopSeq(); return; }
+      if (i >= r.chords.length) { stopSeq(); buildProgs(); return; }
+      seq.card = n; seq.i = i;
+      var v = voicingFor(r, i);
+      if (v) Guitar.play(Chords.midiOf(v.frets), 0.012);
+      buildProgs();
+      seq.timer = setTimeout(function () { at(i + 1); }, 1000);
+    }
+    at(0);
+  }
+  /* a chord in a progression opens it on the main screen, on the voicing it was played with */
+  function jumpTo(r, i) {
+    var v = voicingFor(r, i), c = r.chords[i];
+    stopSeq();
+    progs.classList.remove("open"); gl = null;
+    go(c, 0);
+    var l = list(), id = v ? v.frets.join(",") : "";
+    set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
+    sfx("ok"); store(); show();
+  }
+  function focusProg(d) {
+    if (!gl || !gl.length) return;
+    if (gkeyed) gfocus = (gfocus + d + gl.length) % gl.length;
+    gkeyed = true;
+    sfx("tick"); buildProgs();
+    var card = $("glist").children[gfocus];
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
+  }
+  $("prog").addEventListener("click", openProgs);
+  $("gback").addEventListener("click", function () { sfx("tap"); closeProgs(); });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) stopSeq(); });
+
   /* ---------------- the finder (section 3.4) ---------------- */
   var fs = null;     /* {frets, base} */
   var finder = $("finder");
@@ -316,6 +406,13 @@
 
   /* ---------------- keys (section 7) ---------------- */
   PAD.on("press", function (k) {
+    if (gl) {
+      if (k === "b") { sfx("tap"); closeProgs(); }
+      else if (k === "up" || k === "left") focusProg(-1);
+      else if (k === "down" || k === "right") focusProg(1);
+      else if (k === "a") playProg(gfocus);
+      return;
+    }
     if (fs) {
       if (k === "b") { sfx("tap"); closeFinder(); }
       else if (k === "a" || k === "start") seeFound();
@@ -353,6 +450,7 @@
   $("q").placeholder = t("search"); $("rootH").textContent = t("root"); $("bassH").textContent = t("bass");
   $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
   $("sortH").textContent = t("order");
+  $("prog").textContent = t("progs"); $("gback").textContent = t("back");
   $("fback").textContent = t("back");
   $("fplay").textContent = t("listen"); $("fsee").textContent = t("see");
   document.documentElement.lang = EN ? "en" : "zh";

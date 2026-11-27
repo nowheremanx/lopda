@@ -661,7 +661,7 @@
         "...1.1.1.1.1.1..",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.2.0",
       "released": "2026-11-27",
       "updated": "2026-11-27",
       "description": "标准调弦的吉他和弦字典：19 种和弦、斜线和弦，每个和弦多种按法，按常用或把位排。看框图或全指板，点一下听扫弦，也能在指板上点出和弦名。",
@@ -678,8 +678,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/chord-book/index.html",
-      "sha256": "ff7a5782b94262453cda49b30d179e82bac4aa5922ea784613d132d68b11b4c2",
-      "bytes": 56674
+      "sha256": "db581987791bf83cd7c4515ca913681d13e757571addb7ebdc098a0b280653ba",
+      "bytes": 81394
     },
     {
       "spec": "lopda/1",
