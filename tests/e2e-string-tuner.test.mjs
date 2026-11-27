@@ -104,13 +104,17 @@ test("string-tuner: the mic opens at once; a sharp A shows A2 and its cents, an 
   assert.equal(await p.textContent("#cents"), "0");
   assert.equal(await p.getAttribute("#lamp", "class"), "on");
   assert.match(await p.getAttribute("#strings button:nth-child(1)", "class"), /ok/, "the string is marked tuned");
-  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 1, "one chime when it first lands");
+  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 1, "one chime when the lamp lights");
   await hear(p, 164.81, 16);
-  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 1, "and not again for the same string");
+  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 1, "and not again while it stays lit");
   /* the sound dies: the reading stays, greyed, and the lamp goes out */
   await p.waitForTimeout(800);
   assert.equal(await p.getAttribute("#note", "class"), "stale");
   assert.equal(await p.getAttribute("#lamp", "class"), "");
+  /* plucked again and in tune: the lamp and its chime come back every time */
+  await hear(p, 164.81, 16);
+  assert.equal(await p.getAttribute("#lamp", "class"), "on");
+  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 2);
   assert.deepEqual(errors, []);
 });
 

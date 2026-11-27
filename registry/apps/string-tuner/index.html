@@ -296,9 +296,10 @@ var Tuner = (function () {
     var on = live && okSince && t - okSince >= Tuner.IN_TUNE_MS;
     if (on !== lampOn) {
       lampOn = on; dirty = true;
-      /* a string reaching the lamp the first time chimes once and keeps its mark; the mic skips the chime itself */
-      if (on && shown && shown.i >= 0 && !tuned[shown.i]) {
-        tuned[shown.i] = true; PAD.sfx("ok"); toneUntil = t + 500;
+      /* every time the lamp lights it chimes (the mic skips the chime itself); the string keeps a mark that it was tuned */
+      if (on) {
+        PAD.sfx("ok"); toneUntil = t + 500;
+        if (shown && shown.i >= 0) tuned[shown.i] = true;
       }
     }
     var moved = Math.abs(needleTo - needle) > 0.05;
