@@ -1,8 +1,10 @@
 /* lo-title.js 0.1.0: one title screen for every Lo-PDA app. MIT. See sdk/LO-TITLE.md.
  *
- * A title screen is the app's cover picture (its name drawn into it) above a menu that turns like a wheel: the chosen
- * item sits big in an ink band, the items before and after it show small above and below, and a move rolls the
- * wheel. One layout for all apps, so the store's covers and the apps' first screens look like one family.
+ * A title screen is the app's cover picture (its name drawn into it) as wide as the screen, with a menu that turns
+ * like a drum over its lower part: the chosen item big in an ink band, the items before and after it in framed paper
+ * boxes, and a move rolls the drum. Under it a status bar (paper on ink) holds a note and the keys. One layout for
+ * all apps, so the store's covers and the apps' first screens look like one family. Draw the picture with its lower
+ * third calm: on a short screen the menu lies over it.
  *
  * Everything is drawn into one canvas with putImageData, in the four tones, with the lopix12 pixel font (the
  * data-lo-font block that tools/bundle-app.mjs writes after this one calls LoTitle.font). Nothing here touches PAD:
@@ -22,7 +24,7 @@
  *
  * The canvas is sized by the app's CSS (give it the whole screen, or the area under a top bar); this file
  * reads its size on mount and on every resize, and forgets it once the canvas leaves the page.
- * Touch: a tap on the band picks, a tap on a small item rolls the wheel to it, a finger dragged up or down turns it.
+ * Touch: a tap on the band picks, a tap on a box above or below rolls the drum to it, a finger dragged up or down turns it.
  */
 var LoTitle = (function () {
   "use strict";
@@ -58,31 +60,38 @@ var LoTitle = (function () {
       if (L) draw();
     }
 
-    /* the layout, in device pixels: u is one LCD pixel (a whole number of device pixels, so lines stay sharp) */
+    /* the layout, in device pixels: u is one LCD pixel (a whole number of device pixels, so lines stay sharp).
+       The picture fills the screen's width above a status bar; the wheel lies over the picture's lower part:
+       the ink band, with the item before and after it in framed paper boxes. The bar holds the note and the keys,
+       paper on ink, so it never reads as one more item. */
     function layout() {
       var r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
       W = Math.max(1, Math.round(r.width * d)); H = Math.max(1, Math.round(r.height * d));
       if (canvas.width !== W) canvas.width = W;
       if (canvas.height !== H) canvas.height = H;
       var u = Math.max(1, Math.round(d)), cell = FONT ? FONT.cell : 13;
-      var RB = 46 * u, RS = 20 * u, GAP = 6 * u, HINT = (cell + 4) * u, NOTE = o.note ? (cell + 3) * u : 0;
+      var LINE = (cell + 5) * u, PAD = 8 * u;
+      /* the bar: note on the left and keys on the right on one line when both fit, else one above the other */
+      var nw = o.note ? measure(o.note, u) : 0, hw = o.hint ? measure(o.hint, u) : 0;
+      var oneLine = !o.note || !o.hint || nw + hw + 24 * u <= W - PAD * 2;
+      var F = (o.note || o.hint) ? LINE * (oneLine ? 1 : 2) + 4 * u : 0;
       var art = o.art, aw = art ? art.w : 0, ah = art ? art.h : 0;
-      var n = (o.items || []).length, near = 1;
-      var room = H - (RS * 2 + RB) - HINT - NOTE - GAP * 4;
-      /* the picture as big as fits, in whole device pixels per art pixel; on a very small screen it shrinks */
-      var fit = art ? Math.min((W - 16 * u) / aw, room / ah) : 0, k = fit >= 1 ? Math.floor(fit) : fit;
+      /* the picture as wide as the screen; on a 1x screen in whole pixels (sharp squares), on a 2x or 3x screen any
+         size, where a pixel one device pixel wider than its neighbour cannot be seen */
+      var fit = art ? Math.min(W / aw, (H - F) / ah) : 0, k = d < 2 && fit >= 1 ? Math.floor(fit) : fit;
       var side = Math.round(aw * k), sideH = Math.round(ah * k);
-      /* a tall screen with more than three items shows two each way; then the picture, the wheel and the note
-         stand together in the middle of what is left above the note and the key line */
-      if (n > 3 && room - sideH >= RS * 2) near = 2;
-      var wheel = RB + RS * 2 * near, block = sideH + (art ? GAP * 2 : 0) + wheel;
-      var ay = Math.max(GAP, Math.round((H - HINT - block) / 2)), ax = Math.round((W - side) / 2);
-      var cy = ay + sideH + (art ? GAP * 2 : 0) + RS * near + RB / 2;
-      /* the band is as wide as the screen allows, so a long sub line still fits */
-      var bx0 = 8 * u, bx1 = W - 8 * u;
-      L = { u: u, RB: RB, RS: RS, k: k, ax: ax, ay: ay, aw: side, ah: sideH, cy: cy, near: near,
-        b0: cy - RB / 2, b1: cy + RB / 2, bx0: bx0, bx1: bx1,
-        w0: cy - RB / 2 - RS * near, w1: cy + RB / 2 + RS * near, noteY: H - HINT - NOTE + 2 * u, hintY: H - HINT + 2 * u };
+      var RB = 44 * u, RS = 22 * u, G = 3 * u;
+      var wheel = RS * 2 + G * 2 + RB, ay = 0, cy = H - F - PAD - RS - G - RB / 2;
+      /* a tall screen has room for both: the picture and the wheel stand together in the middle, without overlap */
+      if (H - F - sideH >= wheel + PAD * 2) {
+        ay = Math.round((H - F - sideH - wheel - PAD) / 2);
+        cy = ay + sideH + PAD + RS + G + RB / 2;
+      }
+      var bx0 = PAD, bx1 = W - PAD;
+      L = { u: u, RB: RB, RS: RS, G: G, k: k, ax: Math.round((W - side) / 2), ay: ay, aw: side, ah: sideH, cy: cy,
+        b0: cy - RB / 2, b1: cy + RB / 2, bx0: bx0, bx1: bx1, sx0: bx0 + 14 * u, sx1: bx1 - 14 * u,
+        up0: cy - RB / 2 - G - RS, up1: cy - RB / 2 - G, dn0: cy + RB / 2 + G, dn1: cy + RB / 2 + G + RS,
+        F: F, oneLine: oneLine, LINE: LINE, PAD: PAD };
       buf = new Uint8Array(W * H);
       img = canvas.getContext("2d").createImageData(W, H);
     }
@@ -127,9 +136,10 @@ var LoTitle = (function () {
 
     /* where an item stands when it is d steps from the band (d may be a fraction while the wheel turns) */
     function yAt(d) {
-      var a = Math.abs(d), s = d < 0 ? -1 : 1, step1 = L.RB / 2 + L.RS / 2;
-      return L.cy + s * (a <= 1 ? a * step1 : step1 + (a - 1) * L.RS);
+      var step = L.RB / 2 + L.G + L.RS / 2;
+      return L.cy + d * step;
     }
+    function box(x0, y0, x1, y1) { var u = L.u; fill(x0, y0, x1, y1, INK); fill(x0 + u, y0 + u, x1 - u, y1 - u, PAPER); }
 
     function draw() {
       if (!L) return;
@@ -141,29 +151,38 @@ var LoTitle = (function () {
           for (var x = 0; x < L.aw; x++) buf[row + x] = art.px[sy * art.w + Math.min(art.w - 1, Math.floor(x / L.k))];
         }
       }
+      /* the slots: a box above and below only while there is an item to roll to */
+      var p = Math.round(target), hasUp = p > 0, hasDn = p < items.length - 1;
+      if (hasUp) box(L.sx0, L.up0, L.sx1, L.up1);
+      if (hasDn) box(L.sx0, L.dn0, L.sx1, L.dn1);
       fill(L.bx0, L.b0, L.bx1, L.b1, INK);
+      /* text slides through the slots like a drum: paper in the band, ink in a box, hidden between them */
+      var tone = function (yy) {
+        if (yy >= L.b0 + u && yy < L.b1 - u) return PAPER;
+        if ((hasUp && yy >= L.up0 + u && yy < L.up1 - u) || (hasDn && yy >= L.dn0 + u && yy < L.dn1 - u)) return INK;
+        return null;
+      };
       for (i = 0; i < items.length; i++) {
         var d = i - pos;
-        if (Math.abs(d) > L.near + 0.99) continue;
+        if (Math.abs(d) > 1.99) continue;
         var t = Math.min(1, Math.abs(d)), k = u * (2 - t), it = items[i];
         var withSub = it.sub && Math.abs(d) < 0.25;
         var ty = yAt(d) - cell * k / 2 - (withSub ? 6 * u : 0);
-        /* inside the band: paper; outside: dark; past the wheel's ends: clipped (UI.md 11.3: small text is ink on
-           paper or paper on ink, never mid) */
-        var lx = centred(it.label, ty, k, function (yy) { return yy >= L.b0 && yy < L.b1 ? PAPER : yy < L.w0 || yy >= L.w1 ? null : DARK; });
+        var lx = centred(it.label, ty, k, tone);
         /* a locked item carries a padlock in front of its name while it is in the band; its sub line says why */
         if (it.locked && Math.abs(d) < 0.5) lock(lx - 14 * u, ty + (cell * k - 9 * u) / 2, u);
         if (withSub) centred(it.sub, ty + cell * k + u, u, function (yy) { return yy >= L.b0 && yy < L.b1 ? PAPER : null; });
       }
-      /* small marks in the band's right end: more items above / below */
-      var p = Math.round(target), mx = L.bx1 - 10 * u;
-      for (var j = 0; j < 4; j++) {
-        if (p > 0) fill(mx - j * u, L.b0 + (4 + j) * u, mx + (j + 1) * u, L.b0 + (5 + j) * u, PAPER);
-        if (p < items.length - 1) fill(mx - j * u, L.b1 - (5 + j) * u, mx + (j + 1) * u, L.b1 - (4 + j) * u, PAPER);
+      /* the status bar */
+      if (L.F) {
+        var y0 = H - L.F, paper = function () { return PAPER; };
+        fill(0, y0, W, H, INK);
+        var ly = y0 + 3 * u + 2 * u;
+        if (L.oneLine) {
+          if (o.note && o.hint) { text(o.note, L.PAD, ly, u, paper); text(o.hint, W - L.PAD - measure(o.hint, u), ly, u, paper); }
+          else centred(o.note || o.hint, ly, u, paper);
+        } else { centred(o.note, ly, u, paper); centred(o.hint, ly + L.LINE, u, paper); }
       }
-      var all = function () { return DARK; };
-      if (o.note) centred(o.note, L.noteY, u, all);
-      if (o.hint) centred(o.hint, L.hintY, u, all);
       var px = img.data;
       for (var n = 0, m = W * H; n < m; n++) { var c = TONES[buf[n]], q = n * 4; px[q] = c[0]; px[q + 1] = c[1]; px[q + 2] = c[2]; px[q + 3] = 255; }
       canvas.getContext("2d").putImageData(img, 0, 0);
@@ -209,7 +228,7 @@ var LoTitle = (function () {
       var dy = devY(e) - drag.y;
       if (Math.abs(dy) > L.RS * 0.6) drag.moved = true;
       if (!drag.moved) return;
-      var steps = Math.round(-dy / L.RS);
+      var steps = Math.round(-dy / (L.RB / 2 + L.G + L.RS / 2));
       if (clampIndex(drag.start + steps) !== target) rollTo(drag.start + steps);
     }
     function onUp(e) {
@@ -218,11 +237,8 @@ var LoTitle = (function () {
       if (moved) return;
       var y = devY(e);
       if (y >= L.b0 && y < L.b1) { if (o.onPick && (o.items || []).length) o.onPick(target); return; }
-      if (y < L.w0 || y >= L.w1) return;
-      /* which small item is under the finger: the nearest one's resting place */
-      var best = null, bd = Infinity;
-      for (var i = 0; i < (o.items || []).length; i++) { var dd = Math.abs(yAt(i - target) - y); if (dd < bd) { bd = dd; best = i; } }
-      if (best !== null && best !== target) rollTo(best);
+      if (y >= L.up0 && y < L.up1) rollTo(target - 1);
+      else if (y >= L.dn0 && y < L.dn1) rollTo(target + 1);
     }
     function onResize() { if (canvas.isConnected === false) { removeEventListener("resize", onResize); return; } layout(); draw(); }
 

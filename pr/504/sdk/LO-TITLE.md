@@ -1,11 +1,11 @@
 # lo-title: the shared title screen
 
 `sdk/lo-title.js` (MIT) draws an app's first screen the same way in every app: the cover picture with the name
-drawn into it (UI.md section 11.1), and under it a menu that turns like a wheel. The chosen item sits big in an ink
-band with one line of detail under it ("Level 3 · $1,200", "0 / 30 cleared"); the items before and after it show
-small above and below. Up and Down roll the wheel, A or START picks; on touch, a tap on the band picks, a tap on a
-small item rolls to it, and a finger dragged up or down turns it. One line under the wheel can hold a record or a
-save warning, and the key line sits at the bottom.
+drawn into it (UI.md section 11.1) as wide as the screen, and a menu that turns like a drum. The chosen item sits big
+in an ink band with one line of detail under it ("Level 3 · $1,200", "0 / 30 cleared"); the items before and after
+it sit in framed paper boxes above and below. Up and Down roll the drum, A or START picks; on touch, a tap on the band
+picks, a tap on a box rolls to it, and a finger dragged up or down turns it. A status bar at the bottom, paper on
+ink, holds a note (a record or a save warning) on the left and the keys on the right.
 
 Use it for the title of a game or a story (three to five items). Long lists, round pickers and shops are not wheels.
 
@@ -46,10 +46,11 @@ Use it for the title of a game or a story (three to five items). Long lists, rou
 
 ## The layout
 
-- The picture is as large as fits in whole device pixels per picture pixel, so it stays sharp; it is centred with
-  the wheel in the room above the note and the key line.
-- The band spans the screen; a detail line too long for it ends in "...".
-- Small screens show one item above and below the band, tall screens with more than three items show two.
+- The picture fills the screen's width (in whole pixels on a 1x screen). On a tall screen the picture and the drum
+  stand together in the middle; on a short one the drum lies over the picture's lower part, so draw that part calm
+  (ground, water, a floor) and keep the name and the subject in the upper two thirds.
+- The band spans the screen; a detail line too long for it ends in "...". The bar takes two lines when the note
+  and the keys do not fit side by side.
 - Every pixel is one of the four tones, written with `putImageData` (no `drawImage`, UI.md section 9).
 
 `registry/apps/lao-zhang` is the example.
