@@ -55,21 +55,25 @@ test("the mountain maps are 18 x 16 and every spot is on walkable ground", () =>
  * the stuck-save test fails there); normal runs use the app. */
 const DINER_FILE = process.env.SJ_FILE || "registry/apps/shanjiao-diner/index.html";
 
-async function bootDiner(seed, save) {
+async function bootDiner(seed, save, opts = {}) {
   const { boot } = await import("./app-vm.mjs");
-  const store = {}, listeners = {};
+  const store = {}, listeners = {}, writes = [];
   // a save goes in under SAVE_KEY, "diner" in src/00-main.js, so 继续 is offered
   if (save) store.diner = JSON.parse(JSON.stringify(save));
   const pad = {
     lang: "zh",
-    save(k, v) { store[k] = JSON.parse(JSON.stringify(v)); },
-    load(k) { return Promise.resolve(store[k] == null ? null : JSON.parse(JSON.stringify(store[k]))); },
+    save(k, v) { writes.push(k); store[k] = JSON.parse(JSON.stringify(v)); },
+    load(k) {
+      // opts.loadError: the runtime's rejection for a damaged save (sdk/pad-shim.js PAD.load)
+      if (opts.loadError) return Promise.reject({ code: opts.loadError });
+      return Promise.resolve(store[k] == null ? null : JSON.parse(JSON.stringify(store[k])));
+    },
     remove(k) { delete store[k]; },
     sfx() {}, ambience() {},
     on(t, fn) { (listeners[t] ||= []).push(fn); },
     off() {}, isDown() { return false; }
   };
-  return { app: boot(DINER_FILE, { pad, seed }), listeners };
+  return { app: boot(DINER_FILE, { pad, seed }), listeners, store, writes };
 }
 
 /* one chin press, then a few frames so the scene sees it */
@@ -275,4 +279,126 @@ test("老周's choice box fits its labels and the screen", async () => {
     const w = game.g.measure(label);
     assert.ok(w <= box.width - 15, `"${label}" is ${w} px, wider than the ${box.width - 15} px the box holds`);
   }
+});
+
+/* a real day-1 save, read at the first morning of a new game */
+async function day1Save() {
+  const first = await bootDiner(3);
+  const k = buttons(first.app, first.listeners);
+  await k.tick(6);
+  await k.press("a");                   // 开始
+  await k.tick(80);
+  return JSON.parse(JSON.stringify(first.app.ctx.get("S")));
+}
+
+test("#420: 新局 over a save asks first; B keeps the old save", async () => {
+  const old = await day1Save();
+  old.day = 5; old.money = 321;
+  const { app, listeners, store } = await bootDiner(9, old);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  const ids = app.ctx.get("titleOptions")().map((o) => o.id);
+  assert.deepEqual(ids, ["continue", "new", "help"]);
+  await press("right");                 // 新局
+  await press("a");
+  await tick(3);
+  assert.equal(app.ctx.get("S"), null, "no new game before the player confirms");
+  assert.equal(store.diner.day, 5, "the old save is untouched while the box is open");
+  await press("b");                     // cancel
+  await tick(3);
+  assert.equal(app.ctx.get("S"), null, "B keeps the old game");
+  assert.equal(store.diner.day, 5);
+  assert.equal(store.diner.money, 321);
+  await press("a");                     // 新局 again
+  await tick(3);
+  await press("a");                     // 开新局
+  for (let i = 0; i < 90 && !app.ctx.get("S"); i++) await tick(1);
+  assert.equal(app.ctx.get("S").day, 1, "A on 开新局 starts the new week");
+  assert.equal(store.diner.day, 1);
+});
+
+test("#421: an evening is saved once as 'service' and 继续 starts that evening again", async () => {
+  const old = await day1Save();
+  old.menu = ["mushroom_soup"]; old.stock = { mushroom_soup: 3 }; old.flags.opened = 1;
+  const { app, listeners, store, writes } = await bootDiner(10, old);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");                     // 继续
+  await tick(60);
+  const game = app.ctx.get("game");
+  game.go("service");                   // what 开门营业 does after its save
+  await tick(60);
+  assert.equal(store.diner.phase, "service", "entering the evening saves it as service");
+  assert.deepEqual(store.diner.stock, { mushroom_soup: 3 }, "with the stock it opened with");
+  const before = writes.length;
+  app.ctx.get("addNpc")("ahe", 1);      // a regular's favourite, mid-evening
+  app.ctx.get("addMoney")(7);
+  app.ctx.get("mark")("svc_ahe");
+  await tick(3);
+  assert.equal(writes.length, before, "nothing is written half way through the evening");
+  const midEvening = JSON.parse(JSON.stringify(store.diner));
+
+  // leaving now (HOME) and coming back: 继续 opens the same evening, not the morning
+  const again = await bootDiner(11, midEvening);
+  const k2 = buttons(again.app, again.listeners);
+  await k2.tick(6);
+  assert.equal(again.app.ctx.get("titleOptions")()[0].id, "continue");
+  await k2.press("a");
+  await k2.tick(60);
+  const SERV = again.app.ctx.get("SERV");
+  assert.ok(SERV && !SERV.done, "继续 goes back into the evening");
+  assert.deepEqual(again.app.ctx.get("S").stock, { mushroom_soup: 3 });
+
+  // the end of the evening writes the night in one go
+  app.ctx.get("finishService")(false);
+  await tick(3);
+  assert.equal(store.diner.phase, "night");
+  assert.ok(store.diner.money >= old.money + 7, "the evening's takings are in the night's save");
+  assert.equal(store.diner.seen.svc_ahe, 1);
+});
+
+test("#422: after the ending the save keeps its record and the title offers 结局", async () => {
+  const old = await day1Save();
+  old.day = 7; old.phase = "night";
+  const { app, listeners, store } = await bootDiner(12, old);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");                     // 继续 into the night
+  await tick(30);
+  app.ctx.get("game").go("ending");
+  await tick(60);
+  assert.equal(store.diner.phase, "ending");
+  await press("a");                     // A 回到标题
+  await tick(60);
+  const opts = app.ctx.get("titleOptions")();
+  assert.deepEqual(opts.map((o) => o.id), ["continue", "new", "help"], "the same title as after a restart");
+  assert.equal(opts[0].label, "结局");
+  assert.equal(store.diner.phase, "ending", "the finished week is still saved");
+});
+
+test("#423: a save that cannot be read, or a newer one, offers no new game and is never written", async () => {
+  for (const [save, opt, newer] of [[null, { loadError: "corrupt" }, false], [{ v: 99, phase: "morning" }, {}, true]]) {
+    const { app, listeners, store, writes } = await bootDiner(13, save, opt);
+    const { tick, press } = buttons(app, listeners);
+    await tick(6);
+    assert.equal(app.ctx.get("booted"), true);
+    assert.equal(app.ctx.get("bootFailed"), true);
+    assert.equal(app.ctx.get("bootNewer"), newer);
+    assert.deepEqual(app.ctx.get("titleOptions")().map((o) => o.id), ["help"]);
+    await press("a");                   // 说明
+    await press("a");                   // back
+    await tick(60);
+    assert.equal(app.ctx.get("S"), null, "no game was started");
+    assert.equal(writes.length, 0, "nothing was written");
+    if (save) assert.deepEqual(store.diner, save, "the newer save is untouched");
+  }
+});
+
+test("the title's save warnings fit the screen", async () => {
+  const { app } = await bootDiner(14);
+  const g = app.ctx.get("game").g;
+  const src = read("registry/apps/shanjiao-diner/src/50-title.js");
+  const lines = [...src.matchAll(/g\.text\("([^"]*)", 108, 1(?:62|76)/g)].map((m) => m[1]);
+  assert.equal(lines.length, 4);
+  for (const line of lines) assert.ok(g.measure(line) <= 204, `"${line}" is ${g.measure(line)} px`);
 });

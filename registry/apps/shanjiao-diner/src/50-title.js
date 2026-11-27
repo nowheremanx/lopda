@@ -3,21 +3,33 @@ var TITLE_SEL = 0;
 
 function titleOptions() {
   var opts = [];
-  if (bootSave) opts.push({ id: "continue", label: "继续" });
-  opts.push({ id: "new", label: bootSave ? "新局" : "开始" });
+  /* a save that cannot be read (or is newer) is kept as it is: no new game over it */
+  if (!bootFailed) {
+    /* a finished week keeps its record; 结局 shows it again */
+    if (bootSave) opts.push({ id: "continue", label: bootSave.phase === "ending" ? "结局" : "继续" });
+    opts.push({ id: "new", label: bootSave ? "新局" : "开始" });
+  }
   opts.push({ id: "help", label: "说明" });
   return opts;
+}
+
+function newGame() {
+  S = fresh();
+  startDay(1);
+  game.go("morning");
 }
 
 game.scene("title", {
   enter: function () {
     TITLE_SEL = 0;
+    busy = false;
     game.ambience(null);
     if (typeof stopMusic === "function") stopMusic(); else game.musicStop();
   },
   update: function () {
-    if (!booted) return;
+    if (!booted || busy) return;
     var opts = titleOptions();
+    if (TITLE_SEL >= opts.length) TITLE_SEL = 0;
     if (game.repeat("left")) { TITLE_SEL = (TITLE_SEL + opts.length - 1) % opts.length; game.sfx("move"); }
     if (game.repeat("right")) { TITLE_SEL = (TITLE_SEL + 1) % opts.length; game.sfx("move"); }
     if (game.pressed("a") || game.pressed("start")) {
@@ -27,11 +39,17 @@ game.scene("title", {
         S = bootSave;
         if (S.phase === "night") game.go("night");
         else if (S.phase === "ending") game.go("ending");
+        else if (S.phase === "service") game.go("service");
         else game.go("morning");
+      } else if (id === "new" && bootSave) {
+        /* the only save slot: ask before a new week replaces it */
+        busy = true;
+        game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
+          busy = false;
+          if (c === 0) newGame();
+        });
       } else if (id === "new") {
-        S = fresh();
-        startDay(1);
-        game.go("morning");
+        newGame();
       } else {
         game.go("help", { from: "title" });
       }
@@ -46,7 +64,7 @@ game.scene("title", {
     // menu
     var opts = titleOptions();
     g.window(28, 190, 160, 32, { thin: true });
-    var xs = opts.length === 3 ? [38, 78, 118] : [62, 118];
+    var xs = opts.length === 3 ? [38, 78, 118] : opts.length === 2 ? [62, 118] : [96];
     for (var i = 0; i < opts.length; i++) {
       if (i === TITLE_SEL) {
         g.rect(xs[i] - 5, 196, 36, 18, g.INK);
@@ -57,7 +75,13 @@ game.scene("title", {
     }
     g.text("←→ 选   A 决定", 108, 226, { align: "center", color: g.DARK });
     if (!booted) g.text("…", 108, 170, { align: "center", color: g.DARK });
-    else if (bootFailed) g.text("存档读不出来，可在设置里处理", 108, 170, { align: "center", color: g.DARK });
+    else if (bootNewer) {
+      g.text("存档来自更新的版本", 108, 162, { align: "center", color: g.DARK });
+      g.text("请先更新这个程序", 108, 176, { align: "center", color: g.DARK });
+    } else if (bootFailed) {
+      g.text("存档读不出来，旧档还在", 108, 162, { align: "center", color: g.DARK });
+      g.text("在 设置 → 程序存档 清掉再开局", 108, 176, { align: "center", color: g.DARK });
+    }
   }
 });
 
