@@ -106,7 +106,7 @@ var TXT={
     reconnect:'重新连接',leave:'离开',menuTip:'点回到菜单',
     linkWin:'你赢了',linkLose:'对方赢了',linkWinnote:'五子连珠，漂亮。',linkLosenote:'对方连成五子。',linkDrawnote:'棋盘已满。',
     linkTip:'点交叉点落子',offlineTip:'点重新连接',
-    why:{bye:'对方离开了',lost:'信号断了','other-app':'对方换了别的程序',timeout:'没有连上',home:'这边离开了',cancelled:'连线取消了',denied:'没有允许连线',none:'这台掌机不能连线',busy:'已经有别的连线',big:'消息太长',other:'连线出了错'}},
+    why:{bye:'对方离开了',lost:'信号断了','other-app':'对方换了别的程序',timeout:'没找到对方',home:'这边离开了',cancelled:'连线取消了',denied:'没有允许连线',none:'这台掌机不能连线',busy:'已经有别的连线',big:'消息太长',other:'连线出了错'}},
   en:{title:'GOMOKU',intro:'You play black and go first. Five in a row wins.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',
     yours:'Your move',thinking:'White thinking',tip:'Tap a point',tipsure:'Tap elsewhere to move',tipover:'Restart for another',wins:'Wins ',
     win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.',
@@ -397,6 +397,12 @@ function canMoveNow(){
   return linkOpen&&!over&&!sendingMove&&colourToMove()===linkColour;
 }
 function reasonText(r){return (TXT.why&&TXT.why[r])||TXT.why.other;}
+/* the tip line under a lost link: the reason, then what to do. The header already says "Disconnected" / "No link",
+   so the line does not repeat it; the full stop is each language's own */
+function whyLine(r){
+  var w=reasonText(r);
+  return LANG==='en'?w.charAt(0).toUpperCase()+w.slice(1)+'. '+TXT.offlineTip:w+'。'+TXT.offlineTip;
+}
 function updateButtons(){
   show(document.getElementById('ud'),mode!=='link');
   show(document.getElementById('rs'),mode!=='link');
@@ -413,7 +419,7 @@ function updateLinkUI(){
   if(!linkOpen){
     turnEl.textContent=moves.length?TXT.offline:TXT.notYet;
     recEl.textContent=turnEl.textContent;
-    tipEl.textContent=(moves.length?TXT.offline:TXT.notYet)+'：'+reasonText(linkWhy)+'。'+TXT.offlineTip;
+    tipEl.textContent=whyLine(linkWhy);
     resize();return;
   }
   recEl.textContent=TXT.linked;

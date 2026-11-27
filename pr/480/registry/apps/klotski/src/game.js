@@ -369,7 +369,7 @@ function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExt
 /* ---------------- the table scene (one level or one lesson) ---------------- */
 var table = {
   level: null, kind: "level", pieces: null, moves: 0, history: [], selected: 0,
-  hints: 0, undos: 0, assisted: false, ui: "play", queue: [], anim: null, bump: null,
+  hints: 0, undos: 0, assisted: false, ui: "play", queue: [], anim: null, bump: null, pending: null,
   hint: null, hintLeft: 0, solving: false, demo: null, win: null, card: null, menu: null,
   confirm: null, busy: false, toast: null, session: 0, resumed: false
 };
@@ -379,7 +379,7 @@ function tableReset(fresh) {
   table.pieces = KRules.reset(level);
   table.moves = 0; table.history = []; table.selected = initialSelection(level, table.pieces);
   table.hints = 0; table.undos = 0; table.assisted = false;
-  table.ui = "play"; table.queue = []; table.anim = null; table.bump = null;
+  table.ui = "play"; table.queue = []; table.anim = null; table.bump = null; table.pending = null;
   table.hint = null; table.hintLeft = 0; table.solving = false; table.demo = null;
   table.win = null; table.card = null; table.menu = null; table.confirm = null;
   table.busy = false; table.toast = null;
@@ -422,7 +422,7 @@ function tableEnter(args) {
   table.level = level; table.kind = args.kind; table.resumed = false;
   table.ui = "play"; table.card = null; table.win = null; table.demo = null;
   table.menu = null; table.confirm = null; table.hint = null; table.solving = false;
-  table.busy = false; table.toast = null; table.queue = []; table.anim = null; table.bump = null;
+  table.busy = false; table.toast = null; table.queue = []; table.anim = null; table.bump = null; table.pending = null;
   if (!level) { game.go("levels", null, { fade: false }); return; }
   if (args.kind === "lesson") {
     tableReset(false);
@@ -543,7 +543,7 @@ function stopDemo() {
   if (!table.demo) return;
   table.demo = null;
   table.ui = "play";
-  table.anim = null; table.queue = [];
+  table.anim = null; table.queue = []; table.pending = null;
   table.hint = null; table.hintLeft = 0;
   game.sfx("tap");
 }
@@ -593,7 +593,7 @@ function undo() {
   table.moves = Math.max(0, table.moves - 1);
   table.undos++; table.assisted = true;
   table.hint = null; table.hintLeft = 0;
-  table.anim = null; table.queue = [];
+  table.anim = null; table.queue = []; table.pending = null;
   game.sfx("move");
   if (table.kind === "level") saveCurrent();
 }
@@ -761,13 +761,17 @@ function menuAct(m) {
   } else if (it.key === "list") { game.go(table.kind === "level" ? "levels" : "lessons", null, { fade: false }); }
   else if (it.key === "title") { game.go("title", null, { fade: false }); }
 }
+/* the restart dialog's geometry, shared by drawConfirm and the taps in updateConfirm */
+var CONFIRM_X = 18, CONFIRM_Y = 60, CONFIRM_W = 124, CONFIRM_H = 80, CONFIRM_ROW_Y = CONFIRM_Y + 30, CONFIRM_ROW = 22;
 function updateConfirm(ev) {
   var c = table.confirm;
   if (!c) { table.ui = "play"; return; }
   if (game.repeat("up")) { c.sel = (c.sel + 1) % 2; game.sfx("tick"); }
   if (game.repeat("down")) { c.sel = (c.sel + 1) % 2; game.sfx("tick"); }
   if (ev && ev.dist < 8) {
-    var row = ev.y0 >= 84 && ev.y0 < 128 ? Math.floor((ev.y0 - 84) / 22) : -1;
+    /* the same rows drawConfirm draws: CONFIRM_ROW_Y + i * CONFIRM_ROW, 21 px tall, the 1 px gap goes to the row above */
+    var row = ev.x0 >= CONFIRM_X + 6 && ev.x0 < CONFIRM_X + CONFIRM_W - 6 && ev.y0 >= CONFIRM_ROW_Y && ev.y0 < CONFIRM_ROW_Y + 2 * CONFIRM_ROW
+      ? Math.floor((ev.y0 - CONFIRM_ROW_Y) / CONFIRM_ROW) : -1;
     if (row >= 0 && row < 2) { c.sel = row; confirmAct(c); return; }
   }
   if (game.pressed("a")) { confirmAct(c); return; }
@@ -827,6 +831,24 @@ function cardBack() {
   game.go(table.kind === "level" ? "levels" : "lessons", null, { fade: false });
 }
 
+/* the one key of this frame that acts on the table, or null */
+function playKey() {
+  var ks = ["start", "select", "a", "b"], i;
+  for (i = 0; i < ks.length; i++) if (game.pressed(ks[i])) return ks[i];
+  ks = ["up", "down", "left", "right"];
+  for (i = 0; i < ks.length; i++) if (game.repeat(ks[i])) return ks[i];
+  return null;
+}
+function playKeyAct(k) {
+  if (k === "start") openMenu();
+  else if (k === "select") cyclePiece();
+  else if (k === "a") requestHint();
+  else if (k === "b") undo();
+  else if (k === "up") tryMoveSelected(0, -1);
+  else if (k === "down") tryMoveSelected(0, 1);
+  else if (k === "left") tryMoveSelected(-1, 0);
+  else if (k === "right") tryMoveSelected(1, 0);
+}
 function playGesture(ev) {
   if (!ev) return;
   if (ev.dist < 8) tapBoard(table.level, ev);
@@ -858,17 +880,21 @@ var tableScene = {
       }
       return;
     }
-    if (table.busy || table.solving) return;
+    if (table.busy || table.solving) { table.pending = null; return; }
     updateAnim(dt);
-    if (table.ui !== "play" || table.anim || table.queue.length) return;
-    if (game.pressed("start")) { openMenu(); return; }
-    if (game.pressed("select")) { cyclePiece(); return; }
-    if (game.pressed("a")) { requestHint(); return; }
-    if (game.pressed("b")) { undo(); return; }
-    if (game.repeat("up")) { tryMoveSelected(0, -1); return; }
-    if (game.repeat("down")) { tryMoveSelected(0, 1); return; }
-    if (game.repeat("left")) { tryMoveSelected(-1, 0); return; }
-    if (game.repeat("right")) { tryMoveSelected(1, 0); return; }
+    if (table.ui !== "play") { table.pending = null; return; }
+    var key = playKey();
+    if (table.anim || table.queue.length) {
+      /* a slide is still running (75 ms a cell): keep the newest tap, drag or key and play it when the slide
+         ends, so moving block after block never loses a gesture */
+      if (key) table.pending = { key: key };
+      else if (ev) table.pending = { ev: ev };
+      return;
+    }
+    var p = table.pending;
+    table.pending = null;
+    if (!key && !ev && p) { key = p.key; ev = p.ev; }
+    if (key) { playKeyAct(key); return; }
     playGesture(ev);
   },
   draw: function (g) {
@@ -1141,12 +1167,12 @@ function drawConfirm(g) {
   var c = table.confirm;
   if (!c) return;
   g.rect(0, 0, 160, 200, g.PAPER);
-  var x = 18, y = 60, w = 124, h = 80;
+  var x = CONFIRM_X, y = CONFIRM_Y, w = CONFIRM_W, h = CONFIRM_H;
   g.window(x, y, w, h, { thin: true });
   g.text(T({ zh: "重来这一局？", en: "Restart this run?" }), 80, y + 10, { align: "center", color: g.INK });
   var items = [T({ zh: "取消", en: "Cancel" }), T({ zh: "重来", en: "Restart" })];
   for (var i = 0; i < 2; i++) {
-    var ry = y + 30 + i * 22;
+    var ry = CONFIRM_ROW_Y + i * CONFIRM_ROW;
     if (i === c.sel) {
       g.rect(x + 6, ry, w - 12, 21, g.INK);
       g.text(items[i], 80, ry + 5, { align: "center", color: g.PAPER });

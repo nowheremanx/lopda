@@ -222,7 +222,7 @@ GM.ui = (function () {
   }
 
   function post(screen) {
-    var i, c, ctx2, spr;
+    var i, c, spr;
     if (screen === "title") {
       paintTitle();
       return;
@@ -233,11 +233,7 @@ GM.ui = (function () {
         c = icons[i];
         spr = GM.SPR[c.getAttribute("data-icon")];
         if (!spr) continue;
-        ctx2 = c.getContext("2d");
-        ctx2.imageSmoothingEnabled = false;
-        ctx2.fillStyle = "#7d8a58";
-        ctx2.fillRect(0, 0, c.width, c.height);
-        ctx2.drawImage(GM.spriteCanvas(spr), 0, 0);
+        GM.paintSprite(c, spr, GM.MID, false);
       }
     }
     if (screen === "codex") {
@@ -247,14 +243,7 @@ GM.ui = (function () {
         var type = c.getAttribute("data-item");
         spr = GM.SPR[type === "mole" ? "moleIcon" : type];
         if (!spr) continue;
-        ctx2 = c.getContext("2d");
-        ctx2.imageSmoothingEnabled = false;
-        ctx2.fillStyle = "#4a5a32";
-        ctx2.fillRect(0, 0, c.width, c.height);
-        var src = GM.spriteCanvas(spr);
-        var k = Math.min(32 / spr.w, 32 / spr.h);
-        var iw = spr.w * k, ih = spr.h * k;
-        ctx2.drawImage(src, (32 - iw) / 2, (32 - ih) / 2, iw, ih);
+        GM.paintSprite(c, spr, GM.DARK, true);
       }
     }
   }
@@ -290,12 +279,22 @@ GM.ui = (function () {
 
   function enter(screen) {
     if (!state) return;
+    var prev = lastScreen;
     lastScreen = screen;
     var full = screen !== "play" && screen !== "intro";
     ov.hidden = !full;
     if (full) {
+      /* a cursor move redraws the same screen: keep where its list was scrolled, then bring the cursor's row
+         into view (UI.md 5: the cursor is always on the screen; the English shop is taller than 359 px) */
+      var body = ov.querySelector(".sbody"), top = prev === screen && body ? body.scrollTop || 0 : 0;
       ov.innerHTML = render(screen);
       ov.scrollTop = 0;
+      body = ov.querySelector(".sbody");
+      if (body) {
+        body.scrollTop = top;
+        var cur = body.querySelector(".sel");
+        if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+      }
       post(screen);
     } else {
       ov.innerHTML = "";
@@ -575,10 +574,10 @@ GM.ui = (function () {
         enter("paused");
         return;
       }
-      if (btn === "a" || btn === "start") {
-        if (state.pauseCursor === 0) { GM.resume(state); enter(state.screen); }
-        else { GM.toTitle(state); enter("title"); }
-      } else if (btn === "b") {
+      /* START always resumes, as the footer says; only A acts on the cursor (#344) */
+      if (btn === "start" || (btn === "a" && state.pauseCursor === 0)) { GM.resume(state); enter(state.screen); }
+      else if (btn === "a") { GM.toTitle(state); enter("title"); }
+      else if (btn === "b") {
         GM.resume(state);
         enter(state.screen);
       }
@@ -591,10 +590,11 @@ GM.ui = (function () {
     if (s === "shop") {
       if (btn === "up") { GM.moveShop(state, -1); pump(); enter("shop"); }
       else if (btn === "down") { GM.moveShop(state, 1); pump(); enter("shop"); }
-      else if (btn === "a" || btn === "start") {
+      /* only A buys, as the footer says; START goes on to the next level like B, so a stray press spends nothing */
+      else if (btn === "a") {
         if (state.shopCursor === 4) shopNext();
         else { GM.buy(state, state.shopCursor); pump(); enter("shop"); }
-      } else if (btn === "b") shopNext();
+      } else if (btn === "b" || btn === "start") shopNext();
       return;
     }
     if (s === "over") {
