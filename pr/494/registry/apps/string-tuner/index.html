@@ -87,6 +87,7 @@ var Tuner = (function () {
   var SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
   var FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
   var IN_TUNE = 3, IN_TUNE_MS = 500;   /* within 3 cents for half a second lights the lamp */
+  var ATTACK_MS = 250;
 
   function byId(id) { for (var i = 0; i < TUNINGS.length; i++) if (TUNINGS[i].id === id) return TUNINGS[i]; return null; }
   function hz(midi, a4) { return a4 * Math.pow(2, (midi - 69) / 12); }
@@ -152,7 +153,7 @@ var Tuner = (function () {
     var g = fold(f, targets[i]);
     return { i: i, midi: tuning.notes[i], target: targets[i], cents: cents(g, targets[i]) };
   }
-  return { TUNINGS: TUNINGS, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, byId: byId, hz: hz, cents: cents, name: name,
+  return { TUNINGS: TUNINGS, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, ATTACK_MS: ATTACK_MS, byId: byId, hz: hz, cents: cents, name: name,
     nearest: nearest, fold: fold, pick: pick, smoother: smoother, read: read };
 })();
 </script>
@@ -191,16 +192,24 @@ var Tuner = (function () {
   var mic = "off";         /* off | asking | on | denied | none */
   var needle = 0, needleTo = 0, live = false, dirty = true;
   var lvl = 0;             /* the mic's loudness 0-1, drawn small in the meter's corner so the player sees it hears */
+  var attackUntil = 0;     /* a fresh pluck rings sharp for a moment: readings wait until it settles */
 
   function now() { return Date.now(); }
 
   function onSound(s) {
     if (mic !== "on" || listOpen) return;
     var t = now();
-    if (s.level !== lvl) { lvl = s.level || 0; dirty = true; }
+    if (s.level !== lvl) {
+      var was = lvl; lvl = s.level || 0; dirty = true;
+      /* a jump of 4 steps (about 7 dB) is a new pluck: its first 250 ms are sharp, the harder the more */
+      if (lvl - was >= 0.125) { attackUntil = now() + Tuner.ATTACK_MS; sm.reset(); }
+    }
+    if (now() < attackUntil) return;
     if (t < toneUntil) return;                       /* our own reference tone is playing: not the string */
     var f = typeof s.hz === "number" ? s.hz : (typeof s.pitch === "number" ? s.pitch : null);
     if (f === null) return;                          /* silence, breath, noise: the staleness timer handles it */
+    /* mains hum (50 / 60 Hz) in a quiet room: nothing more than 3 semitones under the lowest string is a string */
+    if (tuning.notes.length && f < Tuner.hz(Math.min.apply(null, tuning.notes) - 3, set.a4)) return;
     var g = sm.push(f);
     if (g === null) return;
     var r = Tuner.read(g, tuning, set.a4, cur, lock);

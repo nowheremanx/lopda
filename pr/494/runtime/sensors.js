@@ -10,7 +10,7 @@
  *     shaker(now) -> fn(acc) -> true when it is a shake, limiter(hz, now, later) -> fn(send, value),
  *     level(samples) -> 0..1, pitch(samples, sampleRate) -> Hz (integer) or null,
  *     hz(samples, sampleRate) -> {pitch, hz}: pitch as above from the newest WINDOW*2 samples, hz the same note to 0.01 Hz
- *     measured over every sample given, and down to -60 dB where pitch stops at -40 (a tuner needs it: 1 Hz is 21 cents at 82 Hz; decisions.md section 74)
+ *     measured over every sample given, and down to -80 dB where pitch stops at -40 (a tuner needs it: 1 Hz is 21 cents at 82 Hz; decisions.md section 74)
  *   host(env) -> the runtime's one set of sensors. env:
  *     window, document, navigator     the page's (fakes in the tests)
  *     context(make)   the runtime's AudioContext (core.js audio())      session(type)   set navigator.audioSession.type
@@ -124,9 +124,10 @@ function hz(s,rate){
   var tail=s.length>WINDOW*2 ? s.subarray(s.length-WINDOW*2) : s;
   var f=rawPitch(tail,rate), quiet=false;
   /* pitch() ignores anything under -40 dB, but a guitar a metre from a phone is often quieter than that (owner's iPhone,
-     2026-11-27: the tuner heard nothing). The curve is normalised, so only that gate stands in the way: hz looks down to
-     -60 dB, and then comes alone, with pitch still null as before */
-  if(f===null){ f=rawPitch(tail,rate,0.001); quiet=true; }
+     2026-11-27: the tuner heard nothing, then only hard plucks). The curve is normalised, so only that gate stands in the
+     way: hz looks down to -80 dB, where room noise alone never makes a clear enough peak, and then comes alone, with pitch
+     still null as before */
+  if(f===null){ f=rawPitch(tail,rate,0.0001); quiet=true; }
   if(f===null) return {pitch:null, hz:null};
   var best=f, P=rate/f, w=Math.max(2,Math.round(0.1*P)), n=s.length-Math.ceil(P)-w-2, p1, p2;
   if(n>=WINDOW && (p1=peak(s,Math.round(P),w,n))!==null){
