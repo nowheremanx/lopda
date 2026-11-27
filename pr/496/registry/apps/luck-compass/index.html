@@ -1991,7 +1991,11 @@ var BAZI_HOURS = [
   { label: "晚子", en: "Late Rat", hour: 23 }, { label: "不知道", en: "Unknown", hour: null }
 ];
 var counterCursor = 0;
-var almanacOffset = 0, almanacScroll = 0, almanacTear = 0, almanacTearDir = 1;
+var almanacOffset = 0, almanacScroll = 0;
+/* the tear: forward, the old page peels up from its bottom edge and comes away at the binding, showing the
+   new page beneath; back, yesterday's page rolls down over today's. Nothing slides sideways. */
+var TEAR_TIME = 0.45, TEAR_TIME_REDUCED = 0.12;
+var almanacTear = 0, almanacTearDir = 1, almanacTearFrom = 0, almanacTearScroll = 0;
 var almanacGodsLine = -1, almanacGodsLineCount = 0, almanacGodsFocused = false;
 var almanacRowIndents = [];
 var WEEK_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
@@ -2344,12 +2348,18 @@ function openAlmanacCompass() {
 function moveAlmanac(days) {
   var dt = almanacDate(), candidate = new Date(dt.y, dt.m - 1, dt.d + days, 12);
   if (candidate.getFullYear() < 1900 || candidate.getFullYear() > 2100) { sfx("err"); return; }
+  almanacTearFrom = almanacOffset;
+  almanacTearScroll = almanacScroll;
   almanacOffset += days;
   almanacScroll = 0;
   almanacGodsFocused = false;
-  almanacTear = REDUCED_MOTION ? 0.08 : 0.25;
-  almanacTearDir = days > 0 ? -1 : 1;
-  sfx("move");
+  almanacTear = REDUCED_MOTION ? TEAR_TIME_REDUCED : TEAR_TIME;
+  almanacTearDir = days > 0 ? 1 : -1;
+  if (typeof PAD !== "undefined" && PAD.sfx) {
+    /* a short dry rip: noise falling in pitch (named "move" on runtimes without custom sounds) */
+    try { PAD.sfx({ wave: "noise", from: 1800, to: 500, ms: 140, attack: 2, decay: 120, vol: 0.35 }); }
+    catch (e) { sfx("move"); }
+  }
 }
 function updateAlmanac(dt) {
   if (almanacTear > 0) almanacTear = Math.max(0, almanacTear - dt);
@@ -2374,6 +2384,59 @@ function updateAlmanac(dt) {
     if (game.pressed("down")) almanacGodsFocused = true;
   }
 }
+function drawBinding(g) {
+  g.rect(8, 20, 200, 15, g.MID);
+  for (var pin = 17; pin < 204; pin += 12) g.circle(pin, 27, 1, g.INK, true);
+  /* the stubs of pages already torn off, a ragged paper line under the strip */
+  for (var x = 8; x < 208; x += 2) g.pixel(x + ((x >> 1) % 3 === 0 ? 1 : 0), 35, g.DARK);
+}
+/* the back of the paper where it curls: a dark band with a light crease and an ink edge */
+function drawCurl(g, y, h) {
+  h = Math.min(h, 207 - y);
+  if (h < 2) return;
+  g.rect(8, y, 200, h, g.DARK);
+  g.line(8, y + 1, 207, y + 1, g.MID);
+  g.line(8, y + h - 1, 207, y + h - 1, g.INK);
+  /* its shadow on the page below, a few rows of checkerboard */
+  var sh = Math.min(3, 207 - (y + h));
+  if (sh > 0) g.dither(8, y + h, 200, sh, g.DARK, 2);
+}
+/* A page other than the one the keys act on: its rows must not replace the gods row the keys use. */
+function otherPage(g, offset, scroll, bottom) {
+  var keep = [almanacGodsLine, almanacGodsLineCount, almanacRowIndents, almanacGodsFocused];
+  almanacGodsFocused = false;
+  drawAlmanacPage(g, offset, scroll, bottom);
+  almanacGodsLine = keep[0]; almanacGodsLineCount = keep[1]; almanacRowIndents = keep[2]; almanacGodsFocused = keep[3];
+}
+/* one page of the block, cut off at y = bottom (the part still hanging on the binding) */
+function drawAlmanacPage(g, offset, scroll, bottom) {
+  if (bottom <= 36) return;
+  var now = new Date(), d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 12);
+  var dt = { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), week: d.getDay() };
+  if (dt.y < 1900 || dt.y > 2100) return;
+  var info = ALMANAC.day(dt.y, dt.m, dt.d), rows = pageLines(g, dt, info);
+  g.clip(8, 36, 200, bottom - 36);
+  g.rect(8, 36, 200, 170, g.PAPER);
+  g.rect(12, 37, 25, 17, g.INK);
+  g.text(String(dt.d), 24, 38, { align: "center", color: g.PAPER });
+  var dateLine = game.lang === "en" ? MONTH_EN[dt.m - 1] + " " + dt.y + " · " + WEEK_EN[dt.week] :
+    dt.y + "年 " + dt.m + "月 · " + WEEK_ZH[dt.week];
+  g.text(fitPageText(g, dateLine), 43, 38, { color: g.INK });
+  g.clip(10, 56, 196, Math.max(0, Math.min(150, bottom - 56)));
+  var lineH = 14, max = Math.floor(150 / lineH);
+  scroll = Math.min(scroll, Math.max(0, rows.length - max));
+  if (offset === almanacOffset) almanacScroll = Math.min(almanacScroll, Math.max(0, rows.length - max));
+  for (var i = scroll; i < rows.length && i < scroll + max; i++) {
+    var y = 57 + (i - scroll) * lineH;
+    if (i >= almanacGodsLine && i < almanacGodsLine + almanacGodsLineCount && almanacGodsFocused) {
+      g.rect(10, y - 1, 196, 14, g.MID);
+    }
+    g.text(rows[i], 12 + almanacRowIndents[i], y, { color: g.INK });
+  }
+  g.clip();
+  /* the page's lower edge while it hangs loose */
+  if (bottom < 207) g.line(8, bottom - 1, 207, bottom - 1, g.INK);
+}
 function drawAlmanac(g) {
   var dt = almanacDate();
   if (dt.y < 1900 || dt.y > 2100) {
@@ -2387,35 +2450,32 @@ function drawAlmanac(g) {
     g.text(fitPageText(g, HINT, 216), CX, 226, { align: "center", color: g.DARK });
     return;
   }
-  dt.week = new Date(dt.y, dt.m - 1, dt.d).getDay();
-  var info = ALMANAC.day(dt.y, dt.m, dt.d), rows = pageLines(g, dt, info);
-  var shift = almanacTear > 0 ? Math.round(-almanacTearDir * (REDUCED_MOTION ? 8 : 24) *
-    (almanacTear / (REDUCED_MOTION ? 0.08 : 0.25))) : 0;
   g.clear(g.PAPER);
   g.rect(0, 0, W, 19, g.INK);
   g.text(T({ zh: "老黄历", en: "Almanac" }), CX, 2, { align: "center", color: g.PAPER });
-  g.origin(shift, 0);
+  /* the block: a frame, then the binding strip that holds every page */
   g.rect(7, 19, 202, 188, g.PAPER);
   g.frame(7, 19, 202, 188, g.INK);
-  g.rect(8, 20, 200, 15, g.MID);
-  for (var pin = 17; pin < 204; pin += 12) g.circle(pin, 27, 1, g.INK, true);
-  g.rect(12, 35, 25, 18, g.INK);
-  g.text(String(dt.d), 24, 37, { align: "center", color: g.PAPER });
-  var dateLine = game.lang === "en" ? MONTH_EN[dt.m - 1] + " " + dt.y + " · " + WEEK_EN[dt.week] :
-    dt.y + "年 " + dt.m + "月 · " + WEEK_ZH[dt.week];
-  g.text(fitPageText(g, dateLine), 43, 36, { color: g.INK });
-  g.clip(10, 54, 196, 150);
-  var lineH = 14, max = Math.floor(150 / lineH);
-  almanacScroll = Math.min(almanacScroll, Math.max(0, rows.length - max));
-  for (var i = almanacScroll; i < rows.length && i < almanacScroll + max; i++) {
-    var y = 56 + (i - almanacScroll) * lineH;
-    if (i >= almanacGodsLine && i < almanacGodsLine + almanacGodsLineCount && almanacGodsFocused) {
-      g.rect(10, y - 1, 196, 14, g.MID);
+  var full = REDUCED_MOTION ? TEAR_TIME_REDUCED : TEAR_TIME;
+  if (almanacTear > 0 && Math.abs(almanacTearFrom - almanacOffset) === 1) {
+    var p = 1 - almanacTear / full, ease = p * p * (3 - 2 * p);
+    if (almanacTearDir > 0) {
+      /* forward: the new page lies still; the old one lifts from the bottom up to the binding */
+      drawAlmanacPage(g, almanacOffset, 0, 207);
+      var edge = Math.round(207 - ease * (207 - 35));
+      otherPage(g, almanacTearFrom, almanacTearScroll, edge);
+      drawCurl(g, edge, Math.round(14 * Math.sin(Math.PI * Math.min(1, p * 1.15))));
+    } else {
+      /* back: the old page stays; yesterday's rolls down over it from the binding */
+      otherPage(g, almanacTearFrom, almanacTearScroll, 207);
+      var down = Math.round(35 + ease * (207 - 35));
+      drawAlmanacPage(g, almanacOffset, 0, down);
+      if (down < 207) drawCurl(g, down, Math.round(14 * Math.sin(Math.PI * p)));
     }
-    g.text(rows[i], 12 + almanacRowIndents[i], y, { color: g.INK });
+  } else {
+    drawAlmanacPage(g, almanacOffset, almanacScroll, 207);
   }
-  g.clip();
-  g.origin(0, 0);
+  drawBinding(g);
   var key = T({ zh: "←→翻页 · START今天 · A神位", en: "←→ page · START today · A gods" });
   g.text(fitPageText(g, key, 216), CX, 211, { align: "center", color: g.INK });
   g.text(fitPageText(g, HINT, 216), CX, 226, { align: "center", color: g.DARK });
