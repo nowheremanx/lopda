@@ -152,6 +152,7 @@ node --test                                  # the test suite; must pass
   `compare <dirA> <dirB>` checks them pixel by pixel. Capture a worktree of main and your tree, then compare.
 - `tests/e2e.test.mjs` boots the runtime and every registry app in headless Chromium; it skips unless
   Playwright is installed (`npm i --no-save playwright && npx playwright install chromium`).
+  CI runs it in four shards, and every per-app `tests/e2e-*.test.mjs` plus `tests/studio-e2e.test.mjs` in the `e2e (apps)` / `e2e (studio)` jobs.
 - Deeper UI checks (camera, cartridge) have been Playwright scripts against
   Chromium (`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` for the camera;
   `--disable-site-isolation-trials` or screenshots of sandboxed iframes come out blank), plus
