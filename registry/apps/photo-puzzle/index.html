@@ -181,7 +181,7 @@ var Solver = (function () {
   var TXT = {
     zh: { title: "拍照拼图", snap: "拍一张", gallery: "内置图片", modeLabel: "模式",
       howto: "怎么玩", mainMenu: "主菜单", cont: "继续", resume: "继续", next: "下一局", again: "再来一局",
-      sizeNow: "难度 {n}×{n}", watch: "看它解", prev: "上一张", start: "开始", nextPic: "下一张",
+      sizeNow: "重开 {n}×{n}", watch: "看它解", prev: "上一张", start: "开始", nextPic: "下一张",
       use: "用这张", retake: "重拍", moves: "{n} 步", best: "最佳 {n}", helped: "助", noRecord: "用了提示，不计记录",
       intro: "拍一张，或挑一张。", nocam: "这台掌机不能拍照，用内置图片玩。",
       nophoto: "没拿到照片，用内置图片玩。", taking: "拍照中…", saved: "上次那盘还在这里。",
@@ -208,7 +208,7 @@ var Solver = (function () {
       quitLesson: "退出教程", nextLesson: "下一课", backMain: "回主菜单" },
     en: { title: "SNAPTILE", snap: "Take a photo", gallery: "Built-in pictures", modeLabel: "Mode",
       howto: "How to play", mainMenu: "Main menu", cont: "Continue", resume: "Resume", next: "Next puzzle", again: "Play again",
-      sizeNow: "Size {n}×{n}", watch: "Watch it solve", prev: "Previous", start: "Start", nextPic: "Next",
+      sizeNow: "Restart {n}×{n}", watch: "Watch it solve", prev: "Previous", start: "Start", nextPic: "Next",
       use: "Use this", retake: "Retake", moves: "{n} moves", best: "best {n}", helped: "aid", noRecord: "Hints used: not recorded",
       intro: "Snap one, or pick one.", nocam: "No camera here: playing with the built-in pictures.",
       nophoto: "No photo: playing with the built-in pictures.", taking: "Camera…", saved: "Your last puzzle is here.",
@@ -1223,7 +1223,7 @@ var Solver = (function () {
     if (S.screen === "preview") return [["use", TXT.use], ["retake", TXT.retake]];
     if (S.screen === "menu") {
       if (S.mode === "tutorial") return [["resume", TXT.resume], ["quit", TXT.quitLesson]];
-      return [["resume", TXT.resume], ["size", tx("sizeNow", S.n)], ["watch", TXT.watch], ["mainmenu", TXT.mainMenu]];
+      return [["resume", TXT.resume], ["size", tx("sizeNow", S.n === 3 ? 4 : 3)], ["watch", TXT.watch], ["mainmenu", TXT.mainMenu]];
     }
     if (S.screen === "lesson" && S.lessonDone) return [["nextlesson", S.lesson < LESSONS.length - 1 ? TXT.nextLesson : TXT.backMain]];
     if (S.screen === "solved") return S.anim && S.anim.done ? [["goon", TXT.cont]] : [];

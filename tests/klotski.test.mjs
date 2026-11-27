@@ -429,3 +429,33 @@ test("klotski: a paragraph longer than a page is split without leaving a lone li
   assert.deepEqual(one(["5", "4"]).map((p) => p.lines.length), [5, 4], "a paragraph that does not fit starts the next page");
   assert.deepEqual(one(["9"]).map((p) => p.cont), [false, true]);
 });
+
+test("klotski app: opening a level without solving it does not count it as cleared (#336)", async () => {
+  const { app } = await bootApp();
+  const K = app.ctx.get("window").KLOTSKI;
+  for (const id of ["k01", "k05", "k11"]) { assert.ok(K.open(id)); run(app, 3); }
+  const clearedCount = app.ctx.get("clearedCount"), clearedRec = app.ctx.get("clearedRec");
+  assert.equal(clearedCount(), 0);
+  assert.equal(clearedRec("k01"), null);
+  assert.equal(app.ctx.get("saved").levels.k01.plays, 1, "the play is still counted");
+});
+
+test("klotski app: an unreadable save is left alone and the title says so (#337)", async () => {
+  const pad = fakePad();
+  let saves = 0;
+  pad.pad.load = () => { const e = new Error("PAD.load: corrupt"); e.code = "corrupt"; return Promise.reject(e); };
+  pad.pad.save = () => { saves++; };
+  const app = boot(join(ROOT, APP_REL), { pad: pad.pad, seed: 1 });
+  await settle();
+  run(app, 3);
+  assert.equal(app.ctx.get("canSave"), false);
+  const game = app.ctx.get("game"), shown = [], draw = game.g.text;
+  game.g.text = function (str, x, y, o) { shown.push(str); return draw.call(game.g, str, x, y, o); };
+  run(app, 1);
+  game.g.text = draw;
+  assert.ok(shown.includes("存档读不出，这次不存"), "the title says the save cannot be read");
+  const K = app.ctx.get("window").KLOTSKI;
+  assert.ok(K.open("k01"));
+  run(app, 3);
+  assert.equal(saves, 0, "nothing is written over the unreadable save");
+});

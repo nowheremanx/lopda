@@ -9,7 +9,7 @@ var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
 /* Bump SAVE_VERSION whenever STORY changes shape: a save is a position in the list, so a save from
-   another version is set aside (left on disk, not used) and the story starts from the top. */
+   another version is set aside (kept under "story.old", not used) and the story starts from the top. */
 var SAVE_KEY = "story", SAVE_VERSION = 1;
 var BOX_Y = PIC_H, LINES = 3, SPEED = 28;
 
@@ -253,14 +253,21 @@ function drawLog(g) {
 }
 
 /* the title: Start, or Continue and Start over when there is a save */
-var saved = null, loading = false, unreadable = false, menuIdx = 0;
+var saved = null, loading = false, unreadable = false, newer = false, menuIdx = 0;
 function titleRow(k) { return { x: 44, y: BOX_Y + 6 + k * game.g.lineHeight, w: 72, h: game.g.lineHeight }; }
 game.scene("title", {
   enter: function () {
-    saved = null; loading = true; unreadable = false; menuIdx = 0; heard = undefined;
+    saved = null; loading = true; unreadable = false; newer = false; menuIdx = 0; heard = undefined;
     listen("title", { rain: 2 });
     game.load(SAVE_KEY).then(function (v) {
       saved = valid(v) ? v : null;
+      if (!saved && v && typeof v === "object" && typeof v.v === "number" && v.v > SAVE_VERSION) {
+        /* a newer app's save: leave it alone (SPEC.md 8) */
+        newer = true; canSave = false;
+      } else if (!saved && v != null) {
+        /* another version's position: set it aside under its own key before the first store() writes over the key */
+        game.save(SAVE_KEY + ".old", v);
+      }
       loading = false;
     }, function () {
       /* leave an unreadable save alone: the story can still be read, without saving */
@@ -295,6 +302,7 @@ game.scene("title", {
       g.text(s, 80, r.y, { align: "center", color: on ? g.PAPER : g.INK });
     });
     var hint = unreadable ? { zh: "存档读不出，这次不存档", en: "Save unreadable: not saving" }
+      : newer ? { zh: "存档来自新版，这次不存档", en: "Newer save: not saving" }
       : { zh: "A 前进  B 回看", en: "A: next   B: log" };
     g.text(T(hint), 80, 128, { align: "center", color: g.INK });
   }

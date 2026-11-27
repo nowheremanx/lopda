@@ -65,6 +65,7 @@ var PT = (function () {
 function blankSave() { return { v: 1, levels: {}, lessons: {}, current: {}, seenHelp: 0 }; }
 var saved = blankSave();
 var loaded = false, loading = false;
+var canSave = true;   /* false when the save could not be read: then nothing is written over it (SPEC.md 8) */
 function num(v) { return typeof v === "number" && isFinite(v) && v >= 0 ? v : 0; }
 function normalize(v) {
   var out = blankSave(), k, r, l;
@@ -97,14 +98,14 @@ function normalize(v) {
   out.seenHelp = v.seenHelp ? 1 : 0;
   return out;
 }
-function save() { game.save(SAVE_KEY, saved); }
+function save() { if (canSave) game.save(SAVE_KEY, saved); }
 function ensureLoaded() {
   if (loaded || loading) return;
   loading = true;
   game.load(SAVE_KEY).then(function (v) {
     saved = normalize(v); loaded = true; loading = false;
   }, function () {
-    saved = blankSave(); loaded = true; loading = false;
+    saved = blankSave(); canSave = false; loaded = true; loading = false;
   });
 }
 
@@ -129,9 +130,14 @@ function prepare() {
 }
 prepare();
 
+/* a level's record once it has been solved; opening a level writes a record (its plays) with no best */
+function clearedRec(id) {
+  var r = saved.levels[id];
+  return r && num(r.best) ? r : null;
+}
 function clearedCount() {
   var n = 0, i;
-  for (i = 0; i < LEVELS.length; i++) if (saved.levels[LEVELS[i].id]) n++;
+  for (i = 0; i < LEVELS.length; i++) if (clearedRec(LEVELS[i].id)) n++;
   return n;
 }
 function lessonsDone() {
@@ -1239,7 +1245,8 @@ var titleScene = {
     }
     /* the progress line; the old "Arrows  A OK" hint gave its row to the picture */
     g.rect(0, 186, 160, 1, g.DARK);
-    g.text(T({ zh: "已通 {a}/{b}　课 {c}/{d}", en: "Cleared {a}/{b}  Lessons {c}/{d}" },
+    if (!canSave) g.text(T({ zh: "存档读不出，这次不存", en: "Save unreadable: no saving" }), 80, 187, { align: "center", color: g.INK });
+    else g.text(T({ zh: "已通 {a}/{b}　课 {c}/{d}", en: "Cleared {a}/{b}  Lessons {c}/{d}" },
       { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, 187, { align: "center", color: g.INK });
   }
 };
@@ -1302,7 +1309,7 @@ var levelsScene = {
       var fg = sel ? g.PAPER : g.INK, sub = sel ? g.PAPER : g.INK;
       g.text(pad2(lv.num), 4, y + 1, { color: fg });
       g.text(T(lv.name), 23, y + 1, { color: fg });
-      rec = saved.levels[lv.id];
+      rec = clearedRec(lv.id);
       if (rec) drawCheck(g, 147, y + 2, fg);
       drawStars(g, 23, y + 18, lv.diff, sel ? g.PAPER : g.INK, sel ? g.PAPER : g.MID);
       var line = rec ? T({ zh: "最佳 {n}", en: "BEST {n}" }, { n: rec.best }) : T({ zh: "最少 {n}", en: "PAR {n}" }, { n: lv.par });

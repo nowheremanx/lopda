@@ -20,6 +20,7 @@ var CAST = STORY.CAST;
 
 var profile = { best: {}, cleared: {}, story: 0, truth: false, endings: {}, finaled: false };
 var loaded = false;
+var canSave = true;   /* false when the save could not be read: then nothing is written over it (SPEC.md 8) */
 
 function tt(zh, en) { return T({ zh: zh, en: en }); }
 
@@ -80,6 +81,7 @@ var TX = {
   chapterShort: { zh: "第{n}章", en: "Ch{n}" },
   progress: { zh: "{act} · {chapter}", en: "{act} · {chapter}" },
   endingCount: { zh: "结局 {e}/4", en: "Endings {e}/4" },
+  saveUnread: { zh: "存档读不出，这次不存", en: "Save unreadable" },
   endingsSeen: { zh: "已看结局 {e}/4", en: "Endings {e}/4" },
   storyKeys: { zh: "A / 点画面 继续", en: "A / tap: continue" },
   choiceTitle: { zh: "要对湣王说实话吗？", en: "Tell the king the truth?" },
@@ -155,9 +157,9 @@ function loadProfile() {
       profile.story = Math.max(0, Math.min(SONGS.length, v.story | 0));
     }
     loaded = true;
-  }).catch(function () { loaded = true; });
+  }).catch(function () { canSave = false; loaded = true; });
 }
-function saveProfile() { game.save(SAVE_KEY, profile); }
+function saveProfile() { if (canSave) game.save(SAVE_KEY, profile); }
 function clearedCount() { var n = 0; SONGS.forEach(function (s) { if (profile.cleared[s.id]) n++; }); return n; }
 function endingsCount() { var n = 0; Object.keys(profile.endings).forEach(function (k) { if (profile.endings[k]) n++; }); return n; }
 function rankLetter(acc, miss, suspicion, failed) {
@@ -232,7 +234,8 @@ game.scene("title", {
     g.text(T(TX.title), 80, 17, { align: "center" });
     g.text(T(TX.subtitle), 80, 30, { align: "center", color: DARK });
     var actN = Math.min(3, SONGS[Math.min(profile.story, SONGS.length - 1)].act);
-    g.text(T(TX.progress, {
+    if (!canSave) g.text(T(TX.saveUnread), 80, 43, { align: "center" });
+    else g.text(T(TX.progress, {
       act: T(TX.actShort, { n: actN }),
       chapter: T(TX.chapterShort, { n: Math.min(profile.story + 1, SONGS.length) })
     }), 80, 43, { align: "center", color: DARK });

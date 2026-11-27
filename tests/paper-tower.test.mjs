@@ -555,3 +555,38 @@ for (const lang of ["zh", "en"]) {
     assert.ok(rec.drawn.texts.some((d) => d.s === footer), `the map's texts: ${rec.drawn.texts.map((d) => d.s).join(" | ")}`);
   });
 }
+
+/* ---------------- an unreadable save (#362) ---------------- */
+
+test("an unreadable save: the title says so, the save sheet still answers B, and nothing is written", async () => {
+  const on = { press: [], release: [] };
+  let saves = 0, rejected = 0;
+  const pad = {
+    lang: "zh", spec: "lopda/1",
+    on: (type, f) => { if (on[type]) on[type].push(f); },
+    off() {}, isDown: () => false,
+    load: () => { rejected++; const e = new Error("PAD.load: corrupt"); e.code = "corrupt"; return Promise.reject(e); },
+    save() { saves++; }, remove() {}, exit() {}, sfx() {}
+  };
+  const app = boot(join(ROOT, "registry/apps/paper-tower/index.html"), { pad });
+  const game = app.ctx.get("game");
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+  const tap = async (b) => { on.press.forEach((f) => f(b)); await run(2); on.release.forEach((f) => f(b)); await run(2); };
+  await run(10);
+  assert.ok(rejected >= 1);
+  assert.equal(app.ctx.get("canSave"), false);
+  const shown = [], draw = game.g.text;
+  game.g.text = function (str, x, y, o) { shown.push(str); return draw.call(game.g, str, x, y, o); };
+  await run(1);
+  game.g.text = draw;
+  assert.ok(shown.includes("存档读不出，这次不存"), "the title says the save cannot be read");
+
+  let popped = false;
+  game.push(app.ctx.get("slotsScene")("save")).then(() => { popped = true; });
+  await run(4);
+  await tap("a");                     /* a save over an unreadable slot is refused */
+  await tap("b");
+  await run(2);
+  assert.ok(popped, "B leaves the save sheet");
+  assert.equal(saves, 0, "nothing is written over the unreadable save");
+});
