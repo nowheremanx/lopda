@@ -100,6 +100,28 @@ var Chords = (function () {
     return out.concat(up);
   }
 
+  /* the degree of any pitch class above the chord's root: the chord's own tones as the chord writes them (4 in a sus4,
+     6 in a 6 chord), every other note as an upper extension, the way a player looks for one to add (11, not 4) */
+  var EXT = ["R", "b9", "9", "b3", "3", "11", "#11", "5", "b13", "13", "b7", "7"];
+  function degree(c, pc) {
+    var Q = qual(c.q);
+    for (var i = 0; i < Q.iv.length; i++) if (mod12(c.root + Q.iv[i]) === pc) return { lab: Q.lab[i], tone: true };
+    return { lab: EXT[mod12(pc - c.root)], tone: false };
+  }
+
+  /* what each string of a voicing sounds, low E first: null for a muted string, else its pitch and the degree it is in the
+     chord (R, 3, 5, b7, 9...), "/" for a slash chord's extra bass. An open C is x, R, 3, 5, R, 3: five notes, not three. */
+  function strings(frets, c) {
+    var ts = tones(c), out = [];
+    for (var s = 0; s < 6; s++) {
+      if (frets[s] < 0) { out.push(null); continue; }
+      var m = OPEN[s] + frets[s], pc = mod12(m), lab = "";
+      for (var i = 0; i < ts.length; i++) if (ts[i].pc === pc) { lab = ts[i].lab; break; }
+      out.push({ s: s, midi: m, pc: pc, lab: lab });
+    }
+    return out;
+  }
+
   /* ---------------- the hand-written shapes (section 2.3) ---------------- */
   function fr(s) {
     var out = [], i = 0;
@@ -341,7 +363,7 @@ var Chords = (function () {
   return {
     OPEN: OPEN, NAMES: NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
-    parse: parse, name: name, qual: qual, tones: tones, mod12: mod12, fr: fr,
+    parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
     fingerCount: fingerCount, assignFingers: assignFingers, position: position, midiOf: midiOf, fretText: fretText,
     identify: identify

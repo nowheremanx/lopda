@@ -1,6 +1,6 @@
-// Chords (和弦大全) 1.1.0: the main screen, the picker and the finder at the smallest and largest LCD, a search that
-// lands on C#m7b5, turning through voicings, the two orders (in the picker) and the two views, a chord tone played on its
-// own, naming a chord from the frets, and the save.
+// Chords (和弦大全) 1.2.0: the main screen, the picker and the finder at the smallest and largest LCD, a search that
+// lands on C#m7b5, turning through voicings, the two orders (in the picker) and the two views, each string played on its
+// own, naming a chord from the frets, the progressions it belongs to (连接), and the save.
 // The app is plain HTML with no runtime around it here: a fake PAD is injected before the app's own script.
 // Needs Playwright, which the repo does not depend on, so the test skips without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-chord-book.test.mjs
@@ -91,10 +91,10 @@ test("chord-book: opens on C x32010; the box, the notes and the footer fit the s
     const { p, errors } = await open(t, { size });
     assert.equal(await text(p, "#cname"), "C");
     assert.match(await text(p, "#line"), /^x32010 · 1 \/ \d+ · 开放$/);
-    assert.equal(await text(p, "#tones"), "CRE3G5");
+    assert.equal(await text(p, "#tones"), "xCRE3G5CRE3", "one cell per string: x, R, 3, 5, R, 3");
     await fits(p, "body > header", size, "header");
     await fits(p, "body > footer", size, "footer");
-    await fits(p, "#tones", size, "the chord tones");
+    await fits(p, "#tones", size, "the strings");
     for (const sel of ["#pic", "#line", "#tones", "#strum"]) await inside(p, sel, size, "main screen");
     const w = await p.locator("#pic").evaluate((c) => parseInt(c.style.width, 10));
     assert.ok(w >= 208 && w % 104 === 0, `the box is drawn at a whole scale: ${w}px`);
@@ -208,14 +208,15 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
   }
 });
 
-test("chord-book: English words, and the strum plays without an error", { skip, timeout: 60000 }, async (t) => {
+test("chord-book: English words, the strum plays without an error, the degree map is named", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t, { lang: "en", size: LARGE });
   assert.equal(await text(p, "#strum"), "Strum");
 
   assert.equal(await text(p, "#qname"), "major");
   assert.match(await text(p, "#line"), /^x32010 · 1 \/ \d+ · open$/);
   await tap(p, "#strum");
-  await tap(p, "#pwrap");
+  await tap(p, "#pic");
+  assert.equal(await text(p, "#view"), "Degrees");
   await tap(p, "#chord");
   assert.equal(await text(p, "#tofind"), "Find by frets");
   assert.equal(await text(p, "#sortH"), "Shape order");
@@ -223,7 +224,7 @@ test("chord-book: English words, and the strum plays without an error", { skip, 
   assert.deepEqual(errors, []);
 });
 
-test("chord-book: each chord tone is a button that plays it alone, counted up from the voicing's root", { skip, timeout: 60000 }, async (t) => {
+test("chord-book: each sounding string is a button with its note and degree that plays that string alone", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t);
   /* Guitar is the app's own global; record what it is asked to play */
   await p.evaluate(() => {
@@ -231,22 +232,127 @@ test("chord-book: each chord tone is a button that plays it alone, counted up fr
     const play = window.Guitar.play;
     window.Guitar.play = (notes, gap, ring) => { window.__notes.push({ notes, ring: !!ring }); return play(notes, gap, ring); };
   });
-  const tones = p.locator("#tones button");
-  assert.equal(await tones.count(), 3);
-  for (let i = 0; i < 3; i++) await tap(p, tones.nth(i));
-  /* C x32010: the root is C3 (48) on the A string, so R, 3, 5 are 48, 52, 55, and they ring together */
-  assert.deepEqual(await p.evaluate(() => window.__notes), [
-    { notes: [48], ring: true }, { notes: [52], ring: true }, { notes: [55], ring: true }
-  ]);
-  /* a slash chord's extra bass is the voicing's lowest note: Am/G 3x2210 has G2 (43) on the low E string, then the
-     root A3 (57) on the G string and C4 (60) a minor third above it */
+  /* C x32010: the low E is muted, then C3 R, E3 3, G3 5, C4 R, E4 3; tapped one after another they ring together */
+  assert.equal(await p.locator("#tones .tone").count(), 6);
+  const strings = p.locator("#tones button");
+  assert.equal(await strings.count(), 5);
+  for (let i = 0; i < 5; i++) await tap(p, strings.nth(i));
+  assert.deepEqual(await p.evaluate(() => window.__notes), [48, 52, 55, 60, 64].map((m) => ({ notes: [m], ring: true })));
+  /* a slash chord's extra bass is marked as the bass: Am/G 3x2210 is G2 bass, A muted, E3 5, A3 R, C4 b3, E4 5 */
   await tap(p, "#chord");
   await p.locator("#q").fill("Am/G");
   await tap(p, "#qgo");
   assert.match(await text(p, "#line"), /^3x2210 · /);
-  assert.equal(await text(p, "#tones"), "G低音ARCb3E5");
+  assert.equal(await text(p, "#tones"), "G低音xE5ARCb3E5");
   await p.evaluate(() => { window.__notes = []; });
-  for (let i = 0; i < 3; i++) await tap(p, p.locator("#tones button").nth(i));
-  assert.deepEqual(await p.evaluate(() => window.__notes.map((x) => x.notes[0])), [43, 57, 60]);
+  for (let i = 0; i < 5; i++) await tap(p, p.locator("#tones button").nth(i));
+  assert.deepEqual(await p.evaluate(() => window.__notes.map((x) => x.notes[0])), [43, 52, 57, 60, 64]);
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book: a tap on the picture opens the degree map; a place on it plays its note, the view button closes it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push({ notes, ring: !!ring }); return play(notes, gap, ring); };
+  });
+  await tap(p, "#pic");
+  assert.equal(await text(p, "#view"), "度数");
+  assert.deepEqual(await p.evaluate(() => window.__notes), [], "the tap opened the map and played nothing");
+  /* a place on the map, in buffer pixels of the 104 x 104 box: the A string at fret 3 (C3), the high E at fret 1 (F4) */
+  const at = async (bx, by) => {
+    const b = await p.locator("#pic").boundingBox();
+    await p.touchscreen.tap(b.x + (bx + 0.5) * b.width / 104, b.y + (by + 0.5) * b.height / 104);
+    await p.waitForTimeout(80);
+  };
+  await at(34, 58);
+  await at(90, 24);
+  assert.deepEqual(await p.evaluate(() => window.__notes), [{ notes: [48], ring: true }, { notes: [65], ring: true }]);
+  /* a swipe still turns the voicing, and the map stays open */
+  await p.evaluate(() => window.__press("right"));
+  await p.waitForTimeout(80);
+  assert.match(await text(p, "#line"), /· 2 \/ /);
+  assert.equal(await text(p, "#view"), "度数");
+  /* the view button closes it back to the box; SELECT opens and closes it too, and it is saved */
+  await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "框图");
+  await p.evaluate(() => window.__press("select"));
+  await p.waitForTimeout(400);
+  assert.equal(await text(p, "#view"), "度数");
+  assert.equal(await p.evaluate(() => window.__saves.set.map), true);
+  await p.evaluate(() => window.__press("select"));
+  await p.waitForTimeout(80);
+  assert.equal(await text(p, "#view"), "框图");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book: 连接 lists C's progressions, plays one a chord a second, and a chord in it opens on the main screen", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await tap(p, "#prog");
+    assert.ok(await p.locator("#progs").isVisible());
+    assert.equal(await text(p, "#gtitle"), "C 的和弦连接");
+    await fits(p, "#progs", size, "the progressions");
+    const card = p.locator("#glist .card").first();
+    assert.equal(await card.locator(".chips").textContent(), "CGAmF");
+    assert.equal(await card.locator(".chips .me").textContent(), "C");
+    assert.equal(await card.locator(".grole").textContent(), "C 在这里是 I");
+    assert.ok((await card.locator(".why").textContent()).length > 20, "the why is there");
+    assert.deepEqual(errors, []);
+  }
+
+  const { p, errors } = await open(t);
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push(notes); return play(notes, gap, ring); };
+  });
+  await tap(p, "#prog");
+  const card = () => p.locator("#glist .card").first();
+  await tap(p, card().locator(".gplay"));
+  assert.equal(await card().locator(".gplay").textContent(), "停");
+  assert.equal(await card().locator(".chips .sel").textContent(), "C");
+  await p.waitForTimeout(1250);
+  assert.equal(await card().locator(".chips .sel").textContent(), "G");
+  /* the first chord is the voicing in view, C x32010 */
+  assert.deepEqual(await p.evaluate(() => window.__notes[0]), [48, 52, 55, 60, 64]);
+  await tap(p, card().locator(".gplay"));
+  assert.equal(await card().locator(".gplay").textContent(), "听");
+  const n = await p.evaluate(() => window.__notes.length);
+  await p.waitForTimeout(1200);
+  assert.equal(await p.evaluate(() => window.__notes.length), n, "a second tap stops it");
+
+  /* a chord in it opens on the main screen, on the shape it was played with */
+  await tap(p, card().locator(".chips button").nth(2));
+  assert.ok(!(await p.locator("#progs").isVisible()));
+  assert.equal(await text(p, "#cname"), "Am");
+
+  /* the keys: the first arrow shows which card has the focus, A plays it, B closes */
+  await tap(p, "#prog");
+  assert.equal(await text(p, "#gtitle"), "Am 的和弦连接");
+  await p.evaluate(() => { window.__press("down"); window.__press("a"); });
+  await p.waitForTimeout(80);
+  assert.equal(await p.locator("#glist .card.focus .gplay").textContent(), "停");
+  await p.evaluate(() => window.__press("b"));
+  await p.waitForTimeout(80);
+  assert.ok(!(await p.locator("#progs").isVisible()));
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book: the progressions in English, and a slash chord's place in the canon", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { lang: "en" });
+  assert.equal(await text(p, "#prog"), "Progs");
+  await tap(p, "#prog");
+  assert.equal(await text(p, "#gtitle"), "Progressions with C");
+  assert.equal(await p.locator("#glist .card .grole").first().textContent(), "C is I here");
+  await tap(p, "#gback");
+  await tap(p, "#chord");
+  await p.locator("#q").fill("C/E");
+  await tap(p, "#qgo");
+  await tap(p, "#prog");
+  const first = p.locator("#glist .card").first();
+  assert.equal(await first.locator(".chips").textContent(), "CG/BAmEm/GFC/EFG");
+  assert.equal(await first.locator(".grole").textContent(), "C/E is I/3 here");
   assert.deepEqual(errors, []);
 });
