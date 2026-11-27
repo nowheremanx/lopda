@@ -106,24 +106,21 @@ test("gomoku: the radio match is secondary, and a win keeps the board and its li
   await sleep(200);
   await frame.evaluate(() => window.dispatchEvent(new Event("resize")));
 
-  // (c) the start panel: 开始 is the solid primary, 对战（电波） is an outlined second choice under its caption
+  // (c) the title screen (1.8.0): 开始 is the solid primary, 对战（电波） an outlined second choice beside it
   await frame.waitForSelector("#lk:not(.hide)");
   const style = await frame.evaluate(() => {
     const read = (id) => {
       const el = document.getElementById(id), r = el.getBoundingClientRect(), c = getComputedStyle(el);
-      return { y: r.y, h: r.height, bg: c.backgroundColor, color: c.color, border: c.borderTopColor };
+      return { x: r.x, y: r.y, w: r.width, h: r.height, bg: c.backgroundColor, color: c.color, border: c.borderTopColor };
     };
-    const cap = document.getElementById("lkcap");
-    return { st: read("st"), lk: read("lk"), cap: cap.textContent, capShown: !cap.classList.contains("hide") };
+    return { st: read("st"), lk: read("lk") };
   });
   assert.ok(style.st.h >= 44 && style.lk.h >= 44, "both start buttons are 44 px tall");
   assert.notEqual(style.lk.bg, style.st.bg, "the radio button does not use the solid primary fill");
   assert.equal(style.lk.bg, "rgb(163, 173, 126)", "the radio button is paper");
   assert.equal(style.lk.color, "rgb(31, 42, 20)", "the radio button's text is ink");
   assert.equal(style.lk.border, "rgb(31, 42, 20)", "the radio button is outlined in ink");
-  assert.equal(style.capShown, true, "the radio button has its caption");
-  assert.match(style.cap, /两台掌机/, "the caption says it is for two handhelds");
-  assert.ok(style.lk.y - (style.st.y + style.st.h) >= 8, "the radio button sits clear of 开始");
+  assert.ok(style.lk.x - (style.st.x + style.st.w) >= 8, "the radio button sits clear of 开始, on its right");
 
   // start a solo game and put four black stones in a row, then win with the fifth
   await frame.click("#st");
