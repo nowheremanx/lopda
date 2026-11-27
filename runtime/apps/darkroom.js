@@ -149,10 +149,11 @@ function renderSheet(){
   if(D.sheet==="name"){ nameSheet(sh,r); renderKeys(); return; }
   if(D.sheet==="export" || D.sheet==="discard" || D.sheet==="erase") sh.appendChild(el("p","hint dk-note",tr(D.sheet==="export"?"dk.export.note":D.sheet==="discard"?"dk.discard.note":"dk.erase.note")));
   else if(D.sheet==="print"){
-    /* 全部单张 opens every frame's place too, so the note speaks of it whenever the roll holds one (issue #306) */
-    var single=D.prints && D.prints.key===r.id+"-"+D.idx && D.prints.jobs["p-single"] && D.prints.jobs["p-single"].out && D.prints.jobs["p-single"].out.placed;
+    /* 全部单张 opens every frame's place too, so the note speaks of it whenever one of them opens (issue #306) */
+    var mine=D.prints && D.prints.key===r.id+"-"+D.idx ? D.prints : null;
+    var single=mine && mine.jobs["p-single"] && mine.jobs["p-single"].out && mine.jobs["p-single"].out.placed;
     if(single) sh.appendChild(el("p","hint dk-note",tr("dk.print.placeboth")));
-    else if(placeInRoll(r)) sh.appendChild(el("p","hint dk-note",tr("dk.print.placeall")));
+    else if(mine && mine.anyPlace) sh.appendChild(el("p","hint dk-note",tr("dk.print.placeall")));
   }
   /* the confirmation stays up while the negative is made, with the work in words, not only greyed keys (issue #305) */
   if(D.busy && D.sheet==="export") sh.appendChild(el("p","hint dk-note dk-busy",D.busy));
@@ -739,7 +740,15 @@ function preparePrints(r){
   var key=r.id+"-"+D.idx, k=D.idx;
   if(D.prints && D.prints.key===key) return;
   var jobs={}, gen=D.gen;
-  D.prints={key:key, jobs:jobs};
+  D.prints={key:key, jobs:jobs, anyPlace:false};
+  /* does any frame 全部单张 would print open a place with this phone's keys? Only then the note names it (issue #306) */
+  r.frames.reduce(function(pr,f){
+    return pr.then(function(found){ return found || !f || f.blank || !f.geo ? found : placeOf(f).then(function(p){ return !!p; }); });
+  },Promise.resolve(false)).then(function(found){
+    if(!found || !D.prints || D.prints.jobs!==jobs) return;
+    D.prints.anyPlace=true;
+    if(D.sheet==="print") renderSheet();
+  });
   ["p-single","p-card","p-strip"].reduce(function(pr,kind){
     return pr.then(function(){
       if(gen!==D.gen || !D.prints || D.prints.jobs!==jobs) return;

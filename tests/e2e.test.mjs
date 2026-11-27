@@ -4012,7 +4012,7 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
   await press(p, "Enter");
   await p.waitForFunction(() => {
     const n = document.querySelector("#dk-sheet .dk-note");
-    return !!n && /单张印相含拍摄地点/.test(n.textContent);
+    return !!n && /单张和全部单张都含拍摄地点/.test(n.textContent);
   }, null, { timeout: 30000 });
   const single = await save(p, () => press(p, "x"));
   assert.match(single.name, /^lopda-print-\d{8}-portrait-400-001-01\.jpg$/);
@@ -4100,7 +4100,7 @@ test("darkroom: the single print alone carries the place; a negative keeps it se
   await press(q, "Enter");
   await q.waitForFunction(() => {
     const n = document.querySelector("#dk-sheet .dk-note");
-    return !!n && /单张印相含拍摄地点/.test(n.textContent);
+    return !!n && /单张和全部单张都含拍摄地点/.test(n.textContent);
   }, null, { timeout: 30000 });
   const opened = await save(q, () => press(q, "x"));
   const openedExif = EXIF.read(opened.buf);
@@ -8400,7 +8400,9 @@ test("camera snap: without the permission null and no dialog; Settings lists the
   await p.locator("#home .app", { has: p.locator(".label", { hasText: /^设置$/ }) }).click();
   await p.click("#set-sense-open");
   await p.waitForSelector("#v-set-sense:not([hidden])");
-  assert.equal(await p.textContent("#set-sense > span"), "传感器与权限");
+  /* the page's title is in its bar, once */
+  assert.equal(await p.locator("#v-set-sense", { hasText: "传感器与权限" }).locator("h2").textContent(), "传感器与权限");
+  assert.equal(await p.locator("#set-sense > span").count(), 0);
   assert.match(await p.textContent("#set-sense-list"), /(拍照测试|snap-test) · 相机/);
   await p.click('#set-sense-list [data-app="snap-test"]');
   assert.match(await p.textContent("#set-sense-list"), /还没有程序获准使用倾斜感应、麦克风、相机、生词本或连线/);
