@@ -175,7 +175,7 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
     await tap(p, "#tofind");
     assert.ok(await p.locator("#finder").evaluate((e) => e.classList.contains("open")));
     assert.equal(await text(p, "#fname"), "C");
-    assert.equal(await text(p, "#xo"), "x3201o", "x, the frets held, o");
+    assert.equal(await text(p, "#xo"), "x32o1o", "x for a muted string, o for an open one, the fret for a held one");
     await fits(p, "#finder", size, "finder");
     for (const sel of ["#fname", "#fsee", "#xo"]) await inside(p, sel, size, "finder");
     /* the G string at fret 2: x32210 */
