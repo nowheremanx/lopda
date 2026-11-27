@@ -126,7 +126,7 @@ var KanaSRS = (function () {
   }
 
   /* what the day's review asks: every started kana whose day has come, oldest first, then the
-     never-answered ones in table order, at most cap new ones a day counting the ones already met today */
+     never-answered ones in table order, at most cap new ones a day counting the ones answered today */
   function dueList(srsScript, today, tableSize, newUsedToday, cap) {
     var src = srsScript && typeof srsScript === "object" ? srsScript : {};
     var size = sizeOf(tableSize), t = isDay(today) ? today : "";
@@ -154,11 +154,22 @@ var KanaSRS = (function () {
     return [box, addDays(t, WAIT[box - 1])];
   }
 
-  /* how many new kana this script has already been shown today; a new day starts at zero */
+  /* how many new kana this script has answered today; a new day starts at zero */
   function countToday(newDay, today, script) {
     if (!newDay || typeof newDay !== "object" || newDay.day !== today) return 0;
     var n = newDay[script === "kata" ? "kata" : "hira"];
     return isCount(n) ? n : 0;
+  }
+
+  /* a new kana counts as introduced when it is answered, so a review left half done still leaves
+     the rest of the day's new kana for later; a count from an older day starts over */
+  function introduce(newDay, today, script) {
+    var t = isDay(today) ? today : "";
+    var hira = isCount(newDay && newDay.hira) ? newDay.hira : 0;
+    var kata = isCount(newDay && newDay.kata) ? newDay.kata : 0;
+    if (!newDay || newDay.day !== t) { hira = 0; kata = 0; }
+    if (script === "kata") kata += 1; else hira += 1;
+    return { day: t, hira: hira, kata: kata };
   }
 
   /* finishing a review today continues yesterday's streak, leaves today's alone, or starts at 1 */
@@ -182,5 +193,6 @@ var KanaSRS = (function () {
   }
 
   return { dayKey: dayKey, addDays: addDays, migrate: migrate, dueList: dueList,
-    applyAnswer: applyAnswer, countToday: countToday, streakAfter: streakAfter, liveStreak: liveStreak };
+    applyAnswer: applyAnswer, countToday: countToday, introduce: introduce,
+    streakAfter: streakAfter, liveStreak: liveStreak };
 })();

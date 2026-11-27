@@ -158,6 +158,24 @@ test("srs: a damaged version number never drops the kata stats", () => {
   assert.deepEqual(plain(SRS.migrate({ v: "3", stats: {} }, TODAY, SIZES)).stats, { hira: {}, kata: {} });
 });
 
+test("srs: a new kana is counted when it is answered, and the day's count rolls over", () => {
+  const first = plain(SRS.introduce({ day: TODAY, hira: 0, kata: 0 }, TODAY, "hira"));
+  assert.deepEqual(first, { day: TODAY, hira: 1, kata: 0 });
+  assert.equal(SRS.countToday(first, TODAY, "hira"), 1);
+  assert.deepEqual(plain(SRS.introduce({ day: TODAY, hira: 2, kata: 7 }, TODAY, "hira")),
+    { day: TODAY, hira: 3, kata: 7 }, "the other script's count is untouched");
+  assert.deepEqual(plain(SRS.introduce({ day: TODAY, hira: 2, kata: 7 }, TODAY, "kata")),
+    { day: TODAY, hira: 2, kata: 8 });
+  assert.deepEqual(plain(SRS.introduce({ day: "2026-05-19", hira: 8, kata: 3 }, TODAY, "hira")),
+    { day: TODAY, hira: 1, kata: 0 }, "a count from an older day starts over");
+  assert.deepEqual(plain(SRS.introduce(null, TODAY, "kata")), { day: TODAY, hira: 0, kata: 1 });
+  assert.deepEqual(plain(SRS.introduce({ day: TODAY, hira: "x", kata: -2 }, TODAY, "hira")),
+    { day: TODAY, hira: 1, kata: 0 }, "junk counts are dropped");
+  /* the cap still follows the answered new kana: eight allowed minus three already answered */
+  assert.equal(plain(SRS.dueList({}, TODAY, 71, 3)).fresh.length, 5);
+  assert.equal(plain(SRS.dueList({}, TODAY, 71, SRS.countToday(first, TODAY, "hira"))).fresh.length, 7);
+});
+
 test("srs: the streak shown on the home is only alive from today or yesterday", () => {
   assert.equal(SRS.liveStreak({ last: TODAY, streak: 4 }, TODAY), 4, "finished today: the run is current");
   assert.equal(SRS.liveStreak({ last: "2026-05-19", streak: 4 }, TODAY), 4, "yesterday: still alive today");

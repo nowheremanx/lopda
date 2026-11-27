@@ -116,6 +116,7 @@ test("kana-cards: the mode label and the key guide are separate on home, in the 
     await assertGuideRow(frame, `${lang} list`);
     await p.locator('#pad [data-b="start"]').click();
     await frame.waitForFunction(() => document.body.classList.contains("quiz"));
+    assert.equal(await frame.textContent("#mode"), lang === "en" ? "Quiz" : "小测", "the free quiz is labelled as a quiz");
     await assertGuideRow(frame, `${lang} quiz`);
     assert.deepEqual(errors, [], `${lang}: no page errors`);
   }
@@ -253,6 +254,7 @@ test("kana-cards: home, a finished review's tally and the table fit the smallest
   });
   await frame.click("#row-review");
   await frame.waitForFunction(() => document.body.classList.contains("quiz"));
+  assert.equal(await frame.textContent("#mode"), "Review", "a review is labelled as a review");
   for (let i = 0; i < 8; i++) {
     const target = Number((await frame.textContent("#count")).split("/")[0]) - 1;
     const before = await frame.textContent("#qnum");
@@ -390,5 +392,37 @@ test("kana-cards: the home follows the day while the app stays open", { skip, ti
   assert.equal(await frame.textContent("#review-label"), "Review 8 today", "the new day offers its eight kana again");
   assert.equal(await frame.evaluate(() => getComputedStyle(document.querySelector("#stamp")).display), "none",
     "the stamp comes down with the old day");
+  assert.deepEqual(errors, []);
+});
+
+test("kana-cards: a review leaves the new kana it did not answer for later", { skip, timeout: 90000 }, async (t) => {
+  const { p, frame, errors } = await open(t, "en");
+  await frame.evaluate(() => {
+    var later = window.setTimeout;
+    window.setTimeout = function (fn, ms) { return later(fn, Math.min(ms, 5)); };
+  });
+  await frame.click("#row-review");
+  await frame.waitForFunction(() => document.body.classList.contains("quiz"));
+  assert.equal(await frame.textContent("#mode"), "Review", "a review is labelled as a review");
+  for (let i = 0; i < 4; i++) {
+    const target = Number((await frame.textContent("#count")).split("/")[0]) - 1;
+    const before = await frame.textContent("#qnum");
+    await frame.locator(`#options button[data-index="${target}"]`).click();
+    await frame.waitForFunction((prev) => document.querySelector("#qnum").textContent !== prev, before, { timeout: 5000 });
+  }
+  await p.locator('#pad [data-b="b"]').click();
+  await frame.waitForFunction(() => document.body.classList.contains("home"));
+  assert.equal(await frame.textContent("#review-label"), "Review 4 today", "the four unanswered new kana are still today's");
+  assert.equal(await frame.evaluate(() => getComputedStyle(document.querySelector("#stamp")).display), "none",
+    "half a review does not stamp the day");
+  const saved = await p.waitForFunction(() => {
+    const doc = JSON.parse(localStorage.getItem("lopda-dev:kana-cards") || "{}")["kana-cards-state"];
+    return doc && doc.newDay && doc.newDay.hira === 4 ? doc : null;
+  }).then((handle) => handle.jsonValue());
+  assert.equal(saved.newDay.kata, 0);
+  assert.equal(Object.keys(saved.srs.hira).length, 4, "only the answered kana got a box");
+  const reopened = await seed(p, "en", saved);
+  assert.equal(await reopened.textContent("#review-label"), "Review 4 today", "reopening the same day keeps the remaining four");
+  assert.equal(await reopened.textContent("#streak"), "0-day streak", "half a review is not a finished day");
   assert.deepEqual(errors, []);
 });

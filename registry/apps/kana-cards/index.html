@@ -277,7 +277,7 @@ var KanaSRS = (function () {
   }
 
   /* what the day's review asks: every started kana whose day has come, oldest first, then the
-     never-answered ones in table order, at most cap new ones a day counting the ones already met today */
+     never-answered ones in table order, at most cap new ones a day counting the ones answered today */
   function dueList(srsScript, today, tableSize, newUsedToday, cap) {
     var src = srsScript && typeof srsScript === "object" ? srsScript : {};
     var size = sizeOf(tableSize), t = isDay(today) ? today : "";
@@ -305,11 +305,22 @@ var KanaSRS = (function () {
     return [box, addDays(t, WAIT[box - 1])];
   }
 
-  /* how many new kana this script has already been shown today; a new day starts at zero */
+  /* how many new kana this script has answered today; a new day starts at zero */
   function countToday(newDay, today, script) {
     if (!newDay || typeof newDay !== "object" || newDay.day !== today) return 0;
     var n = newDay[script === "kata" ? "kata" : "hira"];
     return isCount(n) ? n : 0;
+  }
+
+  /* a new kana counts as introduced when it is answered, so a review left half done still leaves
+     the rest of the day's new kana for later; a count from an older day starts over */
+  function introduce(newDay, today, script) {
+    var t = isDay(today) ? today : "";
+    var hira = isCount(newDay && newDay.hira) ? newDay.hira : 0;
+    var kata = isCount(newDay && newDay.kata) ? newDay.kata : 0;
+    if (!newDay || newDay.day !== t) { hira = 0; kata = 0; }
+    if (script === "kata") kata += 1; else hira += 1;
+    return { day: t, hira: hira, kata: kata };
   }
 
   /* finishing a review today continues yesterday's streak, leaves today's alone, or starts at 1 */
@@ -333,7 +344,8 @@ var KanaSRS = (function () {
   }
 
   return { dayKey: dayKey, addDays: addDays, migrate: migrate, dueList: dueList,
-    applyAnswer: applyAnswer, countToday: countToday, streakAfter: streakAfter, liveStreak: liveStreak };
+    applyAnswer: applyAnswer, countToday: countToday, introduce: introduce,
+    streakAfter: streakAfter, liveStreak: liveStreak };
 })();
 </script>
 <script>
@@ -490,7 +502,8 @@ var KanaSRS = (function () {
     qnumEl.textContent = data.screen === "quiz" && data.review
       ? TXT.qnumOf.replace("{n}", String(data.qpos + 1)).replace("{total}", String(data.queue.length))
       : TXT.qnum.replace("{n}", String(data.question || 1));
-    modeEl.textContent = TXT[data.screen];
+    /* a review is a review, not the free quiz: the label next to the guide says which */
+    modeEl.textContent = data.screen === "quiz" && data.review ? TXT.tally : TXT[data.screen];
     guideEl.textContent = data.screen === "home" ? TXT.homeGuide
       : data.screen === "tally" ? TXT.tallyGuide
       : data.screen === "list" ? TXT.listGuide
@@ -679,13 +692,6 @@ var KanaSRS = (function () {
   function startReview() {
     var list = reviewList(), queue = list.due.concat(list.fresh);
     if (!queue.length) return;
-    if (list.fresh.length) {
-      /* a new kana counts as introduced when it is first offered, so closing the app mid-review
-         cannot hand out another eight later the same day */
-      var day = todayKey();
-      if (data.newDay.day !== day) data.newDay = { day: day, hira: 0, kata: 0 };
-      data.newDay[data.script] += list.fresh.length;
-    }
     data.review = true; data.queue = queue; data.qpos = 0;
     data.res = { right: 0, wrong: 0, up: 0 };
     data.screen = "quiz"; data.target = queue[0];
@@ -696,6 +702,9 @@ var KanaSRS = (function () {
   function reviewAnswer(ok) {
     var key = String(data.target), entry = boxes()[key] || null;
     var was = Array.isArray(entry) ? entry[0] : 0;
+    /* a kana is introduced when it is answered, not when it is offered: a review left half done
+       leaves the rest of the day's new kana for the next session */
+    if (!(was >= 1)) data.newDay = KanaSRS.introduce(data.newDay, todayKey(), data.script);
     var next = KanaSRS.applyAnswer(entry, ok, todayKey());
     boxes()[key] = next;
     if (ok) { data.res.right++; if (next[0] > was) data.res.up++; }
