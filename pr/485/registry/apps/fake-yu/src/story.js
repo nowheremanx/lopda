@@ -23,19 +23,19 @@ var STORY = (function () {
   var ACTS = [
     {
       n: 1, venue: "hall",
-      title: { zh: "第一幕 · 三百人", en: "Act I · Crowd" },
+      title: { zh: "第一幕 · 三百人", en: "Act 1 · Crowd" },
       sub: { zh: "宣王的合奏殿", en: "King Xuan's hall" },
       color: { zh: "人多，热闹。多一个，谁知道？", en: "A crowd is a wonderful place to hide." }
     },
     {
       n: 2, venue: "throne",
-      title: { zh: "第二幕 · 一个人", en: "Act II · One Man" },
+      title: { zh: "第二幕 · 一个人", en: "Act 2 · One Man" },
       sub: { zh: "湣王的独奏殿", en: "King Min's court" },
-      color: { zh: "父王听合奏。寡人，只听独奏。", en: "My father liked the ensemble. I listen to solos." }
+      color: { zh: "父王听合奏。寡人，只听独奏。", en: "My father heard the ensemble. I hear solos." }
     },
     {
       n: 3, venue: "night",
-      title: { zh: "第三幕 · 一支真曲", en: "Act III · One Tune" },
+      title: { zh: "第三幕 · 一支真曲", en: "Act 3 · One Tune" },
       sub: { zh: "宫墙下的夜", en: "The wall at night" },
       color: { zh: "装到最后，总得有一句是真的。", en: "Even a liar needs one true note." }
     }
