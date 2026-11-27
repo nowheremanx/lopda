@@ -1041,11 +1041,23 @@ function senseRequest(app,win,d){
   openAsk(req);
 }
 /* an allowed app: on at once when no system prompt can come (passed already since the page opened, or none on this phone);
-   otherwise the bar, and the prompt in its tap. A tap inside the app does not count: it may not reach the outer page as a
-   gesture (Chromium passes it up, Safari is not known to), so the runtime always uses a tap of its own */
+   on at once too right after a tap in the app, which Chromium and Safari 16.4+ pass up to this page as an activation
+   (navigator.userActivation), so the app's own "turn the mic on" button is the one tap (owner, 1.7.0; decisions.md
+   section 75). Otherwise, or when that try is refused, the bar, and the prompt in its tap */
 function begin(req){
   var mayAsk=req.sense==="motion" ? sensors.motionNeedsAsk() && !sensors.systemOk.motion : !sensors.systemOk.mic;
   if(!mayAsk){ turnOn(req); return; }
+  var ua=navigator.userActivation;
+  if(ua && ua.isActive){
+    var reply=req.reply;
+    turnOn({app:req.app, win:req.win, sense:req.sense, reply:function(v){
+      if(v==="denied" && S.running===req.app && $("run-frame").contentWindow===req.win) bar(req); else reply(v);
+    }});
+    return;
+  }
+  bar(req);
+}
+function bar(req){
   req.bar=true; req.text=tr("sense.tap."+req.sense);
   req.ok=function(){ closeAsk(false); turnOn(req); };
   req.cancel=function(){ req.reply("denied"); };
