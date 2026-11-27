@@ -4,9 +4,10 @@
 // bundled app in tests/app-vm.mjs to read the header and the key line it draws.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import vm from "node:vm";
 import { join } from "node:path";
-import { read, ROOT } from "./helpers.mjs";
+import { read, ROOT, EMOJI } from "./helpers.mjs";
 import { boot, mulberry32 } from "./app-vm.mjs";
 
 const ctx = vm.createContext({ console });
@@ -224,25 +225,6 @@ test("with a working compass the key line does not claim the turning keys", asyn
   }
 });
 
-function dailySlipData() {
-  const html = read("registry/apps/daily-slip/index.html");
-  const at = html.indexOf("var DATA =") + "var DATA =".length;
-  const start = html.indexOf("[", at);
-  let depth = 0, quote = "", escaped = false, end = -1;
-  for (let i = start; i < html.length; i++) {
-    const c = html[i];
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (c === "\\") escaped = true;
-      else if (c === quote) quote = "";
-    } else if (c === '"' || c === "'" || c === "`") quote = c;
-    else if (c === "[") depth++;
-    else if (c === "]" && --depth === 0) { end = i + 1; break; }
-  }
-  assert.ok(end > start, "found daily-slip DATA array");
-  return JSON.parse(JSON.stringify(vm.runInNewContext("(" + html.slice(start, end) + ")")));
-}
-
 function bootStored(lang, loadValue, rejectLoad) {
   const listeners = {};
   const saves = new Map(), appends = [];
@@ -266,18 +248,48 @@ function bootStored(lang, loadValue, rejectLoad) {
   return { app, saves, appends, press };
 }
 
-test("the moved slips and daily slot formula exactly match daily-slip", () => {
+test("the moved slips match their frozen catalogue and daily slot formula", () => {
   const source = vm.createContext({ console });
   vm.runInContext(read("registry/apps/luck-compass/src/slips.js"), source);
-  const slips = source.SLIPS;
-  const original = dailySlipData();
-  assert.equal(slips.DATA.length, 108);
-  assert.deepEqual(JSON.parse(JSON.stringify(slips.DATA)), original);
+  const slips = source.SLIPS, data = JSON.parse(JSON.stringify(source.SLIPS.DATA));
+  assert.equal(data.length, 108);
   assert.equal(slips.count, 108);
+  assert.equal(createHash("sha256").update(JSON.stringify(data)).digest("hex"),
+    "f8a880318d7b808d456df17d80faa5537d009d91374256500e2784e44cba97b6");
+  for (const [num, zh, en] of [
+    [1, "朝露落在木门边", "Dew on the wooden gate"],
+    [2, "小雨拂过旧墙", "Rain brushes the old wall"],
+    [54, "池塘的荷叶托着一颗水珠", "A leaf holds one water drop"],
+    [108, "黄昏时摊子一个一个收", "At dusk the stalls fold up"]
+  ]) {
+    assert.equal(data[num - 1].verse.zh[0], zh, `slip ${num} Chinese first line`);
+    assert.equal(data[num - 1].verse.en[0], en, `slip ${num} English first line`);
+  }
+  const grades = { "上上": "Excellent", "上": "Good", "中": "Fair" };
+  const firsts = { zh: new Set(), en: new Set() };
+  for (const [i, item] of data.entries()) {
+    assert.equal(item.num, i + 1, `slip ${i + 1} number`);
+    assert.equal(grades[item.grade.zh], item.grade.en, `slip ${item.num} grade in both languages`);
+    assert.equal(item.verse.zh.length, 3, `slip ${item.num} Chinese verse`);
+    assert.equal(item.verse.en.length, 3, `slip ${item.num} English verse`);
+    for (const lang of ["zh", "en"]) {
+      for (const line of item.verse[lang]) {
+        assert.equal(typeof line, "string", `slip ${item.num} ${lang} verse line`);
+        assert.ok(line.trim().length > 1, `slip ${item.num} ${lang} verse is not empty`);
+        assert.doesNotMatch(line, EMOJI, `slip ${item.num} ${lang} verse has no emoji`);
+      }
+      const first = item.verse[lang][0];
+      assert.ok(!firsts[lang].has(first), `${lang} first line is unique: ${first}`);
+      firsts[lang].add(first);
+      assert.equal(typeof item.meaning[lang], "string", `slip ${item.num} ${lang} meaning`);
+      assert.ok(item.meaning[lang].trim().length > 5, `slip ${item.num} ${lang} meaning is present`);
+      assert.doesNotMatch(item.meaning[lang], EMOJI, `slip ${item.num} ${lang} meaning has no emoji`);
+    }
+  }
   function dailySlot(dateKey) {
     let sum = 0;
     for (let i = 0; i < dateKey.length; i++) sum += dateKey.charCodeAt(i) * (i + 1);
-    return sum % original.length;
+    return sum % 108;
   }
   for (let i = 0; i < 400; i++) {
     const d = new Date(Date.UTC(2025, 0, 1 + i));
