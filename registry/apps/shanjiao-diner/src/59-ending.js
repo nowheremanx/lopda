@@ -38,13 +38,18 @@ game.scene("ending", {
     } else if (this.kind === "good" && S.flags.finalChoice === "ahe") {
       K = ["山脚小馆", "山神宴过了，小馆还在。", "阿禾坐在灶边，等你盛下一碗。", "明天还得早起。"];
     }
-    g.window(10, 8, 150, 44);
-    g.text(K[0], 85, 12, { align: "center" });
-    g.text(K[1], 10, 28, { align: "center", width: 150, color: g.DARK });
-    g.window(6, 168, 204, 68);
-    g.text(K[2], 6, 172, { align: "center", width: 204 });
-    g.text(K[3], 6, 188, { align: "center", width: 204, color: g.DARK });
-    g.text("客 " + S.stats.served + " · 入 " + S.stats.earned + " 文 · 名 " + S.rep + (S.debt ? " · 欠 " + S.debt : ""), 6, 204, { align: "center", width: 204, color: g.DARK });
+    // the window is as wide as the screen's lower one, so the longest K[1]
+    // (180 px) stays on one line inside it (#426)
+    g.window(6, 8, 204, 44);
+    g.text(K[0], 108, 12, { align: "center" });
+    UI.text(g, K[1], 6, 30, { align: "center", width: 204, color: g.DARK, fit: 196 });
+    // one line per row: the ledger and the unpaid rent get rows of their own,
+    // so nothing wraps onto 「A 回到标题」
+    g.window(6, 160, 204, 76);
+    UI.text(g, K[2], 6, 164, { align: "center", width: 204, fit: 196 });
+    UI.text(g, K[3], 6, 178, { align: "center", width: 204, color: g.DARK, fit: 196 });
+    UI.text(g, "客 " + S.stats.served + " · 入 " + S.stats.earned + " 文 · 名 " + S.rep, 6, 192, { align: "center", width: 204, color: g.DARK, fit: 196 });
+    if (S.debt) UI.text(g, "还欠 " + S.debt + " 文租", 6, 206, { align: "center", width: 204, color: g.DARK, fit: 196 });
     g.text("A 回到标题", 108, 220, { align: "center" });
     UI.toast(g);
   }

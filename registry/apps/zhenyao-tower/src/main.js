@@ -572,12 +572,37 @@ var fm = null;
 var FM_MAIN = ["物品", "状态", "返回"];
 function fmOpen() { fm = { kind: "main", i: 0, msg: "" }; game.sfx("tap"); }
 function fmEffect(id) { var it = BATTLE.ITEMS[id]; return it.hp ? "体力+" + it.hp : "法力+" + it.mp; }
+/* a tap on the field menu: {row} on one of the rows of the window that holds the list, {out: true} outside every
+   window of the screen, null for none (fmDraw draws the same boxes) */
+function fmTap() {
+  var p = game.pointer;
+  if (!p.pressed) return null;
+  var x = p.x, y = p.y;
+  if (fm.kind === "main") {
+    if (x >= 104 && x < 156 && y >= 8 && y < 56) {
+      var r = Math.floor((y - 13) / 13);
+      return r >= 0 && r < FM_MAIN.length ? { row: r } : {};
+    }
+    return { out: true };
+  }
+  if (fm.kind === "items") {
+    if (y >= 100) {
+      var k = Math.floor((y - 104) / 15);
+      return k >= 0 && k < BATTLE.ITEM_ORDER.length ? { row: k } : {};
+    }
+    return y >= 8 && y < 42 ? {} : { out: true };
+  }
+  return { out: true };
+}
 function fmUpdate() {
-  var d = game.dir();
+  var d = game.dir(), tap = fmTap();
+  /* touch: a row selects and acts like A; a tap outside the windows is B; the status page closes on any tap */
+  var ok = game.pressed("a"), back = game.pressed("b") || !!(tap && tap.out);
+  if (tap && tap.row != null) { fm.i = tap.row; ok = true; }
   if (fm.kind === "main") {
     if (d.y) { fm.i = (fm.i + d.y + FM_MAIN.length) % FM_MAIN.length; game.sfx("move"); }
-    if (game.pressed("b") || game.pressed("start")) { fm = null; game.sfx("tap"); }
-    else if (game.pressed("a")) {
+    if (back || game.pressed("start")) { fm = null; game.sfx("tap"); }
+    else if (ok) {
       game.sfx("ok");
       if (fm.i === 0) fm = { kind: "items", i: 0, msg: "" };
       else if (fm.i === 1) fm = { kind: "status", i: 1, msg: "" };
@@ -585,13 +610,20 @@ function fmUpdate() {
     }
   } else if (fm.kind === "items") {
     if (d.y) { fm.i = (fm.i + d.y + BATTLE.ITEM_ORDER.length) % BATTLE.ITEM_ORDER.length; fm.msg = ""; game.sfx("move"); }
-    if (game.pressed("b")) { fm = { kind: "main", i: 0, msg: "" }; game.sfx("tap"); }
-    else if (game.pressed("a")) {
+    if (back) { fm = { kind: "main", i: 0, msg: "" }; game.sfx("tap"); }
+    else if (ok) {
       var id = BATTLE.ITEM_ORDER[fm.i], got = Rules.useItem(me, id);
       if (got) { fm.msg = fmEffect(id).replace(/\d+/, got.hp || got.mp); game.sfx("ok"); }
       else { fm.msg = me.items[id] > 0 ? "已经满了" : "没有了"; game.sfx("err"); }
     }
-  } else if (game.pressed("b") || game.pressed("a")) { fm = { kind: "main", i: 1, msg: "" }; game.sfx("tap"); }
+  } else if (back || ok || tap) { fm = { kind: "main", i: 1, msg: "" }; game.sfx("tap"); }
+}
+/* a row that can't be chosen: dark text struck through with a dotted line (battle.js draws its own the same way) */
+function offText(g, text, x, y, o) {
+  o = o || {};
+  var w = g.measure(text), x0 = o.align === "right" ? x - w : x, ly = y + Math.round(g.lineHeight / 2) - 1;
+  g.text(text, x, y, { align: o.align, color: g.DARK });
+  for (var k = 0; k < w; k += 2) g.rect(x0 + k, ly, 1, 1, g.DARK);
 }
 function fmDraw(g) {
   var s = Rules.stats(me.level);
@@ -610,9 +642,12 @@ function fmDraw(g) {
     BATTLE.ITEM_ORDER.forEach(function (id, i) {
       var y = 106 + i * 15, none = !(me.items[id] > 0);
       if (i === fm.i) g.arrow(5, y + 3, "right");
-      g.text(BATTLE.ITEMS[id].name, 13, y, { color: none ? g.MID : g.INK });
+      /* none left: dark and struck through, as in battle (mid on paper can't be read on a phone) */
+      if (none) offText(g, BATTLE.ITEMS[id].name, 13, y);
+      else g.text(BATTLE.ITEMS[id].name, 13, y);
       g.text(fmEffect(id), 90, y, { color: g.DARK });
-      g.text("x" + (me.items[id] || 0), 154, y, { align: "right", color: none ? g.MID : g.INK });
+      if (none) offText(g, "x0", 154, y, { align: "right" });
+      else g.text("x" + me.items[id], 154, y, { align: "right" });
     });
   } else {
     var next = me.level >= BATTLE.XP.length - 1 ? "满级" : String(BATTLE.XP[me.level + 1] - me.xp);

@@ -67,13 +67,31 @@ var QS = (function () {
     return byId[id];
   }
 
-  function noteText(q, n) {
-    var d = new Date();
-    var date = d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
-    return date + " · 第 " + n + " 次登顶\n\n"
+  function dateText(d) {
+    return d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
+  }
+
+  /* at: {n, d} for the summit and the day the line was given (a bare number is
+     today's summit n). Without it, the note says only the day it was copied, so the
+     handbook never claims a summit or a day it does not know. */
+  function noteText(q, at) {
+    if (typeof at === "number") at = { n: at, d: dateText(new Date()) };
+    var head = at && at.n > 0 && at.d ? at.d + " · 第 " + at.n + " 次登顶" : "抄于 " + dateText(new Date());
+    return head + "\n\n"
       + "「" + q.zh + "」\n"
       + "\"" + q.en + "\"\n\n"
       + "—— 加缪《西西弗斯神话》";
+  }
+
+  /* a saved got record: only lines in the seen list, each {n > 0, d a short string} */
+  function cleanGot(v, seen) {
+    var out = {};
+    if (!v || typeof v !== "object") return out;
+    (seen || []).forEach(function (id) {
+      var r = v[id];
+      if (r && typeof r === "object" && (r.n | 0) > 0 && typeof r.d === "string" && r.d.length <= 24) out[id] = { n: r.n | 0, d: r.d };
+    });
+    return out;
   }
 
   function seenList(state) {
@@ -82,5 +100,5 @@ var QS = (function () {
     return out;
   }
 
-  return { QUOTES: QUOTES, byId: byId, next: next, noteText: noteText, seenList: seenList };
+  return { QUOTES: QUOTES, byId: byId, next: next, noteText: noteText, dateText: dateText, cleanGot: cleanGot, seenList: seenList };
 })();
