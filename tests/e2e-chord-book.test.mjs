@@ -475,11 +475,12 @@ test("chord-book: a chord opened from a progression takes its mode from the key;
   assert.doesNotMatch(await p.locator("#tones .why2 p").first().textContent(), /^按/);
   await p.evaluate(() => window.__press("left"));
   assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调选的。/);
-  /* G is V: Mixolydian, the fourth */
+  /* F's own progressions are in F (and keys where F is not the tonic); C is V in F major: Mixolydian, the fourth */
   await tap(p, "#prog");
-  const g = p.locator("#glist .card").filter({ hasText: "C 大调" }).first();
-  await tap(p, g.locator(".chips button", { hasText: /^G$/ }).first());
-  assert.equal(await text(p, "#cname"), "G");
-  assert.match(await text(p, "#qname"), /^G Mixolydian · 4 \/ 4$/);
+  const card = p.locator("#glist .card").filter({ hasText: "F 大调" }).filter({ has: p.locator(".chips button", { hasText: /^C$/ }) }).first();
+  await tap(p, card.locator(".chips button", { hasText: /^C$/ }).first());
+  assert.equal(await text(p, "#cname"), "C");
+  assert.match(await text(p, "#qname"), /^C Mixolydian · 4 \/ 4$/);
+  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 F 大调选的。/);
   assert.deepEqual(errors, []);
 });
