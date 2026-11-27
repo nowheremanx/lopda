@@ -1150,6 +1150,46 @@ test("calendar: a leap-month birthday falls in the regular month in a year witho
   assert.deepEqual(notBlocked(c.errors), []);
 });
 
+test("calendar: the list follows the highlighted row; on a short window the go-to and add panels scroll and keep their soft keys", { skip, timeout: 60000 }, async (t) => {
+  const c = await calPage(t);
+  const { p } = c;
+  await c.boot();
+  for (let m = 1; m <= 12; m++) {
+    await idb.setDoc(p, "data/users/local/calendar/days/m" + m, { name: "纪念日" + m, month: m, day: 20, lunar: false, leap: false });
+  }
+  await c.boot(true);
+  await c.open();
+  /* issue 288: ten presses down keep the highlighted row inside the list's visible box */
+  await p.click("#cal-list-btn");
+  for (let i = 0; i < 10; i++) await p.keyboard.press("ArrowDown");
+  const box = await p.evaluate(() => {
+    const ul = document.querySelector("#cal-sheet .cal-list"), on = ul.querySelector("li.on");
+    const u = ul.getBoundingClientRect(), r = on.getBoundingClientRect();
+    return { top: r.top - u.top, bottom: u.bottom - r.bottom, scroll: ul.scrollTop, index: [...ul.children].indexOf(on) };
+  });
+  assert.equal(box.index, 10);
+  assert.ok(box.scroll > 0 && box.top >= -0.5 && box.bottom >= -0.5, "the highlighted row is in view: " + JSON.stringify(box));
+  await p.keyboard.press("z");
+  /* issue 287: 375 x 587 (and the 375 x 547 Safari tab) leave the soft keys whole under the go-to and add panels */
+  for (const height of [587, 547]) {
+    await p.setViewportSize({ width: 375, height });
+    await p.waitForTimeout(150);
+    for (const open of [async () => p.keyboard.press("Enter"), async () => { await p.keyboard.press("x"); await p.keyboard.press("x"); await p.click(".cal-kind button:has-text('按农历')"); }]) {
+      await open();
+      await p.waitForSelector("#cal-sheet:not([hidden])");
+      const fit = await p.evaluate(() => {
+        const sh = document.getElementById("cal-sheet").getBoundingClientRect();
+        const keys = [...document.querySelectorAll("#cal-sheet .softkeys > *")].map((k) => k.getBoundingClientRect());
+        return { ok: keys.length > 0 && keys.every((k) => k.top >= sh.top - 0.5 && k.bottom <= sh.bottom + 0.5) };
+      });
+      assert.ok(fit.ok, "the soft keys are whole at 375 x " + height);
+      await p.keyboard.press("z");
+      if (await p.isVisible("#cal-sheet")) await p.keyboard.press("z");
+    }
+  }
+  assert.deepEqual(notBlocked(c.errors), []);
+});
+
 test("calendar: English names", { skip, timeout: 30000 }, async (t) => {
   const c = await calPage(t, { locale: "en-US" });
   await c.boot(); await c.open();
@@ -4652,6 +4692,7 @@ test("pet: hatch, meal, wash, look, the light at night, travel and the postcard;
   await key("b");
   assert.ok(await p.isHidden("#pet-panel"));
 
+
   /* the call icon is dark while all is well and ink once it wants food; 叫它 gets a visible look */
   const inkPixels = (i) => p.evaluate((i) => {
     const c = document.querySelectorAll(".pet-ikey canvas")[i], d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
@@ -5023,6 +5064,10 @@ test("pet: one AI souvenir a day, valid or silently built-in, never a note, date
   await p.waitForFunction(() => LOPDA_DEBUG.pet.save().today.picked === true, null, { timeout: 10000 });
   await p.evaluate(() => LOPDA_DEBUG.pet.forceOuting());
   assert.equal((await save()).today.ai, true, "today.ai is written before the answer");
+  /* the empty room says why, and A promises nothing it cannot do (issue 372) */
+  assert.ok(await p.locator("#pet-away").isVisible(), "the out sign is up");
+  assert.match(await p.locator("#pet-away").innerText(), /出门散步了|Out for a walk/);
+  assert.doesNotMatch(await p.locator("#pet-keys .sk-a").innerText(), /喂食|Feed/, "no feed label while it is out");
   await waitOuting();
   let docs = await beside();
   const aiSouv = docs.find((d) => d.ai === true);
@@ -6667,7 +6712,12 @@ test("pet: an old save's marks load, A then A puts a souvenir on the shelf, and 
   await p.evaluate(() => LOPDA_DEBUG.setButton("a", true));
   await p.waitForTimeout(750);
   await p.evaluate(() => LOPDA_DEBUG.setButton("a", false));
-  await key("a");
+  /* a finger arms the question and A answers it (issue 373: A used to do nothing after a tap); 取消 steps back */
+  await p.locator("#pet-confirm-btn").click();
+  assert.equal(await p.locator("#pet-confirm .btn").count(), 2, "the tap shows confirm / cancel");
+  await p.locator("#pet-confirm .btn.ghost").click();
+  assert.equal(await p.locator("#pet-confirm-btn").count(), 1, "cancel goes back to the one button");
+  await p.locator("#pet-confirm-btn").click();
   await key("a");
   await p.waitForTimeout(200);
   const restarted = await save();
@@ -6795,11 +6845,13 @@ test("pet: the keepsake box is a newest-first month grid with page turns, and fi
   await p.waitForSelector("#pet-panel:not([hidden])");
   await p.locator("#pet-panel .pet-menu").nth(1).click();
 
-  /* the newest month first: October has 22 pictures, one page; the first picture is the newest */
+  /* the newest month first: October has 22 pictures, 15 a page (5 x 3, 44 px targets); the first picture is the newest */
   let text = await p.locator("#pet-panel").innerText();
   assert.match(text, /2026年10月/);
-  assert.match(text, /1\/2/);
-  assert.equal(await p.locator(".pet-tile").count(), 22);
+  assert.match(text, /1\/3/);
+  assert.equal(await p.locator(".pet-tile").count(), 15);
+  const tile = await p.locator(".pet-tile").first().boundingBox();
+  assert.ok(tile.width >= 44 && tile.height >= 44, "each picture is a 44 px target");
   await p.setViewportSize({ width: 375, height: 587 });   /* the 331 x 359 LCD */
   await p.waitForTimeout(150);
   const fit = await p.evaluate(() => {
@@ -6814,15 +6866,21 @@ test("pet: the keepsake box is a newest-first month grid with page turns, and fi
   await p.setViewportSize({ width: 390, height: 844 });
   await p.waitForTimeout(150);
 
-  /* right walks the pictures; one more at the end turns to September */
-  for (let i = 0; i < 21; i++) await key("right");
+  /* right walks the pictures; one more at the end of a page turns it, and past October's last comes September */
+  for (let i = 0; i < 14; i++) await key("right");
   text = await p.locator("#pet-panel").innerText();
   assert.match(text, /2026年10月/);
-  assert.match(text, /1\/2/);
+  assert.match(text, /1\/3/);
+  await key("right");
+  text = await p.locator("#pet-panel").innerText();
+  assert.match(text, /2026年10月/);
+  assert.match(text, /2\/3/);
+  assert.equal(await p.locator(".pet-tile").count(), 7);
+  for (let i = 0; i < 6; i++) await key("right");
   await key("right");
   text = await p.locator("#pet-panel").innerText();
   assert.match(text, /2026年9月/);
-  assert.match(text, /2\/2/);
+  assert.match(text, /3\/3/);
   assert.equal(await p.locator(".pet-tile").count(), 5);
   await key("a");
   assert.match(await p.locator("#pet-panel").innerText(), /九月5/);
