@@ -651,3 +651,58 @@ test("loading a slot with no run in progress asks nothing", async () => {
   assert.equal(titles.length, 1, "only the title menu was shown");
   assert.deepEqual(writes, [["auto", 3]]);
 });
+
+/* ---------------- falling never heals (#366), the forecast box fits (#365), the fight's HP is readable (#364) ---------------- */
+test("a fall takes a fifth of the gold and a death, and leaves the life where it was", () => {
+  const S = R.newGame();
+  S.floor = 4; S.hp = 5; S.gold = 100;
+  const rv = R.revive(S);
+  assert.equal(rv.lost, 20);
+  assert.equal(S.gold, 80);
+  assert.equal(S.deaths, 1);
+  assert.equal(S.hp, 5, "falling is not a way to heal");
+  S.gold = 0;
+  R.revive(S);
+  assert.equal(S.hp, 5, "not with an empty purse either");
+  assert.equal(S.deaths, 2);
+});
+
+for (const lang of ["zh", "en"]) {
+  test(`the forecast box grows with its text and stays on screen (${lang})`, async () => {
+    const t = await startPlay(bootTower(lang));
+    const S = t.app.ctx.get("S"), p = t.app.ctx.get("p"), draw = t.app.ctx.get("drawForecast");
+    const g = t.game.g, VIEW_W = t.app.ctx.get("VIEW_W");
+    p.dir = "down";
+    for (const [ch, atk, hp] of [["k", 1, 600], ["w", 999, 1], ["e", 999, 1], ["c", 999, 1], ["o", 999, 9999], ["i", 999, 9999]]) {
+      R.setTile(S, S.x, S.y + 1, ch);
+      S.atk = atk; S.hp = hp; S.hpMax = Math.max(600, hp);
+      const rec = recorder(t.game), texts = [];
+      rec.g.text = (s, x, y) => texts.push({ s, x, y });
+      draw(rec.g);
+      assert.equal(rec.drawn.windows.length, 1, `${ch}: one box`);
+      const box = rec.drawn.windows[0], txt = texts[0];
+      assert.ok(box.x >= 0 && box.x + box.w <= VIEW_W, `${ch}: box ${box.x}..${box.x + box.w}`);
+      assert.ok(txt.x > box.x && txt.x + g.measure(txt.s) <= box.x + box.w - 2, `${ch}: "${txt.s}" leaves its box`);
+    }
+  });
+}
+
+test("the fight's own HP number is paper on a flat ink band, not mid on the dither", async () => {
+  const t = await startPlay(bootTower("en"));
+  const S = t.app.ctx.get("S"), g = t.game.g;
+  R.setTile(S, S.x, S.y + 1, "i");
+  S.atk = 999;
+  /* record the real g while the fight is on screen (pushed straight, past the first-time intro) */
+  const texts = [], rects = [], text = g.text, rect = g.rect;
+  g.text = function (s, x, y, o) { texts.push({ s: String(s), x, y, o: o || {} }); return text.apply(g, arguments); };
+  g.rect = function (x, y, w, h, c) { rects.push({ x, y, w, h, c }); return rect.apply(g, arguments); };
+  t.game.push("battle", { ch: "i", x: S.x, y: S.y + 1 });
+  await t.run(20);
+  g.text = text; g.rect = rect;
+  const hp = texts.find((d) => /^\d+\/\d+$/.test(d.s) && d.y === 121);
+  assert.ok(hp, `the fight's HP number is drawn: ${texts.map((d) => d.s).join(" | ")}`);
+  assert.equal(hp.o.color, g.PAPER);
+  const half = Math.ceil(g.measure(hp.s) / 2);
+  assert.ok(rects.some((r) => r.c === g.INK && r.y <= hp.y && r.y + r.h >= hp.y + 14 && r.x <= hp.x - half && r.x + r.w >= hp.x + half),
+    "on an ink band as wide as the number");
+});

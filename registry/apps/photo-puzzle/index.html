@@ -533,8 +533,10 @@ var Solver = (function () {
     }
     var arcade = g.arcade === true, left = 0;
     if (arcade) {
-      if (typeof g.left !== "number" || isNaN(g.left) || g.left <= 0) left = arcadeTotal(n);
-      else left = Math.min(arcadeTotal(n), g.left);
+      /* only a save with no time at all (from before the fuse was saved) starts full; a fuse that has
+         burnt down stays at 0, and continuing it ends the game at once */
+      if (typeof g.left !== "number" || isNaN(g.left)) left = arcadeTotal(n);
+      else left = clamp(g.left, 0, arcadeTotal(n));
     }
     return { n: n, tiles: g.tiles, moves: g.moves, src: g.src, px: px, picKey: key,
       helped: g.helped === true, arcade: arcade, left: left };
@@ -717,11 +719,12 @@ var Solver = (function () {
   }
 
   /* ---------- the clock: only arcade games have one ----------
-     left is saved with every move and whenever play pauses, so closing the handheld does not stop the fuse and
-     reopening does not give the time back. START's menu pauses it; the menu is the pause. */
+     left is saved with every move and whenever play pauses (START's menu, or the page hidden), so reopening a game
+     goes on from the time it had, never from a full fuse; a fuse that burnt down is time up (#380). */
   function startClock() {
-    if (!S.gameArcade || S.screen !== "play" || S.left <= 0) { updateFuse(); return; }
+    if (!S.gameArcade || S.screen !== "play") { updateFuse(); return; }
     stopClock(false);
+    if (S.left <= 0) { loseGame(); return; }   /* the fuse ran out while paused or away: that is time up, not a free game */
     S.clockAt = Date.now(); S.clockLow = Math.ceil(S.left);
     S.clockTimer = setInterval(clockTick, 250);
     updateInfo(); updateFuse();
@@ -1448,6 +1451,8 @@ var Solver = (function () {
     if (S.screen === "cut") { skipIntro(); return; }
     if (S.screen === "solved") { if (S.anim.done) { S.sel = 0; choose(); } else endAnim(); }
   });
+  /* hiding the page (another app, a call, the lock button) pauses the fuse like START's menu does, and saves it
+     (decisions.md section 30): the board cannot be seen meanwhile, so it buys nothing the menu does not */
   document.addEventListener("visibilitychange", function () {
     if (document.hidden) stopClock(true);
     else if (S.screen === "play") startClock();

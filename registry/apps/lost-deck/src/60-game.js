@@ -18,8 +18,8 @@
   function loadSave() {
     return game.load("save").then(function (v) {
       if (v == null) { saveOk = true; return; }
-      if (typeof v !== "object" || typeof v.v !== "number") { saveMsg = t("存档格式不对，这次不保存。", "Save not understood; not saving."); return; }
-      if (v.v > SAVE_V) { saveMsg = t("存档来自新版本，请更新游戏。", "Save is from a newer version. Update the game."); return; }
+      if (typeof v !== "object" || typeof v.v !== "number") { saveMsg = t("存档格式不对，不保存", "Bad save: not saving"); return; }
+      if (v.v > SAVE_V) { saveMsg = t("新版本存档，这次不保存", "Newer save: not saving"); return; }
       save.unlocked = Math.max(1, Math.min(LD.DECKS.length + 1, v.unlocked | 0));
       save.best = {};
       /* keep each record in the shape this version draws; the stored copy is only rewritten after a deck is cleared */
@@ -32,7 +32,7 @@
       });
       save.tips = v.tips && typeof v.tips === "object" ? v.tips : {};
       saveOk = true;
-    }, function () { saveMsg = t("存档读不出来，这次不保存。", "Save could not be read; not saving."); });
+    }, function () { saveMsg = t("存档读不出，这次不保存", "Load failed: not saving"); });
   }
   function writeSave() {
     if (!saveOk) return;
@@ -356,7 +356,8 @@
       var input = { up: game.btn("up"), down: game.btn("down"), left: game.btn("left"), right: game.btn("right") };
       if (game.pressed("b")) { bHeld = 0; bMoved = false; bArmed = true; }
       if (game.btn("b")) { bHeld += dt; if (input.left || input.right) bMoved = true; input.strafe = true; }
-      if (game.released("b") && bArmed && !bMoved && bHeld < 0.4) input.use = true;
+      /* however long B was held, letting it go without having sidestepped uses what is in front */
+      if (game.released("b") && bArmed && !bMoved) input.use = true;
       if (!game.btn("b")) bArmed = false;
       /* after a dialog or the pause menu, A fires only once it has been let go */
       if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
@@ -602,16 +603,25 @@
   });
   game.scene("ending", {
     enter: function () { this.t = 0; music(LD.MUSIC.title); game.ambience(null); },
+    /* the lines come one by one; A, START or B first shows them all, and only then goes back to the title */
     update: function (dt) {
       this.t += dt;
-      if (this.t > 2 && (game.pressed("a") || game.pressed("start") || game.pressed("b"))) { sfx("ok"); game.go("title"); }
+      var lines = LD.ENDING[game.lang] || LD.ENDING.zh, all = (lines.length - 1) / 0.7;
+      if (!(game.pressed("a") || game.pressed("start") || game.pressed("b"))) return;
+      if (this.t < all) { this.t = Math.max(this.t, all); return; }
+      if (this.t > all + 0.5) { sfx("ok"); game.go("title"); }
     },
     draw: function () {
       drawStars(1 / 60, 0.6);
-      var lines = LD.ENDING[game.lang] || LD.ENDING.zh, y = 20;
+      var lines = LD.ENDING[game.lang] || LD.ENDING.zh, all = (lines.length - 1) / 0.7;
+      /* the whole text fits between the top and the hint at y 146: the gap between lines shrinks when English wraps */
+      var LH = g.lineHeight, sum = 0, n = lines.length, i;
+      for (i = 0; i < n; i++) sum += g.wrap(lines[i], 150).length * LH;
+      var gap = Math.max(0, Math.min(4, Math.floor((142 - sum) / Math.max(1, n - 1))));
+      var y = Math.max(1, Math.floor((144 - sum - gap * (n - 1)) / 2));
       var shown = Math.floor(this.t * 0.7);
-      for (var i = 0; i < Math.min(lines.length, shown + 1); i++) { y += g.text(lines[i], 5, y, { color: 3, align: "center", width: 150 }) + 4; }
-      if (this.t > 2) g.text(t("A 返回", "A back"), 80, 146, { color: 3, align: "center" });
+      for (i = 0; i < Math.min(n, shown + 1); i++) { y += g.text(lines[i], 5, y, { color: 3, align: "center", width: 150 }) + gap; }
+      if (this.t > all + 0.5) g.text(t("A 返回", "A back"), 80, 146, { color: 3, align: "center" });
     }
   });
 
