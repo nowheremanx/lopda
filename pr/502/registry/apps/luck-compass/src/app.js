@@ -556,8 +556,12 @@ var slipScroller = makeScroller(), almanacScroller = makeScroller(),
   glossaryScroller = makeScroller(), guaScroller = makeScroller(),
   guaExplainScroller = makeScroller();
 var scrollGestureMoved = false;
+/* Content that scrolls gets 16 px of paper after its last line, so the end reads as the end and not as text
+   pressed against the key line (owner, 2026-11-27). Content that fits does not scroll at all. */
+var SCROLL_END = 16;
+function scrollMax(total, h) { return total > h ? total - h + SCROLL_END : 0; }
 function scrollUpdate(sc, area, total, dt, lineHeight) {
-  var p = game.pointer, max = Math.max(0, total - area.h), dir = 0, releasedNow = false;
+  var p = game.pointer, max = scrollMax(total, area.h), dir = 0, releasedNow = false;
   sc.max = max;
   sc.offset = Math.max(0, Math.min(max, sc.offset));
   if (game.pressed("up") || game.btn("up")) dir = -1;
@@ -1073,8 +1077,8 @@ function drawAlmanacPage(g, offset, scroll, bottom) {
   }
   if (offset === almanacOffset) {
     almanacTotalHeight = layout.height;
-    almanacScroll = Math.max(0, Math.min(almanacScroll, Math.max(0, layout.height - 171)));
-    almanacScroller.max = Math.max(0, layout.height - 171);
+    almanacScroll = Math.max(0, Math.min(almanacScroll, scrollMax(layout.height, 171)));
+    almanacScroller.max = scrollMax(layout.height, 171);
   }
   g.clip();
   /* the page's lower edge while it hangs loose */
@@ -1181,7 +1185,7 @@ function drawAlmanacGlossary(g) {
   g.rect(0, 0, W, 19, g.INK);
   g.text(T({ zh: "老黄历 · 词条", en: "Almanac · Glossary" }), CX, 2, { align: "center", color: g.PAPER });
   var rows = almanacGlossaryRows(g), lineH = g.lineHeight || 14, area = { x: 10, y: 27, w: 196, h: 174 };
-  glossaryScroller.max = Math.max(0, rows.length * lineH - area.h);
+  glossaryScroller.max = scrollMax(rows.length * lineH, area.h);
   almanacGlossaryScroll = glossaryScroller.offset;
   g.clip(10, 27, 196, 174);
   for (var i = 0; i < rows.length; i++) {
@@ -1337,7 +1341,7 @@ function drawFortune(g) {
     var item = slipItem(), grade = item.grade[game.lang], lines = fortuneLines(g), j;
     var verseCount = slipVerseCount(g);
     var lineH = g.lineHeight || 14, area = { x: 13, y: 68, w: 190, h: 102 };
-    slipScroller.max = Math.max(0, lines.length * lineH - area.h);
+    slipScroller.max = scrollMax(lines.length * lineH, area.h);
     slipScroll = Math.max(0, Math.min(slipScroller.max, slipScroller.offset));
     var reveal = slipRevealAt < 0 ? 1 : Math.min(1, (game.time - slipRevealAt) / (REDUCED_MOTION ? .08 : .64));
     var revealBottom = Math.round(171 * reveal);
@@ -1564,7 +1568,7 @@ function drawHexagram(g) {
     var rows = guaResultRows(g), total = 0, y = 22 - guaScroller.offset;
     for (var i = 0; i < rows.length; i++) total += rows[i].height;
     var area = guaArea();
-    guaScroller.max = Math.max(0, total - area.h);
+    guaScroller.max = scrollMax(total, area.h);
     guaScroll = guaScroller.offset;
     g.clip(area.x, area.y, area.w, area.h);
     for (i = 0; i < rows.length; i++) {
@@ -1640,7 +1644,7 @@ function drawGuaExplain(g) {
   g.text(T({ zh: "八卦 · 详解", en: "I Ching · More" }), CX, 2, { align: "center", color: g.PAPER });
   var rows = guaExplainRows(g), total = 0, area = { x: 10, y: 27, w: 196, h: 174 };
   for (var i = 0; i < rows.length; i++) total += rows[i].height;
-  guaExplainScroller.max = Math.max(0, total - area.h);
+  guaExplainScroller.max = scrollMax(total, area.h);
   guaExplainScroll = guaExplainScroller.offset;
   g.clip(area.x, area.y, area.w, area.h);
   var y = area.y - guaExplainScroll;
