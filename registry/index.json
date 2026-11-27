@@ -617,7 +617,6 @@
       ],
       "version": "1.2.3",
       "released": "2026-11-27",
-      "updated": "2026-11-27",
       "description": "给吉他、贝斯、尤克里里、小提琴、二胡、琵琶等调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。",
       "i18n": {
         "zh": {
@@ -898,8 +897,8 @@
         "notes"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "c0171f3b23817807aba1f2f3117cb473dd41dd7644004e28ecd1f2c14969c186",
-      "bytes": 287289
+      "sha256": "8eff541165d5ac97ba45d9bceff5fc4b27312e1f4363a6ec97fed7c9fe8c5230",
+      "bytes": 290596
     }
   ]
 }
