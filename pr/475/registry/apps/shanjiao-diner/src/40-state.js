@@ -21,7 +21,11 @@ function fresh() {
   };
 }
 
-function save() { if (bootFailed) return; if (S) game.save(SAVE_KEY, S); }
+/* serviceLive: the evening is being played.  Its changes (money, regulars,
+ * flags) stay in memory until finishService writes the whole night at once, so
+ * a save never lands half way through an evening (see the service scene). */
+var serviceLive = false;
+function save() { if (bootFailed || serviceLive) return; if (S) game.save(SAVE_KEY, S); }
 function seen(id) { return !!(S && S.seen[id]); }
 function mark(id) { if (S) { S.seen[id] = 1; save(); } }
 function flag(id) { return !!(S && S.flags[id]); }

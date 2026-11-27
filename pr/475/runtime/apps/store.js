@@ -353,7 +353,10 @@ function saveApp(app){
   if(!S.db) return Promise.resolve(true);
   pending.apps[app.id]=true;
   var meta={}; for(var k in app) if(k!=="html") meta[k]=app[k];
-  return put(S.refs.code.doc(app.id),{html:app.html, sha256:app.sha256}).then(function(okCode){
+  /* an app read back from storage carries no html until it runs: a metadata refresh (icon, names) must leave the
+     stored code alone, not write {sha256} over it (issue #322) */
+  var code=app.html ? put(S.refs.code.doc(app.id),{html:app.html, sha256:app.sha256}) : Promise.resolve(true);
+  return code.then(function(okCode){
     return put(S.refs.apps.doc(app.id),meta).then(function(ok){ if(ok && okCode) delete pending.apps[app.id]; return ok && okCode; });
   });
 }
@@ -559,13 +562,13 @@ function saveKvSoon(appId){
   kvLoaded[appId]=true; kvSaved[appId]=true;
   clearTimeout(kvTimers[appId]);
   var sid=localScriptId(appId);
-  if(sid && LP.scripts){ kvTimers[appId]=setTimeout(function(){ LP.scripts.saveData(sid, S.kv[appId]); },500); return; }
+  if(sid && LP.scripts){ kvTimers[appId]=setTimeout(function(){ delete kvTimers[appId]; LP.scripts.saveData(sid, S.kv[appId]); },500); return; }
   kvMeta[appId]=AS.record(appId, S.kv[appId], kvMeta[appId], installedOf(appId), Date.now());
-  kvTimers[appId]=setTimeout(function(){ put(S.refs.kv.doc(appId), kvMeta[appId]); },500);
+  kvTimers[appId]=setTimeout(function(){ delete kvTimers[appId]; put(S.refs.kv.doc(appId), kvMeta[appId]); },500);
 }
 /* leaving a run must not lose the last 500 ms of saves */
 function flushKv(appId){
-  clearTimeout(kvTimers[appId]);
+  clearTimeout(kvTimers[appId]); delete kvTimers[appId];
   if(!S.db || !Object.prototype.hasOwnProperty.call(S.kv,appId)) return Promise.resolve(true);
   var sid=localScriptId(appId);
   if(sid && LP.scripts) return LP.scripts.saveData(sid, S.kv[appId]);
@@ -624,7 +627,7 @@ function appSaveRows(){
 }
 function clearAppSave(id){
   if(S.running && S.running.id===id) return Promise.reject({code:"running"});
-  clearTimeout(kvTimers[id]);
+  clearTimeout(kvTimers[id]); delete kvTimers[id];
   delete S.kv[id]; delete kvMeta[id]; delete kvWarned[id]; delete kvLoaded[id]; delete kvSaved[id];
   if(!S.db) return Promise.resolve(true);
   return S.refs.kv.doc(id).delete().then(function(){ return true; },function(){ return false; });
@@ -1280,6 +1283,9 @@ LP.builtin({id:"run", view:"run", keepPad:true,
     if(S.running) flushKv(S.running.id);
     closeRunMenu(); closeAsk(false); LP.snap.cancel(); LP.speech.stop(); closeLink(S.running); sensors.stopAll(); LP.chip.stop(); LP.keepAwake(false); freshRunFrame(); S.running=null;
   },
+  /* the page going to the background may be its last moment: iOS freezes the 500 ms timer and may then end the page,
+     so a save still waiting is written now (issue #440). Nothing waiting, nothing written. */
+  pause:function(){ if(S.running && kvTimers[S.running.id]) flushKv(S.running.id); },
   lang:function(){
     /* apps read PAD.lang once at start: a running app is started again in the new language */
     if(S.running && !$("v-run").hidden) runApp(S.running);
