@@ -188,9 +188,14 @@ test("degree map: every place in the box's frets is named by its degree, the cho
   const m = D.map(v, c);
   assert.equal(m.w, D.BOX_W);
   assert.ok(m.px.every((t) => t >= 0 && t <= 3));
-  assert.deepEqual({ ...D.mapAt(v, 34, 58) }, { s: 1, f: 3 }, "the A string at the third fret");
-  assert.deepEqual({ ...D.mapAt(v, 90, 6) }, { s: 5, f: 0 }, "the open high E, above the nut");
-  assert.equal(D.mapAt(v, 2, 50), null, "beside the strings is nothing");
+  assert.deepEqual({ ...D.boxAt(v, 34, 58) }, { s: 1, f: 3 }, "the A string at the third fret");
+  assert.deepEqual({ ...D.boxAt(v, 90, 6) }, { s: 5, f: 0 }, "the open high E, above the nut");
+  assert.equal(D.boxAt(v, 2, 50), null, "beside the strings is nothing");
+  /* the neck: low E at the bottom (y 56), frets 9 px wide from x 12, the open strings left of the nut */
+  assert.deepEqual({ ...D.neckAt(12 + 4 * 9 + 4, 56) }, { s: 0, f: 5 });
+  assert.deepEqual({ ...D.neckAt(12 + 14 * 9 + 4, 6) }, { s: 5, f: 15 });
+  assert.deepEqual({ ...D.neckAt(5, 36) }, { s: 2, f: 0 });
+  assert.equal(D.neckAt(140 + 9, 30), null, "past the fifteenth fret");
   assert.equal(m.px[58 * m.w + 34 - 6], 0, "a played note's tile is ink");
   assert.equal(m.px[24 * m.w + 34 - 6], 3, "a note not played has a paper patch");
 });
