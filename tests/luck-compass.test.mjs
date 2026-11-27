@@ -13,10 +13,8 @@ import { boot, mulberry32 } from "./app-vm.mjs";
 const ctx = vm.createContext({ console });
 vm.runInContext(read("registry/apps/luck-compass/src/luck.js"), ctx, { filename: "luck.js" });
 vm.runInContext(read("registry/apps/luck-compass/src/almanac.js"), ctx, { filename: "almanac.js" });
-vm.runInContext(read("registry/apps/luck-compass/src/bazi.js"), ctx, { filename: "bazi.js" });
 const L = ctx.LUCK;
 const A = ctx.ALMANAC;
-const B = ctx.BAZI;
 
 test("almanac lunar dates and solar terms match the runtime tables", () => {
   const runtime = vm.createContext({ console });
@@ -227,15 +225,16 @@ test("with a working compass the key line does not claim the turning keys", asyn
 
 function bootStored(lang, loadValue, rejectLoad) {
   const listeners = {};
-  const saves = new Map(), saveCalls = [], appends = [];
+  const saves = new Map(), saveCalls = [], removeCalls = [], loadCalls = [], appends = [];
   const pad = {
     lang,
     on(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
     off() {},
     isDown() { return false; },
     sfx() {},
-    load(key) { return rejectLoad ? Promise.reject(new Error("broken")) : Promise.resolve(loadValue || saves.get(key) || null); },
+    load(key) { loadCalls.push(key); return rejectLoad ? Promise.reject(new Error("broken")) : Promise.resolve(loadValue instanceof Map ? loadValue.get(key) || null : loadValue || saves.get(key) || null); },
     save(key, value) { saves.set(key, { ...value }); saveCalls.push({ key, value: { ...value } }); },
+    remove(key) { removeCalls.push(key); },
     notes: { append(title, text) { appends.push({ title, text }); return Promise.resolve("saved"); } }
   };
   const app = boot(APP, { pad, seed: 1 });
@@ -245,7 +244,7 @@ function bootStored(lang, loadValue, rejectLoad) {
     (listeners.release || []).forEach((fn) => fn(button));
     app.frame();
   }
-  return { app, saves, saveCalls, appends, press };
+  return { app, saves, saveCalls, removeCalls, loadCalls, appends, press };
 }
 
 test("the moved slips match their frozen catalogue and daily slot formula", () => {
@@ -506,17 +505,19 @@ test("almanac counter summary keeps 忌/Avoid visible with one term of each kind
   }
 });
 
-test("the counter's five 32px rows sit under the banner and above the key line", () => {
+test("the counter's four 32px rows sit under the banner and above the key line", () => {
   const { app } = bootApp("zh", false), sections = app.ctx.get("SECTIONS");
   const g = app.ctx.get("game").g, real = g.text, placed = [];
-  assert.equal(sections.length, 5);
+  assert.equal(sections.length, 4);
+  assert.deepEqual([...sections.map((row) => row.name)], ["老黄历", "每日一签", "罗盘", "八卦"]);
+  assert.ok(!sections.some((row) => row.name.includes("八字")));
   g.text = function (text, x, y, options) { placed.push({ text: String(text), y }); return real.call(g, text, x, y, options); };
   try {
     app.ctx.get("drawCounter")(g);
-    const last = placed.find((item) => item.text === sections[4].name);
+    const last = placed.find((item) => item.text === sections[3].name);
     assert.ok(last);
-    assert.equal(last.y, 50 + 4 * 32 + 9);
-    assert.ok(last.y + 12 < 214, "fifth row fits above the key line");
+    assert.equal(last.y, 50 + 3 * 32 + 9);
+    assert.ok(last.y + 12 < 214, "fourth row fits above the key line");
   } finally {
     g.text = real;
   }
@@ -648,6 +649,9 @@ test("a hexagram cast saves each line, resumes today, and never overwrites a rej
   }
   const save = env.saves.get("gua"), day = env.app.ctx.get("todayKey")();
   assert.deepEqual(save, { v: 1, day, lines: save.lines });
+  const castLines = drawnLines(env.app), primary = env.app.ctx.get("YI").primary(save.lines);
+  assert.ok(castLines.includes(primary.judgment));
+  assert.ok(castLines.some((line) => line.includes(env.app.ctx.get("GUAREAD")[primary.number - 1].slice(0, 6))));
   assert.equal(env.app.ctx.get("sectionSummary")("hexagram").includes(env.app.ctx.get("YI").primary(save.lines).name), true);
   const resumed = bootStored("zh", save);
   await settle();
@@ -696,248 +700,67 @@ test("八卦 START appends one note, persists written, and accepts old gua saves
   assert.equal(resumed.app.ctx.get("guaState").written, false);
 });
 
-test("every visible hexagram and trigram-chart string fits the canvas in both languages", async () => {
-  for (const lang of ["zh", "en"]) {
-    const env = bootStored(lang);
-    await settle();
-    env.app.ctx.get("openSection")("hexagram");
-    env.app.ctx.get("guaState").lines = [9, 7, 8, 6, 7, 8];
-    const g = env.app.ctx.get("game").g, castLines = drawnLines(env.app);
-    for (const line of castLines) assert.ok(g.measure(line) <= SCREEN_W, `${lang} cast: ${line}`);
-    env.press("select");
-    assert.equal(env.app.ctx.get("guaExplain"), true, "SELECT opens the reading notes after a full cast");
-    env.press("select");
-    env.press("right");
-    env.press("a");
-    const chartLines = drawnLines(env.app);
-    for (const line of chartLines) assert.ok(g.measure(line) <= SCREEN_W, `${lang} chart: ${line}`);
-    assert.ok(chartLines.includes(lang === "en" ? "Image Earth" : "卦象 地"));
-    assert.ok(chartLines.includes(lang === "en" ? "Family mother" : "家人 母"));
-    assert.ok(chartLines.includes(lang === "en" ? "Direction SW" : "方位 西南"));
-  }
+test("a stored 八字 save is never read, written or removed", async () => {
+  const env = bootStored("zh", new Map([["bazi", { v: 1, y: 1985, m: 6, d: 1, hour: 11 }]]));
+  await settle();
+  assert.deepEqual(env.loadCalls.slice().sort(), ["gua", "slip"]);
+  assert.ok(!env.saveCalls.some((call) => call.key === "bazi"));
+  assert.ok(!env.removeCalls.includes("bazi"));
+  assert.deepEqual(env.saves.get("bazi"), undefined);
 });
 
-test("hexagram SELECT cycles through explanation, trigram chart and back", async () => {
-  const env = bootStored("zh");
-  await settle();
-  env.app.ctx.get("openSection")("hexagram");
-  env.app.ctx.get("guaState").lines = [9, 7, 8, 6, 7, 8];
-  env.press("select");
-  assert.equal(env.app.ctx.get("guaExplain"), true);
-  const explain = drawnLines(env.app);
-  assert.ok(explain.some((line) => line.includes("三枚铜钱")));
-  assert.ok(explain.some((line) => line.startsWith("彖曰：")));
-  env.press("b");
-  assert.equal(env.app.ctx.get("guaExplain"), false);
-  env.press("select");
-  env.press("select");
-  assert.equal(env.app.ctx.get("guaChart"), true);
-  env.press("select");
-  assert.equal(env.app.ctx.get("guaChart"), false);
-});
-
-test("BAZI pillars, 子初换日, 纳音 and visible-element counts match reference charts", () => {
-  function names(chart) {
-    return ["year", "month", "day", "hour"].map((key) =>
-      chart[key] === null ? null : A.name(chart[key]));
-  }
-  const beforeSpring = B.chart(1990, 1, 15, 10);
-  assert.deepEqual(names(beforeSpring), ["己巳", "丁丑", "庚辰", "辛巳"]);
-  assert.deepEqual({ ...beforeSpring.nayin },
-    { year: "大林木", month: "涧下水", day: "白蜡金", hour: "白蜡金" });
-  assert.equal(beforeSpring.dayMaster, "庚金");
-  const late = B.chart(1992, 8, 8, 23);
-  assert.deepEqual(names(late), ["壬申", "戊申", "丁巳", "庚子"]);
-  assert.deepEqual({ ...late.nayin },
-    { year: "剑锋金", month: "大驿土", day: "沙中土", hour: "壁上土" });
-  assert.deepEqual(names(B.chart(1992, 8, 8, 22)), ["壬申", "戊申", "丙辰", "己亥"]);
-  const noon = B.chart(1985, 6, 1, 12);
-  assert.deepEqual(names(noon), ["乙丑", "辛巳", "辛未", "甲午"]);
-  assert.deepEqual({ ...noon.nayin },
-    { year: "海中金", month: "白蜡金", day: "路旁土", hour: "沙中金" });
-  assert.equal(noon.dayMaster, "辛金");
-  assert.deepEqual({ ...noon.counts }, { 木: 2, 火: 2, 土: 2, 金: 2, 水: 0 });
-  const unknown = B.chart(1985, 6, 1, null);
-  assert.deepEqual(names(unknown), ["乙丑", "辛巳", "辛未", null]);
-  assert.deepEqual({ ...unknown.counts }, { 木: 1, 火: 1, 土: 2, 金: 2, 水: 0 });
-  assert.equal(B.nayin(0), "海中金");
-  assert.equal(B.nayin(59), "大海水");
-  assert.equal(B.valid(1900, 1, 1), true);
-  assert.equal(B.valid(2100, 12, 31), true);
-  assert.equal(B.valid(1900, 2, 29), false);
-  assert.equal(B.valid(2101, 1, 1), false);
-});
-
-test("八字 picker saves a birth chart and shows its counter summary", async () => {
-  const env = bootStored("zh");
-  await settle();
-  env.app.ctx.get("openSection")("bazi");
-  assert.equal(env.app.ctx.get("baziState").picker, true);
-  assert.ok(drawnLines(env.app).includes("八字 · 填写"));
-  /* Up/Down pick the field, Left/Right change the value */
-  for (let i = 0; i < 5; i++) env.press("left");
-  env.press("down");
-  for (let i = 0; i < 5; i++) env.press("right");
-  env.press("down");
-  env.press("down");
-  for (let i = 0; i < 7; i++) env.press("right");
-  env.press("a");
-  assert.deepEqual(env.saves.get("bazi"), { v: 1, y: 1985, m: 6, d: 1, hour: 11 });
-  assert.equal(env.app.ctx.get("baziState").chart.dayMaster, "辛金");
-  env.press("b");
-  const counter = drawnLines(env.app);
-  assert.ok(counter.includes("日主 辛金"));
-});
-
-test("八字 picker: holding Right speeds up, and the year then moves ten at a time", async () => {
-  const env = bootStored("zh");
-  await settle();
-  env.app.ctx.get("openSection")("bazi");
-  const state = env.app.ctx.get("baziState");
-  assert.equal(state.field, 0);
-  assert.equal(state.y, 1990);
-  env.app.ctx.get("game").btn = (name) => name === "right";   /* a held key, read every frame */
-  for (let i = 0; i < 30; i++) env.app.frame();                 /* half a second: a few single steps */
-  const slow = state.y;
-  assert.ok(slow > 1990 && slow < 1996, `half a second gave ${slow}`);
-  for (let i = 0; i < 90; i++) env.app.frame();                 /* two seconds in all: tens */
-  assert.ok(state.y >= 2030, `two seconds gave ${state.y}`);
-  assert.ok(state.y <= 2100);
-});
-
-test("八字 rejected reads are not saved; invalid schemas wait for A before overwrite", async () => {
-  const rejected = bootStored("zh", null, true);
-  await settle();
-  rejected.app.ctx.get("openSection")("bazi");
-  assert.ok(drawnLines(rejected.app).some((line) => line.includes("存档读不出，这次不会保存")));
-  rejected.press("a");
-  assert.equal(rejected.saves.has("bazi"), false);
-
-  const invalid = bootStored("zh", { v: 2, y: 1985, m: 6, d: 1, hour: 11 });
-  await settle();
-  invalid.app.ctx.get("openSection")("bazi");
-  assert.equal(invalid.app.ctx.get("baziState").picker, true);
-  assert.equal(invalid.saves.has("bazi"), false);
-  invalid.press("a");
-  assert.deepEqual(invalid.saves.get("bazi"), { v: 1, y: 1990, m: 1, d: 1, hour: null });
-});
-
-test("八字 picker and chart strings fit 216px in both languages", async () => {
-  for (const lang of ["zh", "en"]) {
-    const env = bootStored(lang);
-    await settle();
-    env.app.ctx.get("openSection")("bazi");
-    let g = env.app.ctx.get("game").g;
-    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} picker: ${line}`);
-    const state = env.app.ctx.get("baziState");
-    state.y = 1985; state.m = 6; state.d = 1; state.hour = 11;
-    state.saved = { v: 1, y: 1985, m: 6, d: 1, hour: 11 };
-    state.chart = B.chart(1985, 6, 1, 11);
-    state.picker = true;
-    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} sample picker: ${line}`);
-    state.picker = false;
-    const chartLines = drawnLines(env.app);
-    for (const line of chartLines) assert.ok(g.measure(line) <= SCREEN_W, `${lang} chart: ${line}`);
-    assert.ok(chartLines.includes(lang === "en" ? "Na Yin" : "纳音"));
-    if (lang === "en") assert.equal(env.app.ctx.get("sectionSummary")("bazi"), "Day master 辛 Metal");
-  }
-});
-
-test("八字 START writes the chart and A opens the picker", async () => {
-  const env = bootStored("zh");
-  await settle();
-  const state = env.app.ctx.get("baziState");
-  state.loaded = true;
-  state.saved = { v: 1, y: 1985, m: 6, d: 1, hour: 11 };
-  state.chart = env.app.ctx.get("BAZI").chart(1985, 6, 1, 11);
-  env.app.ctx.get("openSection")("bazi");
-  env.press("select");
-  assert.equal(state.picker, false);
-  assert.equal(env.app.ctx.get("baziExplain"), true);
-  env.press("b");
-  assert.equal(env.app.ctx.get("baziExplain"), false);
-  env.press("start");
-  await settle();
-  assert.equal(env.appends[0].title, "八字");
-  assert.equal(env.appends[0].text, "1985-06-01 午时  乙丑 辛巳 辛未 甲午  日主 辛金");
-  env.press("start");
-  await settle();
-  assert.equal(env.appends.length, 2, "there is no once-a-day write limit");
-  env.press("a");
-  assert.equal(state.picker, true);
-});
-
-test("all explanation-page strings wrap to 216px in Chinese and English", async () => {
+test("explanation data, gua results and details fit in both languages", async () => {
   for (const lang of ["zh", "en"]) {
     const env = bootStored(lang);
     await settle();
     const g = env.app.ctx.get("game").g, explain = env.app.ctx.get("EXPLAIN");
     const fits = (text, label) => {
-      for (const line of g.wrap(text, 196)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} ${label}: ${line}`);
+      for (const line of g.wrap(text, 192)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} ${label}: ${line}`);
     };
     for (const entry of explain.ALMANAC) {
       fits(entry.term[lang], "almanac heading");
       fits(entry.text[lang], "almanac text");
-    }
-    for (const entry of explain.BAZI) {
-      fits(entry.term[lang], "bazi heading");
-      fits(entry.text[lang], "bazi text");
     }
     fits(explain.HOW[lang], "how");
     for (const rule of explain.RULES) fits(rule[lang], "rule");
     fits(explain.RULE_SOURCE[lang], "source");
     const state = env.app.ctx.get("guaState");
     state.lines = [9, 7, 8, 6, 7, 8];
-    for (const item of env.app.ctx.get("guaReading")(state.lines)) {
-      fits(typeof item.text === "string" ? item.text : item.text[lang], item.kind);
-    }
+    const primary = env.app.ctx.get("YI").primary(state.lines);
+    assert.equal(env.app.ctx.get("GUAREAD").length, 64);
+    for (const reading of env.app.ctx.get("GUAREAD")) assert.ok(reading.trim());
     env.app.ctx.get("openSection")("hexagram");
-    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} result: ${line}`);
+    const result = drawnLines(env.app);
+    assert.ok(result.includes(primary.judgment), `${lang}: primary judgment shown`);
+    assert.ok(result.some((line) => line.includes(env.app.ctx.get("GUAREAD")[primary.number - 1].slice(0, 6)), `${lang}: plain reading shown`));
+    const yao = env.app.ctx.get("ZHOUYI")[primary.number - 1].yao;
+    assert.ok(!result.some((line) => yao.some((entry) => line.includes(entry[1]))), `${lang}: no line text on result`);
+    const changed = env.app.ctx.get("YI").changed(state.lines);
+    if (changed) assert.ok(result.some((line) => line.includes("变卦") || line.includes("Changed:")));
+    for (const line of result) assert.ok(g.measure(line) <= SCREEN_W, `${lang} result: ${line}`);
+    const expectedKey = lang === "zh" ? "START记事本 · SELECT详解" : "START notes · SELECT more";
+    assert.ok(result.join(" ").includes(expectedKey));
     env.press("select");
-    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} reading page: ${line}`);
+    const details = drawnLines(env.app);
+    assert.ok(details.some((line) => line.includes(lang === "zh" ? "读法" : "Reading rule")));
+    assert.ok(details.some((line) => line.includes(env.app.ctx.get("ZHOUYI")[primary.number - 1].tuan.slice(0, 6))));
+    for (const line of details) assert.ok(g.measure(line) <= SCREEN_W, `${lang} details: ${line}`);
     env.press("b");
+    assert.equal(env.app.ctx.get("guaExplain"), false);
+    assert.equal(env.app.ctx.get("section"), "hexagram");
     env.app.ctx.get("openSection")("almanac");
     env.press("select");
     for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} almanac glossary: ${line}`);
-    env.app.ctx.get("openSection")("bazi");
-    const bazi = env.app.ctx.get("baziState");
-    bazi.picker = false;
-    bazi.saved = { v: 1, y: 1985, m: 6, d: 1, hour: 11 };
-    bazi.chart = env.app.ctx.get("BAZI").chart(1985, 6, 1, 11);
-    env.press("select");
-    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} bazi notes: ${line}`);
   }
 });
 
-test("八字 chart text never overlaps vertically in either language or hour mode", async () => {
-  for (const lang of ["zh", "en"]) for (const hour of [11, null]) {
-    const env = bootStored(lang);
-    await settle();
-    const state = env.app.ctx.get("baziState"), bazi = env.app.ctx.get("BAZI");
-    state.saved = { v: 1, y: 1992, m: 2, d: 1, hour };
-    state.chart = bazi.chart(1992, 2, 1, hour);
-    state.loaded = true;
-    const g = env.app.ctx.get("game").g, real = g.text, calls = [];
-    g.text = function (text, x, y, options) {
-      const opts = options || {}, width = g.measure(String(text));
-      let left = x;
-      if (opts.align === "center") left -= width / 2;
-      else if (opts.align === "right") left -= width;
-      calls.push({ text: String(text), x: left, right: left + width, y });
-      return real.call(g, text, x, y, options);
-    };
-    try {
-      env.app.ctx.get("drawBaziChart")(g);
-    } finally {
-      g.text = real;
-    }
-    for (const line of calls) assert.ok(line.y + 12 <= 240, `${lang}/${hour}: ${line.text} at ${line.y}`);
-    for (let i = 0; i < calls.length; i++) for (let j = i + 1; j < calls.length; j++) {
-      const a = calls[i], b = calls[j];
-      if (a.x < b.right && b.x < a.right) {
-        assert.ok(Math.abs(a.y - b.y) >= 12,
-          `${lang}/${hour}: "${a.text}" at ${a.y} overlaps "${b.text}" at ${b.y}`);
-      }
-    }
-  }
+test("SELECT does nothing while a hexagram is casting", async () => {
+  const env = bootStored("zh");
+  await settle();
+  env.app.ctx.get("openSection")("hexagram");
+  env.app.ctx.get("guaState").lines = [9, 7, 8];
+  env.press("select");
+  assert.equal(env.app.ctx.get("guaExplain"), false);
+  assert.equal(env.app.ctx.get("guaState").lines.length, 3);
+  assert.equal(env.app.ctx.get("section"), "hexagram");
 });

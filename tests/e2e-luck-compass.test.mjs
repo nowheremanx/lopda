@@ -73,15 +73,12 @@ test("luck-compass: counter sections, daily slip and notes work from keys", { sk
   }));
   assert.deepEqual(await state(), { section: "counter", cursor: 0 }, "the app opens at the counter");
 
-  const sections = ["almanac", "fortune", "compass", "hexagram", "bazi"];
+  const sections = ["almanac", "fortune", "compass", "hexagram"];
   for (let i = 0; i < sections.length; i++) {
     const cursor = (await state()).cursor;
     for (let n = (i - cursor + sections.length) % sections.length; n > 0; n--) await key("ArrowDown");
     await key("x");
     await frame.waitForFunction((expected) => typeof section !== "undefined" && section === expected, sections[i]);
-    if (sections[i] === "bazi") {
-      await frame.waitForFunction(() => typeof baziState !== "undefined" && baziState.loaded);
-    }
     assert.equal((await state()).section, sections[i], `${sections[i]} opens from the counter`);
     await key("z");
     await frame.waitForFunction(() => typeof section !== "undefined" && section === "counter");
