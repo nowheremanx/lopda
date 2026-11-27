@@ -11,7 +11,7 @@ function title(body){ return String(body||"").split("\n")[0].trim(); }
 
 /* ---------- no colour glyphs on a four-tone screen (CLAUDE.md: no emoji anywhere). A note is the one place where the player
    types freely, so what the phone would draw as a colour emoji is left out of it: typed, pasted, imported or quoted. Only
-   those: a pictograph that shows as text by default (© ™ ★ ↔ ☆) stays unless a variation selector asks for the colour form,
+   those: a pictograph that shows as text by default (the copyright, trademark, star and arrow signs) stays unless a variation selector asks for the colour form,
    and so do digits and # in front of a keycap. A ZWJ sequence goes whole; leftover flags, skin tones, tags and selectors go */
 var EMO_ONE="(?:\\p{Extended_Pictographic}\\uFE0F|\\p{Emoji_Presentation}\\uFE0F?)[\\u{1F3FB}-\\u{1F3FF}]?";
 var EMOJI_SEQ=new RegExp(EMO_ONE+"(?:\\u200D(?:"+EMO_ONE+"|\\p{Extended_Pictographic}))*","gu");
