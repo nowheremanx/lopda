@@ -27,7 +27,7 @@
         ".....000000.....",
         "................"
       ],
-      "version": "1.4.1",
+      "version": "1.4.2",
       "released": "2026-10-28",
       "updated": "2026-11-27",
       "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
@@ -40,8 +40,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "0ea1939aef52964f1c767b95408c7145d05566c5e268023e4f77999b0ffd508f",
-      "bytes": 148273
+      "sha256": "767664960e4ea889c3752781789a6ec6e55acc4a90f83c5357fef7cf86e0b1ab",
+      "bytes": 150117
     },
     {
       "spec": "lopda/1",
@@ -213,7 +213,7 @@
         "................",
         "................"
       ],
-      "version": "2.1.3",
+      "version": "2.1.4",
       "released": "2026-10-21",
       "updated": "2026-11-27",
       "description": "节奏故事：十首古典曲、三幕剧情、四种结局。A 吹竽、B 敲磬；国王睁眼时停手，闭上再起手。",
@@ -226,8 +226,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/fake-yu/index.html",
-      "sha256": "a391efc0d94d52e8b77c6ed4db81e6cff5412ea29ebb5a7e6976cf0c1a05e4a5",
-      "bytes": 207014
+      "sha256": "1baf74737f280c1c575e74efa0d1947d81ce193da42f6c993e96abd6497d987a",
+      "bytes": 207180
     },
     {
       "spec": "lopda/1",
@@ -384,7 +384,7 @@
         "................",
         "................"
       ],
-      "version": "1.1.1",
+      "version": "1.1.2",
       "released": "2026-10-28",
       "updated": "2026-11-27",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
@@ -401,8 +401,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/klotski/index.html",
-      "sha256": "78d62494dc2f81e4c75b41af1c9f4ea8fc5b7eb8a4b57e6683a91fdb3f084ead",
-      "bytes": 161404
+      "sha256": "04886bdb6def49dcf8807a2f16fa77db9e0b11f808558164573be50d4e72bece",
+      "bytes": 162755
     },
     {
       "spec": "lopda/1",
@@ -476,7 +476,7 @@
         "................",
         "................"
       ],
-      "version": "1.8.1",
+      "version": "1.8.2",
       "released": "2026-10-07",
       "updated": "2026-11-27",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
@@ -492,8 +492,8 @@
         "link"
       ],
       "path": "apps/gomoku/index.html",
-      "sha256": "28396741969a4809a96b644a44e5d97a4c1e28a1eaf39bf4a0b225b560dfbc93",
-      "bytes": 46123
+      "sha256": "da63334496377f672f682f6c9a3145d94139f5670e47754584923ffe7aa71867",
+      "bytes": 46397
     },
     {
       "spec": "lopda/1",
@@ -520,9 +520,9 @@
         "....11111111....",
         "......1111......"
       ],
-      "version": "1.8.0",
+      "version": "1.8.1",
       "released": "2026-10-24",
-      "updated": "2026-11-26",
+      "updated": "2026-11-27",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
       "i18n": {
         "zh": {
@@ -540,8 +540,8 @@
         "wordbook"
       ],
       "path": "apps/crossing/index.html",
-      "sha256": "dfff2e3985cd3d5722f848c29c02d55ec8c840aeab2e37dc9508a923972408d1",
-      "bytes": 112700
+      "sha256": "ab9b0e20be3f4915c55e63cc38f109573d8b2eac84965454c99df5c7f4e4e2b4",
+      "bytes": 113122
     },
     {
       "spec": "lopda/1",
@@ -663,9 +663,9 @@
         "...0000000000...",
         "................"
       ],
-      "version": "1.2.0",
+      "version": "1.2.1",
       "released": "2026-10-11",
-      "updated": "2026-11-24",
+      "updated": "2026-11-27",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -676,8 +676,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/calculator/index.html",
-      "sha256": "dba170723ce7d835e9d5cbf30abdbdfcec6d712aaf695948fe7bd9b28eca08fe",
-      "bytes": 13646
+      "sha256": "9ecd2b927d8d9145633f631c8f14a98f4bd575b583313623fd09b8a52fd53bb5",
+      "bytes": 14610
     },
     {
       "spec": "lopda/1",
