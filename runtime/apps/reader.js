@@ -845,6 +845,7 @@ function renderSheet(){
   /* only now, with the keys below it, does the list have its final height: keep the highlighted row in view */
   fitRows(sh);
   var on=sh.querySelector(".lcd-menu li.on"); if(on && on.scrollIntoView) on.scrollIntoView({block:R.sheet==="toc" ? "center" : "nearest"});
+  var fit=sh.querySelector(".lcd-menu.fit"); if(fit && fit.onscroll) fit.onscroll();   // the arrows now, not on the next scroll event
 }
 /* a list taller than its window (the menu has eleven rows; a small phone shows four and a half, issue #400) shows
    whole rows only, never a half row that looks like a drawing fault, and stops on a row when swiped; the arrows under

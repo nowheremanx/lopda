@@ -2533,6 +2533,7 @@ test("reader: on an iPhone SE in Safari the menu shows whole rows, with ▲ ▼ 
   assert.deepEqual(v.cut, [], "no half row (issue #400)");
   assert.deepEqual([v.up, v.down], ["hidden", "visible"]);
   for (let i = 0; i < 12; i++) await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(200);
   v = await look();
   assert.deepEqual(v.cut, []);
   assert.deepEqual([v.up, v.down], ["visible", "hidden"]);
