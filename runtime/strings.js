@@ -282,6 +282,7 @@
       "upd.noversion": "读不到版本号", "upd.nocopy": "没有离线副本", "upd.notinstalled": "新版本没装上，再试一次", "upd.nonew": "手机没收到新版本，过一会儿再试", "upd.slow": "新版本 {v} 还在下载，好了会提示。", "upd.ready": "新版本 {v} 下载好了，按「重启升级」。",
       "upd.failed": "检查失败：{msg}", "upd.offline": "连不上", "upd.arrived": "新版本下载好了。到「设置」按「重启升级」。",
 
+      "pad.connected": "手柄已连接", "pad.gone": "手柄已断开",
       "run.title": "程序", "run.frame": "运行中的程序", "run.remove": "卸载", "run.more": "更多", "run.error": "程序出错了：",
       "run.hide": "收起", "run.loading": "载入中…", "run.missing": "这个程序的代码找不到了，去应用商店重新安装。",
       "run.loadfail": "读档失败（{code}）", "run.toobig": "存档超过 256 KB 上限，这次没存。", "run.line": "位置：第 {line} 行，第 {col} 列",
@@ -1288,6 +1289,7 @@
       "upd.noversion": "no version found", "upd.nocopy": "no offline copy", "upd.notinstalled": "the new version did not install, try again", "upd.nonew": "the new version has not reached this phone yet, try later", "upd.slow": "{v} is still downloading. You will be told when it is in.", "upd.ready": "{v} is in. Press Restart.",
       "upd.failed": "Check failed: {msg}", "upd.offline": "offline", "upd.arrived": "New version in. Settings → Restart.",
 
+      "pad.connected": "Controller connected", "pad.gone": "Controller gone",
       "run.title": "Program", "run.frame": "Running program", "run.remove": "Remove", "run.more": "More", "run.error": "Program error:",
       "run.hide": "Hide", "run.loading": "Loading…", "run.missing": "This program's code is gone. Reinstall it from the Store.",
       "run.loadfail": "Read failed ({code})", "run.toobig": "Save data over the 256 KB limit. Not saved.", "run.line": "At line {line}, column {col}",
