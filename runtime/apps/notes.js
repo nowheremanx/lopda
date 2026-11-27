@@ -423,7 +423,7 @@ function startEditor(write){
   backLabel();
   show("note");
   renderYears(); renderOpts();
-  if(write){ writeAt(e.body.length); ta.scrollTop=e.body.length ? ta.scrollHeight : 0; }
+  if(write) writeAt(e.body.length);
   else { readMode(); $("note-read").scrollTop=0; }
 }
 /* reading: the text in a plain block, so nothing can take focus and bring up the keyboard; the textarea waits, hidden
@@ -433,9 +433,12 @@ function readMode(){
   N.reading=true;
   rd.textContent=S.editing ? S.editing.body : "";
   rd.setAttribute("data-ph",tr("notes.placeholder"));
-  if(!ta.hidden) rd.scrollTop=ta.scrollTop;
+  /* the page stays where the writing left it: read before the textarea hides, set once the block shows (a hidden
+   element ignores scrollTop, which put the page back where it was before the tap, issue #356) */
+  var top=ta.hidden ? -1 : ta.scrollTop;
   ta.readOnly=true; ta.hidden=true; rd.hidden=false;
-  renderWhen();
+  if(top>=0) rd.scrollTop=top;
+  renderYears(); renderWhen();
 }
 /* writing, with the caret at a place in the text. Runs inside the tap's or the key's handler: iOS brings up the
    keyboard only for a focus() made there */
@@ -446,6 +449,9 @@ function writeAt(at){
   ta.scrollTop=top;
   ta.focus({preventScroll:true});
   try{ ta.setSelectionRange(at,at); }catch(x){}
+  /* a tap writes where it fell, which is on screen. A (or a new note) writes at the end, which may be pages below:
+   the text goes there, so the caret is in sight before the first letter (issue #356) */
+  if(at>=ta.value.length) ta.scrollTop=ta.scrollHeight;
   renderWhen();
 }
 function renderWhen(){
@@ -478,11 +484,20 @@ function yearsOf(day){
   return live().filter(function(n){ return n.day && n.day.slice(4)===md && n.day.slice(0,4)<y; })
     .sort(function(a,b){ return a.day<b.day?1:a.day>b.day?-1:0; }).slice(0,YEARS);
 }
+/* while writing they fold to one row: the rows are for reading, and with the keyboard up on a small phone they took
+   most of the screen above the text (issue #357). Leaving the text (the keyboard's Done), or a tap on that row, puts
+   the keyboard away and unfolds them */
 function renderYears(){
   var ul=$("note-years"), e=S.editing; ul.textContent="";
   N.years=e && e.day ? yearsOf(e.day) : [];
   ul.hidden=!N.years.length;
   if(!N.years.length) return;
+  if(!N.reading){
+    var fold=el("li","fold"); fold.appendChild(el("span","",tr("notes.onthisdayn",{n:N.years.length})));
+    fold.onclick=function(){ var ta=$("note-body"); if(document.activeElement===ta) ta.blur(); else { flushNote(); readMode(); } };
+    ul.appendChild(fold);
+    return;
+  }
   ul.appendChild(el("li","label",tr("notes.onthisday")));
   N.years.forEach(function(n,i){
     var li=el("li",i===N.ecur?"on":"");
