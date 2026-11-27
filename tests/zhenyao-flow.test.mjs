@@ -252,3 +252,58 @@ test("START skips the ending to the credits, the same end as watching it", async
   assert.equal(st.scene, "credits");
   assert.ok(st.cleared || st.credits || st.ended, "the game counts as cleared");
 });
+
+/* ---------- #458: saves that cannot be read are kept, never written over ---------- */
+/* a fake PAD whose load answers with `answer(key)`; every write is recorded */
+function padWith(answer) {
+  const writes = [], listeners = {};
+  const pad = {
+    lang: "zh",
+    save(k, v) { writes.push([k, v]); },
+    load(k) { return answer(k); },
+    remove() {}, sfx() {}, ambience() {},
+    music: { play() {}, stop() {} },
+    on(t, fn) { (listeners[t] ||= []).push(fn); }, off() {}, isDown() { return false; }
+  };
+  return { pad, writes, listeners };
+}
+async function titleWith(answer) {
+  const { pad, writes, listeners } = padWith(answer);
+  const app = boot(APP, { pad });
+  const get = app.ctx.get;
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
+  await run(5);
+  /* catch the items the title's menu offers */
+  const game = get("game"), choose = game.choose;
+  let items = null;
+  game.choose = (list, o) => { items = list.slice(); return choose.call(game, list, o); };
+  /* A on the chin pad (PAD.on "press" / "release") */
+  (listeners.press || []).forEach((f) => f("a")); await run(3);
+  (listeners.release || []).forEach((f) => f("a")); await run(3);
+  return { get, run, writes, items };
+}
+
+test("a save the runtime cannot read leaves the title without 进入小镇 and nothing is written", async () => {
+  const z = await titleWith(() => Promise.reject({ code: "corrupt" }));
+  assert.equal(z.get("saveLocked"), "corrupt");
+  assert.deepEqual(z.items, ["演武"]);
+  /* even a save stone or a cutscene's end writes nothing */
+  z.get("writeSeen()");
+  assert.equal(z.writes.length, 0);
+});
+
+test("a progress save from a newer version is kept: no 继续, no new game, no writes", async () => {
+  const z = await titleWith((k) => Promise.resolve(k === "progress" ? { v: 2, map: "top" } : null));
+  assert.equal(z.get("saveLocked"), "newer");
+  assert.equal(z.get("lastSave"), null);
+  assert.deepEqual(z.items, ["演武"]);
+  z.get("writeSeen()");
+  assert.equal(z.writes.length, 0);
+});
+
+test("a readable save still offers 继续 and 进入小镇", async () => {
+  const z = await titleWith((k) => Promise.resolve(k === "progress"
+    ? { v: 1, map: "floor1", x: 6, y: 11, face: "up", hero: { lv: 1 }, flags: { master: 1, entered: {}, opened: {}, beat: {} } } : null));
+  assert.equal(z.get("saveLocked"), null);
+  assert.deepEqual(z.items, ["继续", "进入小镇", "演武"]);
+});

@@ -21,7 +21,7 @@ var FINDER=window.LopdaFinder, ditherLuma=FINDER.ditherLuma;
 
 /* ---------- pixel camera: a roll of film. Frames are fixed once taken; a finished roll goes to the darkroom. ---------- */
 var CW=128, CH=112;
-var F={roll:null, no:0, count:0, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, place:false, frames:[], ready:false, stale:null, jobs:[]};
+var F={roll:null, no:0, count:0, size:12, res:1, stock:"portrait", seed:0, loaded:0, exposure:0, contrast:0, date:true, place:false, frames:[], ready:false, nostore:false, stale:null, jobs:[]};
 var ccv=$("cam-cv"), cctx=ccv.getContext("2d"), cimg=cctx.createImageData(CW,CH);
 /* film format: 1 = 128x112 standard, 2 = 256x224 fine grain. Fixed for the life of a roll. */
 /* film stocks (docs/design/darkroom.md section 4): a describing word and a speed, never a real film's name. The
@@ -85,13 +85,13 @@ function camIdle(){
 function renderCam(){
   var has=!!F.roll, full=rollFull();
   $("cam-count").textContent= has ? pad2(Math.min(F.frames.length+(full?0:1),F.size))+"/"+pad2(F.size) : "--/--";
-  $("cam-film").textContent= has ? tr("cam.lcd",{film:stockLabel(F.stock), stock:tr(F.res===2?"cam.stock.s2":"cam.stock.s1")}) : tr(F.ready?"cam.nofilm":"cam.reading");
+  $("cam-film").textContent= has ? tr("cam.lcd",{film:stockLabel(F.stock), stock:tr(F.res===2?"cam.stock.s2":"cam.stock.s1")}) : tr(F.nostore?"status.unsaved":F.ready?"cam.nofilm":"cam.reading");
   var sg=function(v){ return (v>0?"+":v<0?"−":"±")+Math.abs(v); };
   $("cam-exp").textContent=tr("cam.exp",{b:sg(F.exposure), c:sg(F.contrast)});
   $("cam-date").className=F.date?"":"off";
   var shooting=has && !full;
   ["cam-shutter","ck-dark","ck-bright"].forEach(function(id){ $(id).disabled=!shooting; });
-  if(F.ready && !has && CAM.mode!=="load") camSheet("load");
+  if(F.ready && !has && !F.nostore && CAM.mode!=="load") camSheet("load");
   else if(has && full && CAM.mode!=="menu") camMenu("done");
   else if(has && !full && CAM.mode==="load") camSheet(null);
   camModeLabel(); camLayout();
@@ -142,6 +142,7 @@ function random32(){
   return a[0]>>>0;
 }
 function loadRoll(){
+  if(!S.db) return;   /* a roll that cannot be stored is never loaded (issue #291) */
   setRes(nextStock); F.stock=nextStockId; F.contrast=0; F.exposure=0; F.seed=random32();
   F.roll="r"+Date.now().toString(36)+Math.floor(Math.random()*1679616).toString(36); F.size=nextSize; F.loaded=Date.now(); F.frames=[]; F.jobs=[];
   /* the roll's number on this handheld, 1, 2, 3...: it names the negative's file, so a day's rolls never come out as
@@ -600,7 +601,10 @@ function rewindEarly(){
 }
 
 function loadFilm(){
-  if(!S.db){ F.ready=true; renderCam(); return Promise.resolve(); }
+  /* Storage not open yet: the camera stays at 读取中… with no film to load, so nothing can be shot into a roll the
+     ready hook would then read as "no film" and drop. Storage that failed for good (nostore): no film at all, the
+     LCD says so, and nothing is shot that could never reach the darkroom (issue #291). */
+  if(!S.db){ if(F.nostore){ F.ready=true; renderCam(); } return Promise.resolve(); }
   return S.refs.camera.get().then(function(sn){ var c=sn.exists?own(sn.data()):null; F.count=Math.max(F.count,(c&&c.rolls)|0); F.place=!!(c&&c.place===true); },function(){})
   .then(function(){ return S.refs.film.get(); }).then(function(sn){
     var d=sn.exists?own(sn.data()):null;
@@ -874,7 +878,7 @@ LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   lang:function(){ paintRolls(); if(!$("v-cam").hidden) renderCam(); },
   padLayout:function(){ if(!$("v-cam").hidden) camLayout(); },
   ready:function(){ loadFilm().then(function(){ if(!$("v-home").hidden) LP.renderHome(); if(!$("v-cam").hidden) renderCam(); }); },
-  nostore:function(){ F.ready=true; },
+  nostore:function(){ F.nostore=true; F.ready=true; if(!$("v-cam").hidden) renderCam(); },
   /* hidden while getUserMedia is pending (the phone's prompt): the request is left to finish, so the phone is not asked
      twice; a stream that comes while hidden is let go (startLive's alive) */
   pause:function(){ if(LIVE.opening){ camLog("hidden while opening"); return; } stopLive(); },

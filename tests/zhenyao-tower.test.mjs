@@ -34,7 +34,8 @@ test("every line fits the screen: about 13 characters", () => {
 test("the title menu is 继续 (only with a save), 进入小镇 and 演武; the route fights stay off screen", () => {
   const main = read("registry/apps/zhenyao-tower/src/main.js");
   const menus = [...main.matchAll(/\[(?:"[^"]*",? ?)+\]/g)].map((m) => JSON.parse(m[0])).filter((a) => a.includes("演武"));
-  assert.deepEqual(menus, [["继续", "进入小镇", "演武"], ["进入小镇", "演武"]]);
+  /* the first is the title over a save it cannot read or a newer one (#458): no new game over it */
+  assert.deepEqual(menus, [["演武"], ["继续", "进入小镇", "演武"], ["进入小镇", "演武"]]);
   assert.doesNotMatch(main, /game\.scene\("trial"/);
 });
 
