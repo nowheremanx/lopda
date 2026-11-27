@@ -22,6 +22,10 @@ img{max-width:100%}
 html,body{height:100%;overflow:hidden;overscroll-behavior:none}
 body{background:var(--case);color:var(--ink);margin:0;display:flex;justify-content:center;padding-inline:16px;box-sizing:border-box;font-family:var(--f-lcd)}
 *{box-sizing:border-box}
+/* the sideways notice covers the whole page; only a phone browser tab ever shows it (core.js) */
+.rotate{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;background:var(--lcd);color:var(--ink);font-family:var(--f-lcd);font-size:22px;text-align:center}
+.rotate[hidden]{display:none}
+.rotate p{margin:0;max-width:20em}
 .device{width:100%;max-width:560px;height:100%;height:100dvh;display:flex;flex-direction:column;gap:10px;padding-block:calc(env(safe-area-inset-top,0px) + 10px) calc(env(safe-area-inset-bottom,0px) + 14px)}
 .brand{white-space:nowrap;gap:12px;overflow:hidden;display:flex;justify-content:space-between;align-items:baseline;color:var(--case-label);font-family:var(--f-pix);font-size:18px;letter-spacing:.12em;padding-inline:4px}
 .brand b{color:#e4ddc9;font-weight:400}
@@ -382,7 +386,7 @@ textarea::placeholder{color:var(--ink-2)}
 #v-cart.locked{overflow:hidden;overscroll-behavior:none;touch-action:none;display:flex;flex-direction:column}
 #v-cart.locked .cart-play{flex:1;min-height:0;height:auto}
 @media (pointer:coarse){#cart-msg{display:none}}
-#cart-cv{display:block;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid var(--ink);background:var(--lcd)}
+#cart-cv{display:block;box-sizing:content-box;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid var(--ink);background:var(--lcd)}
 .cart-play .hint{text-align:center;max-width:360px}
 #cart-tools .btn{padding:6px 8px;font-size:13px}
 /* the speed knob under the screen: small keys, like the tools row, so the game screen keeps its size */
