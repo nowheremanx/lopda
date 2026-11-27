@@ -69,7 +69,7 @@ Twenty-two apps today, all open source and all made for Lo-PDA:
 |---|---|
 | Games | LostDeck (a first-person maze shooter on a silent space station), Paper Tower (a ten-minute tower climb), Fake Yu (a one-key rhythm story), SnapTile (a sliding puzzle from your own photo), Marble (tilt the phone), Gomoku (also a two-handheld match over sound), Mole Bop, Gold Dig (a sixty-second hook-and-haul mine), Pagoda (a 3D prologue), Sisyphus (a meditative climb with sixteen lines from Camus), Crossing (spell words on a wheel to fill a crossword), DailyBox (one crate-pushing puzzle a day), Klotski (the sliding-block escape), Foothill (seven days running a mountain diner) |
 | Story | Rain Station: Fifty Minutes Late, a ten-minute visual novel (a rainy platform, a late train, your dad seeing you off to university) |
-| Tools and toys | Calc and Paint (both preinstalled), Tune Up (a guitar and ukulele tuner on the mic), Fortune, Kana, VecDream, LuckyWay (hold the phone flat like a compass) |
+| Tools and toys | Calc and Paint (both preinstalled), Tune Up (a tuner for guitar, bass, ukulele, violin, erhu and more), Fortune, Kana, VecDream, LuckyWay (hold the phone flat like a compass) |
 
 Preinstalled apps are ordinary store apps: remove them and they stay removed; the store has them again.
 

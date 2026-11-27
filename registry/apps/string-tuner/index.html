@@ -35,6 +35,7 @@ main{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px
 /* the string the tuner is reading is inverted; a locked one also carries a bar on top; a tuned one a bar below */
 #strings button.cur{background:#1f2a14;color:#a3ad7e}
 #strings button.lock::before{content:"";position:absolute;left:4px;right:4px;top:3px;height:3px;background:currentColor}
+#strings button.ok:not(.cur){background:#7d8a58}
 #strings button.ok::after{content:"";position:absolute;left:8px;right:8px;bottom:4px;height:3px;background:currentColor}
 footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
 footer button{flex:1}
@@ -49,6 +50,10 @@ footer button{flex:1}
 #rows .row{display:flex;width:100%;justify-content:space-between;align-items:center;margin:0 0 8px;box-shadow:none;text-align:left;gap:8px}
 #rows .row span{font-size:13px;overflow-wrap:anywhere;text-align:right}
 #rows .row.sel{background:#1f2a14;color:#a3ad7e}
+#rows .inst{display:flex;gap:8px}
+#rows .inst .row{flex:1;min-width:0}
+#rows .more{min-width:44px;margin:0 0 8px;font-size:17px;box-shadow:none}
+#rows .row.sub{width:calc(100% - 20px);margin-left:20px}
 #a4{display:flex;align-items:center;gap:8px;margin-top:4px}
 #a4 span{flex:1;font-size:15px}
 #a4 button{min-width:44px;font-size:20px;font-weight:bold}
@@ -82,8 +87,23 @@ var Tuner = (function () {
     { id: "uke-std",   group: "uke",    zh: "标准（高 G）", en: "Standard (high G)", notes: [67, 60, 64, 69] },
     { id: "uke-lowg",  group: "uke",    zh: "低 G",        en: "Low G",           notes: [55, 60, 64, 69] },
     { id: "uke-bari",  group: "uke",    zh: "上低音",      en: "Baritone",        notes: [50, 55, 59, 64] },
+    /* the bass's low strings (E1 41 Hz, B0 31 Hz) are under the mic's 50 Hz floor: they are read by their second harmonic
+       and folded down an octave, like the guitar's low E */
+    { id: "bass-std",  group: "bass",   zh: "四弦标准",    en: "4-string",        notes: [28, 33, 38, 43] },
+    { id: "bass-5",    group: "bass",   zh: "五弦",        en: "5-string",        notes: [23, 28, 33, 38, 43] },
+    { id: "bass-dropd",group: "bass",   zh: "Drop D",      en: "Drop D",          notes: [26, 33, 38, 43] },
+    { id: "violin",    group: "violin", zh: "标准",        en: "Standard",        notes: [55, 62, 69, 76] },
+    { id: "viola",     group: "viola",  zh: "标准",        en: "Standard",        notes: [48, 55, 62, 69] },
+    { id: "cello",     group: "cello",  zh: "标准",        en: "Standard",        notes: [36, 43, 50, 57] },
+    { id: "mandolin",  group: "mandolin", zh: "标准",      en: "Standard",        notes: [55, 62, 69, 76] },
+    /* the banjo's short fifth string is a high G, played first */
+    { id: "banjo-g",   group: "banjo",  zh: "Open G",      en: "Open G",          notes: [67, 50, 55, 59, 62] },
+    { id: "erhu",      group: "erhu",   zh: "内弦 D 外弦 A", en: "D and A",       notes: [62, 69] },
+    { id: "pipa",      group: "pipa",   zh: "标准",        en: "Standard",        notes: [45, 50, 52, 57] },
     { id: "chromatic", group: "chrom",  zh: "半音模式",    en: "Chromatic",       notes: [] }
   ];
+  /* the instruments in the list, in order; each one's first tuning is its default */
+  var GROUPS = ["guitar", "bass", "uke", "violin", "viola", "cello", "mandolin", "banjo", "erhu", "pipa", "chrom"];
   var SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
   var FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
   var IN_TUNE = 3, IN_TUNE_MS = 500;   /* within 3 cents for half a second lights the lamp */
@@ -154,7 +174,8 @@ var Tuner = (function () {
     var g = fold(f, targets[i]);
     return { i: i, midi: tuning.notes[i], target: targets[i], cents: cents(g, targets[i]) };
   }
-  return { TUNINGS: TUNINGS, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, ATTACK_MS: ATTACK_MS, byId: byId, hz: hz, cents: cents, name: name,
+  function inGroup(g) { return TUNINGS.filter(function (t) { return t.group === g; }); }
+  return { TUNINGS: TUNINGS, GROUPS: GROUPS, inGroup: inGroup, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, ATTACK_MS: ATTACK_MS, byId: byId, hz: hz, cents: cents, name: name,
     nearest: nearest, fold: fold, pick: pick, smoother: smoother, read: read };
 })();
 </script>
@@ -164,13 +185,15 @@ var Tuner = (function () {
   "use strict";
   var EN = PAD.lang === "en";
   var T = EN ? {
-    guitar: "Guitar", uke: "Ukulele", chrom: "Any note", list: "Tuning", back: "Back", auto: "Auto", locked: "Locked",
-    tone: "Play note", ok: "IN TUNE", pluck: "Pluck a string", sing: "Play or sing a note",
+    guitar: "Guitar", bass: "Bass", uke: "Ukulele", violin: "Violin", viola: "Viola", cello: "Cello", mandolin: "Mandolin",
+    banjo: "Banjo", erhu: "Erhu", pipa: "Pipa", chrom: "Any instrument", list: "Tuning", back: "Back", auto: "Auto", locked: "Locked",
+    tone: "Play note", ok: "IN TUNE", more: "Other tunings", pluck: "Pluck a string", sing: "Play or sing a note",
     asking: "Asking for the mic...", denied: "No mic: tap here to ask again, or tune by ear with Play note",
     none: "No mic on this device: tune by ear with Play note", a4: "Reference A4", hz: "Hz"
   } : {
-    guitar: "吉他", uke: "尤克里里", chrom: "其他乐器", list: "定弦", back: "返回", auto: "自动认弦", locked: "已锁定",
-    tone: "听音", ok: "准", pluck: "拨一根弦", sing: "弹或唱一个音",
+    guitar: "吉他", bass: "贝斯", uke: "尤克里里", violin: "小提琴", viola: "中提琴", cello: "大提琴", mandolin: "曼陀林",
+    banjo: "班卓琴", erhu: "二胡", pipa: "琵琶", chrom: "其他乐器", list: "定弦", back: "返回", auto: "自动认弦", locked: "已锁定",
+    tone: "听音", ok: "准", more: "其他定弦", pluck: "拨一根弦", sing: "弹或唱一个音",
     asking: "正在开话筒…", denied: "没开话筒：点这里再问一次，或点 听音 用耳朵调",
     none: "这台设备没有话筒：点 听音 用耳朵调", a4: "标准音 A4", hz: "Hz"
   };
@@ -273,7 +296,10 @@ var Tuner = (function () {
     var on = live && okSince && t - okSince >= Tuner.IN_TUNE_MS;
     if (on !== lampOn) {
       lampOn = on; dirty = true;
-      if (on && shown && shown.i >= 0) tuned[shown.i] = true;
+      /* a string reaching the lamp the first time chimes once and keeps its mark; the mic skips the chime itself */
+      if (on && shown && shown.i >= 0 && !tuned[shown.i]) {
+        tuned[shown.i] = true; PAD.sfx("ok"); toneUntil = t + 500;
+      }
     }
     var moved = Math.abs(needleTo - needle) > 0.05;
     if (moved) needle += (needleTo - needle) * 0.5;   /* quick, so each reading's wobble shows */
@@ -305,7 +331,11 @@ var Tuner = (function () {
   function frame() { fit(); render(); requestAnimationFrame(frame); }
 
   /* ---- the tuning ---- */
-  function tuningLabel(tu) { return (tu.group === "guitar" ? T.guitar + " · " : tu.group === "uke" ? T.uke + " · " : "") + (EN ? tu.en : tu.zh); }
+  /* "吉他 · Drop D"; an instrument with one tuning is just its name; chromatic is just "半音模式" */
+  function tuningLabel(tu) {
+    if (tu.group === "chrom") return EN ? tu.en : tu.zh;
+    return Tuner.inGroup(tu.group).length > 1 ? T[tu.group] + " · " + (EN ? tu.en : tu.zh) : T[tu.group];
+  }
   function chooseTuning(tu, quiet) {
     tuning = tu; set.tuning = tu.id; if (!quiet) store();
     cur = -1; lock = -1; tuned = []; shown = null; live = false; needleTo = 0; okSince = 0; sm.reset();
@@ -351,22 +381,41 @@ var Tuner = (function () {
 
   /* ---- the tuning list ---- */
   var listOpen = false;
+  var expanded = {};       /* which instruments show their tunings; the current one opens with the list */
+  function notesText(tu) { return tu.notes.map(function (m) { return Tuner.name(m, tu.flats).n; }).join(" "); }
   function buildList() {
     var rows = $("rows"); rows.innerHTML = "";
-    var group = null;
-    Tuner.TUNINGS.forEach(function (tu) {
-      if (tu.group !== group) {
-        group = tu.group;
-        var h = document.createElement("h3"); h.textContent = T[group]; rows.appendChild(h);
-      }
+    /* one row per instrument: the row chooses its default tuning, the arrow on the right opens its other tunings */
+    Tuner.GROUPS.forEach(function (g) {
+      var list = Tuner.inGroup(g), mine = tuning.group === g;
+      var line = document.createElement("div"); line.className = "inst";
       var b = document.createElement("button");
-      b.className = "row" + (tu === tuning ? " sel" : "");
-      var l = document.createElement("b"); l.textContent = EN ? tu.en : tu.zh;
-      var s = document.createElement("span");
-      s.textContent = tu.notes.map(function (m) { return Tuner.name(m, tu.flats).n; }).join(" ");
-      b.appendChild(l); b.appendChild(s);
-      b.addEventListener("click", function () { PAD.sfx("ok"); chooseTuning(tu); closeList(); });
-      rows.appendChild(b);
+      b.className = "row" + (mine && (list.length === 1 || !expanded[g]) ? " sel" : "");
+      var l = document.createElement("b"); l.textContent = g === "chrom" ? T.chrom : T[g];
+      var sp = document.createElement("span");
+      var pick = mine ? tuning : list[0];
+      sp.textContent = g === "chrom" ? (EN ? list[0].en : list[0].zh)
+        : (list.length > 1 && mine ? (EN ? pick.en : pick.zh) + "  " : "") + notesText(pick);
+      b.appendChild(l); b.appendChild(sp);
+      b.addEventListener("click", function () { PAD.sfx("ok"); chooseTuning(list[0]); closeList(); });
+      line.appendChild(b);
+      if (list.length > 1) {
+        var more = document.createElement("button"); more.className = "more";
+        more.textContent = expanded[g] ? "\u25be" : "\u25b8";
+        more.setAttribute("aria-label", T.more);
+        more.addEventListener("click", function () { PAD.sfx("tap"); expanded[g] = !expanded[g]; buildList(); });
+        line.appendChild(more);
+      }
+      rows.appendChild(line);
+      if (list.length > 1 && expanded[g]) list.forEach(function (tu) {
+        var r = document.createElement("button");
+        r.className = "row sub" + (tu === tuning ? " sel" : "");
+        var tl = document.createElement("b"); tl.textContent = EN ? tu.en : tu.zh;
+        var ts = document.createElement("span"); ts.textContent = notesText(tu);
+        r.appendChild(tl); r.appendChild(ts);
+        r.addEventListener("click", function () { PAD.sfx("ok"); chooseTuning(tu); closeList(); });
+        rows.appendChild(r);
+      });
     });
     var a = document.createElement("div"); a.id = "a4";
     var lab = document.createElement("span");
@@ -385,7 +434,9 @@ var Tuner = (function () {
     rows.appendChild(a);
   }
   function openList() {
-    PAD.sfx("tap"); listOpen = true; stopMic(); buildList(); $("list").className = "open";
+    PAD.sfx("tap"); listOpen = true; stopMic();
+    expanded = {}; if (Tuner.inGroup(tuning.group).length > 1) expanded[tuning.group] = true;
+    buildList(); $("list").className = "open";
     var sel = document.querySelector("#rows .sel"); if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
   }
   function closeList() {

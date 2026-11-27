@@ -615,18 +615,18 @@
         "......0000......",
         "................"
       ],
-      "version": "1.0.3",
+      "version": "1.1.0",
       "released": "2026-11-27",
       "updated": "2026-11-27",
-      "description": "给吉他和尤克里里调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。",
+      "description": "给吉他、贝斯、尤克里里、小提琴、二胡、琵琶等调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。",
       "i18n": {
         "zh": {
           "name": "调音器",
-          "description": "给吉他和尤克里里调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。"
+          "description": "给吉他、贝斯、尤克里里、小提琴、二胡、琵琶等调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。"
         },
         "en": {
           "name": "Tune Up",
-          "description": "Tune guitar or ukulele: standard, Drop D, DADGAD, open tunings, or any note."
+          "description": "Tune guitar, bass, ukulele, violin, erhu and more. Drop D, DADGAD, open tunings."
         }
       },
       "author": "Haowei Wu",
@@ -635,8 +635,8 @@
         "mic"
       ],
       "path": "apps/string-tuner/index.html",
-      "sha256": "c80ed24d3c2d0f449c2b6fbb0fe017896ba0a55d1ec2866236a045c039961708",
-      "bytes": 24399
+      "sha256": "39980fd3db74a474c56b14448e5a58a59c86726b5a01cb75527b3b1aa51b0c86",
+      "bytes": 28504
     },
     {
       "spec": "lopda/1",

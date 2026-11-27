@@ -104,6 +104,9 @@ test("string-tuner: the mic opens at once; a sharp A shows A2 and its cents, an 
   assert.equal(await p.textContent("#cents"), "0");
   assert.equal(await p.getAttribute("#lamp", "class"), "on");
   assert.match(await p.getAttribute("#strings button:nth-child(1)", "class"), /ok/, "the string is marked tuned");
+  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 1, "one chime when it first lands");
+  await hear(p, 164.81, 16);
+  assert.equal((await p.evaluate(() => window.__log)).filter((x) => x === "sfx:ok").length, 1, "and not again for the same string");
   /* the sound dies: the reading stays, greyed, and the lamp goes out */
   await p.waitForTimeout(800);
   assert.equal(await p.getAttribute("#note", "class"), "stale");
@@ -131,6 +134,10 @@ test("string-tuner: the list closes the mic, a choice is saved and changes the s
   const { p, errors } = await open(t);
   await tap(p, "#tuning");
   assert.equal(await p.isVisible("#list"), true);
+  /* one row per instrument; the current one (guitar) opens with its tunings */
+  assert.equal(await p.locator("#rows .inst").count(), 11);
+  assert.equal(await p.locator("#rows .row.sub").count(), 8, "the guitar's eight tunings");
+  assert.equal(await p.textContent("#rows .row.sub.sel b"), "标准");
   assert.equal((await p.evaluate(() => window.__log)).at(-1), "mic:stop");
   await tap(p, p.locator("#rows .row", { hasText: "DADGAD" }));
   assert.equal(await p.isVisible("#list"), false);
@@ -146,10 +153,22 @@ test("string-tuner: the list closes the mic, a choice is saved and changes the s
   assert.equal((await p.evaluate(() => window.__log)).at(-1), "sfx:err");
   await tap(p, "#back");
   assert.equal((await p.evaluate(() => window.__saves.set)).a4, 446);
-  /* the ukulele: four strings, the high G first */
+  /* the ukulele's row chooses its default, the high G first */
   await tap(p, "#tuning");
-  await tap(p, p.locator("#rows .row", { hasText: "标准（高 G）" }));
+  await tap(p, p.locator("#rows .inst .row", { hasText: "尤克里里" }));
+  assert.equal(await p.textContent("#tname"), "尤克里里 · 标准（高 G）");
   assert.deepEqual(await p.locator("#strings button").allTextContents(), ["G4", "C4", "E4", "A4"]);
+  /* the bass's arrow opens its tunings; an instrument with one tuning has no arrow and is just its name */
+  await tap(p, "#tuning");
+  assert.equal(await p.locator("#rows .row.sub").count(), 3, "the ukulele's tunings open with the list");
+  await tap(p, p.locator("#rows .inst", { hasText: "贝斯" }).locator(".more"));
+  await tap(p, p.locator("#rows .row.sub", { hasText: "五弦" }));
+  assert.deepEqual(await p.locator("#strings button").allTextContents(), ["B0", "E1", "A1", "D2", "G2"]);
+  await tap(p, "#tuning");
+  assert.equal(await p.locator("#rows .inst", { hasText: "二胡" }).locator(".more").count(), 0);
+  await tap(p, p.locator("#rows .inst .row", { hasText: "二胡" }));
+  assert.equal(await p.textContent("#tname"), "二胡");
+  assert.deepEqual(await p.locator("#strings button").allTextContents(), ["D4", "A4"]);
   assert.deepEqual(errors, []);
 });
 

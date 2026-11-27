@@ -16,9 +16,14 @@ test("string-tuner: standard tuning is E2 A2 D3 G3 B3 E4 at the usual frequencie
   assert.deepEqual(std.notes.map((m) => { const n = Tuner.name(m); return n.n + n.o; }), ["E2", "A2", "D3", "G3", "B3", "E4"]);
   const ids = Tuner.TUNINGS.map((t) => t.id);
   assert.equal(new Set(ids).size, ids.length);
-  for (const t of Tuner.TUNINGS) assert.ok(t.group === "chrom" ? t.notes.length === 0 : t.notes.length === (t.group === "guitar" ? 6 : 4), t.id);
+  const COUNT = { guitar: 6, bass: [4, 5], uke: 4, violin: 4, viola: 4, cello: 4, mandolin: 4, banjo: 5, erhu: 2, pipa: 4, chrom: 0 };
+  for (const t of Tuner.TUNINGS) assert.ok([].concat(COUNT[t.group]).includes(t.notes.length), t.id);
+  assert.deepEqual(Tuner.GROUPS, Object.keys(COUNT), "every instrument is in the list, in order");
+  assert.equal(Tuner.inGroup("violin").length, 1);
   assert.equal(Tuner.name(39, true).n, "Eb", "the half-step-down tuning names flats");
   assert.equal(Tuner.name(67).n + Tuner.name(67).o, "G4", "the ukulele's high G");
+  assert.deepEqual(Tuner.byId("bass-std").notes.map((m) => { const n = Tuner.name(m); return n.n + n.o; }), ["E1", "A1", "D2", "G2"]);
+  assert.deepEqual(Tuner.byId("cello").notes.map((m) => { const n = Tuner.name(m); return n.n + n.o; }), ["C2", "G2", "D3", "A3"]);
 });
 
 test("string-tuner: auto picks the nearest string, folds an octave-high low E, and holds the current string near a boundary", () => {
@@ -34,6 +39,13 @@ test("string-tuner: auto picks the nearest string, folds an octave-high low E, a
   const r = Tuner.read(Tuner.hz(40, 440) * 2 * Math.pow(2, 5 / 1200), std, 440, -1, -1);
   assert.equal(r.i, 0);
   assert.ok(Math.abs(r.cents - 5) < 0.01, "cents are measured after the octave fold: " + r.cents);
+});
+
+test("string-tuner: a bass's low E, read at its second harmonic (82 Hz, over the mic's 50 Hz floor), is the E1 string", () => {
+  const bass = Tuner.byId("bass-std");
+  const r = Tuner.read(82.41, bass, 440, -1, -1);
+  assert.equal(r.i, 0);
+  assert.ok(Math.abs(r.cents) < 1, String(r.cents));
 });
 
 test("string-tuner: a locked string reads only that string, A4 moves every target, chromatic names the nearest note", () => {
