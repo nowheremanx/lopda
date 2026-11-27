@@ -558,7 +558,7 @@ test("store: search finds an app by either language, ignores case, and clearing 
 
 test("store: an app that asks for a capability shows its icons before install, and the grant is remembered", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
-  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.goto(base + "/runtime/?debug", { waitUntil: "networkidle" });   /* ?debug: LOPDA_DEBUG.setButton presses the pad */
   await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
   await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
   await p.waitForSelector("#store-list .store-item");
@@ -584,6 +584,20 @@ test("store: an app that asks for a capability shows its icons before install, a
     "the focus returns to the install button");
   await p.waitForSelector("#file-ask", { state: "detached" });
   assert.equal((await item.locator("button").innerText()).trim(), "安装", "cancelling changes nothing");
+
+  /* Left / Right pick a button and A presses the picked one (decisions.md section 77): Right, then A cancels */
+  await item.locator("button").click();
+  await p.waitForSelector("#file-ask .ask-perms");
+  assert.deepEqual(await p.evaluate(() => [document.getElementById("file-ok").classList.contains("ghost"),
+    document.getElementById("file-no").classList.contains("ghost")]), [false, true], "OK is picked when it opens");
+  /* the store has no chin pad on screen, so the keyboard does not reach it; press the pad's buttons directly */
+  const pad = (b) => p.evaluate((b) => { window.LOPDA_DEBUG.setButton(b, true); window.LOPDA_DEBUG.setButton(b, false); }, b);
+  await pad("right");
+  assert.deepEqual(await p.evaluate(() => [document.getElementById("file-ok").classList.contains("ghost"),
+    document.getElementById("file-no").classList.contains("ghost")]), [true, false], "Right picks Cancel");
+  await pad("a");
+  await p.waitForSelector("#file-ask", { state: "detached" });
+  assert.equal((await item.locator("button").innerText()).trim(), "安装", "A on the picked Cancel installs nothing");
 
   await item.locator("button").click();
   await p.waitForSelector("#file-ask .ask-perms");

@@ -228,7 +228,7 @@
       "set.sense.revoke": "撤销", "set.sense.script": "脚本「{name}」", "set.sense.noname": "未命名", "set.sense.note": "撤销以后，这个程序下次要用时会再问一次。",
 
       "file.export": "导出「{name}」？", "file.import": "从文件导入？", "file.ok": "好", "file.pick": "选文件",
-      "file.keys": "A 确定　B 取消", "file.toobig": "文件超过 2 MB，导入不了。", "file.badtype": "这种文件这个程序用不了。",
+      "file.keys": "←→ 选择　A 确定　B 取消", "file.toobig": "文件超过 2 MB，导入不了。", "file.badtype": "这种文件这个程序用不了。",
       "file.readfail": "文件读不出来。",
 
       "set.title": "设置", "set.on": "开", "set.off": "关", "set.volume": "音量",
@@ -1234,7 +1234,7 @@
       "set.sense.revoke": "Revoke", "set.sense.script": "Script \u201c{name}\u201d", "set.sense.noname": "untitled", "set.sense.note": "After a revoke, the program asks again the next time.",
 
       "file.export": "Export \u201c{name}\u201d?", "file.import": "Import a file?", "file.ok": "OK", "file.pick": "Choose",
-      "file.keys": "A: OK  B: Cancel", "file.toobig": "That file is over 2 MB.", "file.badtype": "This program can't use that kind of file.",
+      "file.keys": "←→ pick  A: OK  B: Cancel", "file.toobig": "That file is over 2 MB.", "file.badtype": "This program can't use that kind of file.",
       "file.readfail": "Can't read that file.",
 
       "set.title": "Settings", "set.on": "On", "set.off": "Off", "set.volume": "Volume",

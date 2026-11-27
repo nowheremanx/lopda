@@ -920,18 +920,18 @@
         ".00000000000000.",
         "................"
       ],
-      "version": "2.0.0",
+      "version": "2.0.1",
       "released": "2026-10-24",
       "updated": "2026-11-27",
-      "description": "老黄历、每日一签、罗盘、八卦、八字，一间小小的旧历书铺。旧书上的说法，图个吉利。",
+      "description": "老黄历、每日一签、罗盘、八卦，一间小小的旧历书铺。旧书上的说法，图个吉利。",
       "i18n": {
         "zh": {
           "name": "玄机阁",
-          "description": "老黄历、每日一签、罗盘、八卦、八字，一间小小的旧历书铺。旧书上的说法，图个吉利。"
+          "description": "老黄历、每日一签、罗盘、八卦，一间小小的旧历书铺。旧书上的说法，图个吉利。"
         },
         "en": {
           "name": "Oracle",
-          "description": "An old almanac shop: almanac, fortune slip, compass, I Ching, birth chart."
+          "description": "An old almanac shop: the almanac, a fortune slip, a compass and the I Ching."
         }
       },
       "author": "Haowei Wu",
@@ -941,8 +941,8 @@
         "notes"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "218989b4399c25cf7ff62647048a21d340bedfa3251ed9e0809baf3b8e1ab651",
-      "bytes": 286216
+      "sha256": "7a912c2996d3941d7f6d059386bc0ebbc86b61ef58434e7a824f88108a95d2b4",
+      "bytes": 387806
     }
   ]
 }
