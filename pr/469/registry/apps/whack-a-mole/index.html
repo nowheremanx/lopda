@@ -120,15 +120,15 @@
   var RUN_MS = 60000, ENDLESS_START_MS = 15000, LEVEL_MS = 30000;
   var LEVELS = [
     { target: 20, cap: 2, helmet: false, gold: false, thief: false, mines: false, p0: 0, p1: 0.10, hint: { zh: "普通地鼠，砸就对了", en: "Bonk the plain moles." } },
-    { target: 22, cap: 3, helmet: false, gold: false, thief: false, mines: false, p0: 0.10, p1: 0.25, hint: null },
-    { target: 23, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.15, p1: 0.30, hint: { zh: "戴头盔的要砸两下", en: "Helmets take two hits" } },
-    { target: 26, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.30, p1: 0.45, hint: null },
-    { target: 30, cap: 3, helmet: true, gold: true, thief: false, mines: false, p0: 0.35, p1: 0.50, hint: { zh: "金地鼠：快，+3", en: "Gold moles: fast, +3" } },
-    { target: 33, cap: 4, helmet: true, gold: true, thief: false, mines: false, p0: 0.45, p1: 0.60, hint: null },
-    { target: 42, cap: 3, helmet: true, gold: true, thief: true, mines: false, p0: 0.50, p1: 0.65, hint: { zh: "小偷没砸到会换洞跑", en: "Missed thieves change holes" } },
-    { target: 45, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.55, p1: 0.75, hint: { zh: "冒火花的雷别碰", en: "Avoid the sparking mines" } },
-    { target: 55, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.70, p1: 0.90, hint: null },
-    { target: 65, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.85, p1: 1.00, hint: { zh: "全部来了，更快", en: "Everything, faster" } }
+    { target: 21, cap: 3, helmet: false, gold: false, thief: false, mines: false, p0: 0.10, p1: 0.25, hint: null },
+    { target: 22, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.15, p1: 0.30, hint: { zh: "戴头盔的要砸两下", en: "Helmets take two hits" } },
+    { target: 25, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.30, p1: 0.45, hint: null },
+    { target: 29, cap: 3, helmet: true, gold: true, thief: false, mines: false, p0: 0.35, p1: 0.50, hint: { zh: "金地鼠：快，+3", en: "Gold moles: fast, +3" } },
+    { target: 31, cap: 4, helmet: true, gold: true, thief: false, mines: false, p0: 0.45, p1: 0.60, hint: null },
+    { target: 39, cap: 3, helmet: true, gold: true, thief: true, mines: false, p0: 0.50, p1: 0.65, hint: { zh: "小偷没砸到会换洞跑", en: "Missed thieves change holes" } },
+    { target: 41, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.55, p1: 0.75, hint: { zh: "冒火花的雷别碰", en: "Avoid the sparking mines" } },
+    { target: 48, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.70, p1: 0.90, hint: null },
+    { target: 55, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.85, p1: 1.00, hint: { zh: "全部来了，更快", en: "Everything, faster" } }
   ];
   var levelNo = 0, stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], levelSaveProtected = false;
   var screen = "title", transitionBusy = false, thiefRuns = 0;
@@ -446,10 +446,12 @@
     var h = free[Math.floor(Math.random() * free.length)];
     h.kind = "mole"; h.helmet = false; h.gold = false; h.thief = false; h.escaped = false; h.runStay = 0;
     h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at;
-    h.stay = 380 + 520 * (1 - p) + Math.random() * 140;
+    h.stay = 520 + 420 * (1 - p) + Math.random() * 140; /* slower late game (owner, 11-27) */
     var goldChance = data ? (data.gold ? 0.06 + 0.04 * p : 0) : (at - startAt > 15000 ? 0.06 + 0.04 * p : 0);
     if (Math.random() < goldChance) { h.gold = true; h.stay *= 0.65; }
     else h.helmet = data ? (data.helmet && Math.random() < 0.22) : (at - startAt > 8000 && Math.random() < 0.22);
+    /* a helmet takes two hits, so it stays long enough for two even at full speed (owner, 11-27) */
+    if (h.helmet) h.stay = Math.max(h.stay, 850 + Math.random() * 150);
     if (data && data.thief && Math.random() < 0.18) {
       h.thief = true; h.runStay = h.stay; h.stay *= 0.7;
     }
@@ -507,7 +509,7 @@
     if (now >= nextSpawn - TELL_MS) {
       var at = Math.max(nextSpawn, now), ps = at === now ? p : profileAt(at);
       spawn(now, at, ps);
-      nextSpawn = at + 300 + 620 * (1 - ps) + Math.random() * 140;
+      nextSpawn = at + 380 + 560 * (1 - ps) + Math.random() * 140;
     }
     if (now >= nextMine - TELL_MS) {
       var atMine = Math.max(nextMine, now), pm = atMine === now ? p : profileAt(atMine);
@@ -545,7 +547,7 @@
       }
       hits++;
       if (MODE === "endless") endAt += h.gold ? 3000 : 1000;
-      if (h.helmet) { h.helmet = false; h.stay += 300; PAD.sfx("hit"); m.hit = false; m.helm = true; return; }
+      if (h.helmet) { h.helmet = false; h.stay = Math.max(h.stay + 300, now - h.t + 600); PAD.sfx("hit"); m.hit = false; m.helm = true; return; }
       combo++; if (combo > maxCombo) maxCombo = combo;
       var add = h.thief && h.escaped ? 3 : (h.gold ? 3 : (combo % 5 === 0 ? 2 : 1));
       score += add; h.s = "hit"; h.t = now;
