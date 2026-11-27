@@ -164,3 +164,21 @@ test("string-tuner: a saved tuning opens; English; chromatic hides the strings; 
   assert.ok((await p.evaluate(() => window.__log)).includes("sfx:square:442"), "A4 at the saved 442 Hz");
   assert.deepEqual(errors, []);
 });
+
+test("string-tuner: the first 250 ms of a pluck (sharp) and mains hum are not read", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  /* hum at 60 Hz in a quiet room: below the low E by more than 3 semitones, ignored */
+  for (let i = 0; i < 6; i++) { await p.evaluate(() => window.__fire("sound", { level: 0.1, pitch: null, hz: 59.9 })); await p.waitForTimeout(50); }
+  assert.equal(await p.textContent("#note"), "-");
+  /* a hard pluck: the level jumps, the attack reads 40 cents sharp, then the string settles in tune */
+  const send = (level, hz) => p.evaluate(([level, hz]) => window.__fire("sound", { level, pitch: Math.round(hz), hz }), [level, hz]);
+  await send(0.8, 110 * Math.pow(2, 40 / 1200));
+  for (let i = 0; i < 3; i++) { await p.waitForTimeout(50); await send(0.8, 110 * Math.pow(2, (40 - i) / 1200)); }
+  assert.equal(await p.textContent("#note"), "-", "nothing shown during the attack");
+  await p.waitForTimeout(150);
+  for (let i = 0; i < 4; i++) { await send(0.78 - i / 32, 110.05 + i * 0.001); await p.waitForTimeout(50); }
+  await p.waitForTimeout(80);
+  assert.equal(await p.textContent("#note"), "A2");
+  assert.equal(await p.textContent("#cents"), "+1");
+  assert.deepEqual(errors, []);
+});

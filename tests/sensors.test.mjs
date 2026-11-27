@@ -157,18 +157,22 @@ test("sensor mic: hz in noise (about 20 dB) stays within a few cents where pitch
   assert.ok(worst < 5, "worst " + worst.toFixed(2) + " cents");
 });
 
-test("sensor mic: a quiet note (-50 dB) gets hz alone, pitch stays null as before; silence and noise get neither", () => {
+test("sensor mic: a quiet note (-50 dB and -70 dB) gets hz alone, pitch stays null as before; silence and noise get neither", () => {
   for (const f of [82.41, 110, 329.63]) {
-    const s = tone(f, 48000, 4096, [1, 0.5, 0.3], 0, 3).map((v) => v * 0.02);
-    assert.equal(LS.pitch(s.subarray(2048), 48000), null, "under pitch()'s -40 dB gate");
-    const r = LS.hz(s, 48000);
-    assert.equal(r.pitch, null);
-    assert.ok(Math.abs(cents(r.hz, f)) < 0.5, `${f}: ${r.hz}`);
+    for (const k of [0.02, 0.002]) {
+      const s = tone(f, 48000, 4096, [1, 0.5, 0.3], 0, 3).map((v) => v * k);
+      assert.equal(LS.pitch(s.subarray(2048), 48000), null, "under pitch()'s -40 dB gate");
+      const r = LS.hz(s, 48000);
+      assert.equal(r.pitch, null);
+      assert.ok(Math.abs(cents(r.hz, f)) < 0.5, `${f} x${k}: ${r.hz}`);
+    }
   }
   let seed = 9;
-  const noise = Float32Array.from({ length: 4096 }, () => (((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1) * 0.01);
-  assert.deepEqual({ ...LS.hz(noise, 48000) }, { pitch: null, hz: null });
-  assert.deepEqual({ ...LS.hz(new Float32Array(4096).fill(0.0001), 48000) }, { pitch: null, hz: null });
+  for (const k of [0.01, 0.0003]) {
+    const noise = Float32Array.from({ length: 4096 }, () => (((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1) * k);
+    assert.deepEqual({ ...LS.hz(noise, 48000) }, { pitch: null, hz: null }, "noise at " + k);
+  }
+  assert.deepEqual({ ...LS.hz(new Float32Array(4096).fill(0.00001), 48000) }, { pitch: null, hz: null });
 });
 
 /* ---------- the host: fake window, document, navigator, audio ---------- */
