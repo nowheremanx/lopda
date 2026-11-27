@@ -18,7 +18,8 @@ game.scene("ending", {
   update: function () {
     if (game.pressed("a") || game.pressed("start")) {
       game.sfx("tap");
-      bootSave = null;
+      /* the finished week stays saved: the title offers 结局 and asks before 新局 */
+      bootSave = S;
       S = null;
       game.go("title");
     }

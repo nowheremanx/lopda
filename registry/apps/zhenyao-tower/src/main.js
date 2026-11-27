@@ -39,12 +39,20 @@ var runSave = null;
 function clone(x) { return JSON.parse(JSON.stringify(x)); }
 function freshFlags() { return { master: 0, entered: {}, opened: {}, beat: {} }; }
 /* the animations and cutscenes seen survive a new game, so they can be skipped from the second time on */
-function writeSeen() { game.save("seen", Object.assign({}, Cut.seen, Battle.seen())); }
+/* saveLocked: the saves on disk cannot be read ("corrupt") or come from a newer version ("newer"). They are kept as
+   they are: nothing is written, and the title offers no new game over them (SPEC.md section 8). The runtime itself
+   refuses this app's writes until the player clears a damaged save in Settings */
+var saveLocked = null;
+function lockSaves(e) { if (!saveLocked) saveLocked = e && e.code === "newer" ? "newer" : "corrupt"; }
+function writeSeen() { if (saveLocked) return; game.save("seen", Object.assign({}, Cut.seen, Battle.seen())); }
 Cut.onDone = writeSeen;
 game.load("seen").then(function (s) {
   if (s && typeof s === "object") { Object.assign(Battle.seen(), s); Object.assign(Cut.seen, s); }
-});
-game.load("progress").then(function (p) { if (p && p.v === 1 && p.map && p.hero && p.flags) lastSave = p; });
+}, lockSaves);
+game.load("progress").then(function (p) {
+  if (p && p.v === 1 && p.map && p.hero && p.flags) lastSave = p;
+  else if (p && typeof p.v === "number" && p.v > 1) saveLocked = "newer";
+}, lockSaves);
 
 /* ---------- title ---------- */
 var TITLE = scene("title", {
@@ -54,7 +62,7 @@ var TITLE = scene("title", {
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);
     g.window(14, 82, 132, 52);
     g.text("镇妖塔·序章", 80, 88, { align: "center" });
-    g.text("内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
+    g.text(saveLocked === "newer" ? "存档较新，请先更新" : saveLocked ? "存档读不出来" : "内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
     /* the menu is an overlay of its own: the prompt would blink through it */
     if (game.top() === TITLE && Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
   },
@@ -63,7 +71,7 @@ var TITLE = scene("title", {
     game.sfx("ok");
     busy = true;
     /* 听曲 (the music room) once the game has been cleared */
-    var items = (lastSave ? ["继续", "进入小镇", "演武"] : ["进入小镇", "演武"]).concat(Cut.seen.cleared ? ["听曲"] : []);
+    var items = (saveLocked ? ["演武"] : lastSave ? ["继续", "进入小镇", "演武"] : ["进入小镇", "演武"]).concat(Cut.seen.cleared ? ["听曲"] : []);
     game.choose(items, { y: 108 - 14 * items.length }).then(function (i) {
       busy = false;
       var pick = items[i];
@@ -200,7 +208,7 @@ function doSave() {
   var p = { v: 1, map: cur.id, x: hero.c, y: hero.r, face: hero.face, hero: clone(me), flags: clone(flags) };
   lastSave = clone(p);
   runSave = clone(p);
-  game.save("progress", p);
+  if (!saveLocked) game.save("progress", p);
   writeSeen();
 }
 async function saveStone() {
