@@ -112,6 +112,7 @@ function headerText(dt, p) {
 var HAS_MOTION = typeof PAD !== "undefined" && !!PAD.motion;
 var wanted = false, wasWanted = false, live = false, denied = false, startSeq = 0;
 var heading = null, lastHeading = null, compass = false, keyHeading = 0;
+var section = "counter", motionOwner = null, pendingMotion = false;
 /* The heading is only right when the phone lies flat; flat is absolute, unlike y,
    which is relative to start()/zero(). */
 var flat = null, flatBadT = 0, bubbleX = 0, bubbleY = 0;
@@ -126,7 +127,7 @@ function aimDial(deg) {
   dialT = 0;
 }
 function onTilt(t) {
-  if (!wanted) return;
+  if (!wanted || motionOwner !== "compass" || section !== "compass") return;
   var f = t && t.flat;
   if (f && typeof f === "object" && typeof f.x === "number" && typeof f.y === "number" &&
       isFinite(f.x) && isFinite(f.y)) flat = { x: f.x, y: f.y };
@@ -137,50 +138,93 @@ function onTilt(t) {
   if (h !== lastHeading) { lastHeading = h; sfx("tick"); aimDial(-h); }
   heading = h;
 }
-function sensorStart() {
-  if (!HAS_MOTION) return;
+function pageVisible() { return typeof document.hidden === "undefined" || !document.hidden; }
+function wantedOwner() {
+  if (section === "compass") return "compass";
+  if (section === "fortune" && slipState.slip === null && !slipState.animating) return "fortune";
+  return null;
+}
+function clearMotionReadings() {
+  live = false; motionOwner = null; heading = null; lastHeading = null; flatBadT = 0; compass = false;
+}
+function motionPause(remember) {
+  if (remember && (wanted || pendingMotion)) wasWanted = wantedOwner() || motionOwner || wasWanted;
+  wanted = false;
+  clearMotionReadings();
+  if (HAS_MOTION && PAD.motion && typeof PAD.motion.stop === "function") PAD.motion.stop();
+}
+function sensorStart(owner) {
+  if (!HAS_MOTION || !PAD.motion || typeof PAD.motion.start !== "function") return;
   wanted = true;
+  motionOwner = owner;
+  if (live) return;
+  if (pendingMotion) return;
+  pendingMotion = true;
   var seq = ++startSeq;
-  PAD.motion.start().then(function (r) {
-    /* A second start() makes the runtime cancel the first dialog and answer it "denied".
-       Ignore that stale answer, and never stop the sensor: a newer request owns it now. */
+  var result;
+  try { result = PAD.motion.start(); }
+  catch (e) { result = Promise.reject(e); }
+  Promise.resolve(result).then(function (r) {
     if (seq !== startSeq) return;
-    if (!wanted) { PAD.motion.stop(); return; }      /* paused while the player was asked */
+    pendingMotion = false;
+    if (!wanted || !pageVisible() || wantedOwner() !== motionOwner) {
+      motionPause(false);
+      syncMotion();
+      return;
+    }
     live = r === "on";
     denied = r === "denied";
     if (!live) {
       wanted = false;
+      motionOwner = null;
       heading = null; lastHeading = null; keyHeading = 0;
       aimDial(0);
     }
   }, function () {
     if (seq !== startSeq) return;
-    if (!wanted) return;
-    wanted = false; live = false; denied = true;
+    pendingMotion = false;
+    if (!wanted) { syncMotion(); return; }
+    wanted = false; live = false; denied = true; motionOwner = null;
     heading = null; lastHeading = null; keyHeading = 0;
     aimDial(0);
   });
 }
-function sensorPause() {
-  if (wanted) wasWanted = true;
-  wanted = false;
-  live = false; heading = null; lastHeading = null; flatBadT = 0;
-  if (HAS_MOTION) PAD.motion.stop();
+function syncMotion() {
+  var owner = pageVisible() ? wantedOwner() : null;
+  if (!owner) {
+    if (wanted || live) motionPause(false);
+    return;
+  }
+  wasWanted = owner;
+  if (!HAS_MOTION) return;
+  if (live && motionOwner !== owner) {
+    motionPause(false);
+    sensorStart(owner);
+    return;
+  }
+  if (live) { wanted = true; motionOwner = owner; return; }
+  sensorStart(owner);
 }
 function sensorResume() {
-  if (HAS_MOTION && (wasWanted || wanted)) { wasWanted = false; sensorStart(); }
+  var owner = pageVisible() ? wantedOwner() : null;
+  if (owner) { wasWanted = owner; sensorStart(owner); }
+  else syncMotion();
 }
-if (HAS_MOTION) {
-  PAD.on("tilt", onTilt);
-  /* hiding the app (HOME, lock, another program) must stop the sensor; pagehide is the
-     last way out, and pageshow restarts it for a bfcache return */
+function onShake() {
+  if (section === "fortune" && motionOwner === "fortune" && wanted && live &&
+      slipState.slip === null && !slipState.animating) drawSlip();
+}
+if (typeof PAD !== "undefined" && PAD.on) {
+  if (HAS_MOTION) PAD.on("tilt", onTilt);
+  if (HAS_MOTION) PAD.on("shake", onShake);
   document.addEventListener("visibilitychange", function () {
-    if (document.hidden) sensorPause();
+    if (document.hidden) motionPause(true);
     else sensorResume();
   });
-  window.addEventListener("pagehide", sensorPause);
-  /* pageshow also fires on the first load; only a bfcache return needs a resume */
-  window.addEventListener("pageshow", function (e) { if (e && e.persisted) sensorResume(); });
+  window.addEventListener("pagehide", function () { motionPause(true); });
+  window.addEventListener("pageshow", function (e) {
+    if (e && e.persisted) sensorResume();
+  });
 }
 
 /* ---- easing: each 11.25-degree step glides in about 150 ms, with a tick ---- */
@@ -475,8 +519,263 @@ function drawPanel(g, stem) {
   g.text(PANEL_CLOSE, CX, 168, { align: "center", color: g.DARK });
 }
 
+var slipState = { dateKey: todayKey(), slip: null, written: false, animating: false };
+var loadComplete = false, loadFailed = false, slipScroll = 0, appendBusy = false, appendStatus = "";
+var REDUCED_MOTION = typeof window.matchMedia === "function" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var SECTIONS = [
+  { id: "fortune", name: T({ zh: "每日一签", en: "Fortune" }) },
+  { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) }
+];
+var counterCursor = 0;
+var WEEK_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+var WEEK_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var MONTH_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function pad2(n) { return n < 10 ? "0" + n : String(n); }
+function todayKey() {
+  var d = new Date();
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+}
+function prettyDate(dateKey) {
+  var p = dateKey.split("-"), m = parseInt(p[1], 10), day = parseInt(p[2], 10);
+  var week = new Date(parseInt(p[0], 10), m - 1, day).getDay();
+  return game.lang === "en" ? MONTH_EN[m - 1] + " " + day + " · " + WEEK_EN[week] :
+    m + "月" + day + "日 · " + WEEK_ZH[week];
+}
+function syncSlipDate() {
+  var key = todayKey();
+  if (key === slipState.dateKey) return;
+  slipState.dateKey = key;
+  slipState.slip = null;
+  slipState.written = false;
+  slipState.animating = false;
+  slipScroll = 0;
+  appendStatus = "";
+  syncMotion();
+}
+function slipItem() { return SLIPS.DATA[slipState.slip]; }
+function slipTitleText() {
+  var item = slipItem();
+  var label = game.lang === "en" ? "No. " + item.num : "第" + item.num + "签";
+  return slipState.dateKey + "  " + label + "  " + item.grade[game.lang] + "\n" +
+    item.verse[game.lang].join("\n") + "\n" + item.meaning[game.lang];
+}
+function saveSlip() {
+  if (loadFailed || typeof PAD === "undefined" || typeof PAD.save !== "function") return;
+  try {
+    PAD.save("slip", { dateKey: slipState.dateKey, slip: slipState.slip, written: slipState.written });
+  } catch (e) {}
+}
+function readSlip() {
+  if (typeof PAD === "undefined" || typeof PAD.load !== "function") { loadComplete = true; return; }
+  var result;
+  try { result = PAD.load("slip"); }
+  catch (e) { loadFailed = true; loadComplete = true; return; }
+  Promise.resolve(result).then(function (d) {
+    if (slipState.slip === null && !slipState.animating && d &&
+        d.dateKey === todayKey() && typeof d.slip === "number" &&
+        d.slip >= 0 && d.slip < SLIPS.DATA.length && Math.floor(d.slip) === d.slip) {
+      slipState.dateKey = d.dateKey;
+      slipState.slip = d.slip;
+      slipState.written = !!d.written;
+    }
+    loadComplete = true;
+    syncMotion();
+  }, function () {
+    loadFailed = true;
+    loadComplete = true;
+  });
+}
+function drawSlip() {
+  syncSlipDate();
+  if (!loadComplete || slipState.slip !== null || slipState.animating) return;
+  slipState.animating = true;
+  syncMotion();
+  var span = REDUCED_MOTION ? 0.12 : 0.82;
+  var ticks = REDUCED_MOTION ? [0, 0.03, 0.06, 0.09] : [0, 0.21, 0.42, 0.65];
+  for (var i = 0; i < ticks.length; i++) {
+    game.after(ticks[i], function () { sfx("tick"); });
+  }
+  game.after(span, function () {
+    slipState.slip = SLIPS.slotFor(slipState.dateKey);
+    slipState.written = false;
+    slipState.animating = false;
+    slipScroll = 0;
+    appendStatus = "";
+    saveSlip();
+    sfx("ok");
+    syncMotion();
+  });
+}
+function appendSlip() {
+  syncSlipDate();
+  if (slipState.slip === null || slipState.animating || appendBusy) return;
+  if (typeof PAD === "undefined" || !PAD.notes || typeof PAD.notes.append !== "function") return;
+  appendBusy = true;
+  var title = game.lang === "en" ? "Daily fortune" : "每日一签";
+  var result;
+  try { result = PAD.notes.append(title, slipTitleText()); }
+  catch (e) { result = Promise.reject(e); }
+  Promise.resolve(result).then(function (answer) {
+    appendBusy = false;
+    slipState.written = answer === "saved";
+    appendStatus = answer === "saved" ? "saved" : "denied";
+    saveSlip();
+    if (answer === "saved") sfx("ok");
+    else sfx("err");
+  }, function () {
+    appendBusy = false;
+    slipState.written = false;
+    appendStatus = "denied";
+    saveSlip();
+    sfx("err");
+  });
+}
+function openSection(id) {
+  if (id !== "counter" && id !== "compass" && id !== "fortune") return;
+  game.go(id, null, { fade: false });
+}
+function backToCounter() { openSection("counter"); }
+function sectionSummary(id) {
+  syncSlipDate();
+  if (id === "fortune") {
+    if (!loadComplete) return "…";
+    if (slipState.slip === null) return T({ zh: "未抽", en: "Not drawn" });
+    var item = slipItem();
+    return T({ zh: "第 " + item.num + " 签 " + item.grade.zh,
+      en: "No. " + item.num + " " + item.grade.en });
+  }
+  /* the counter always speaks of today, whatever day the compass was left on */
+  var now = new Date(), p = LUCK.pillar(now.getFullYear(), now.getMonth() + 1, now.getDate()), gods = LUCK.gods(p.stem);
+  return GODS[0].name + " " + dirName(gods.xi);
+}
+function updateCounter() {
+  var p = game.pointer, i;
+  if (game.pressed("up")) { counterCursor = (counterCursor + SECTIONS.length - 1) % SECTIONS.length; sfx("move"); }
+  if (game.pressed("down")) { counterCursor = (counterCursor + 1) % SECTIONS.length; sfx("move"); }
+  if (p.pressed) {
+    i = Math.floor((p.y - 58) / 55);
+    if (i >= 0 && i < SECTIONS.length) { counterCursor = i; openSection(SECTIONS[i].id); sfx("tap"); return; }
+  }
+  if (game.pressed("a")) { sfx("tap"); openSection(SECTIONS[counterCursor].id); }
+}
+function drawCounter(g) {
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 42, g.INK);
+  g.text(T({ zh: "玄机阁", en: "Oracle" }), CX, 3, { align: "center", color: g.PAPER });
+  g.text(T({ zh: "旧历书上的说法，图个吉利", en: "Old almanac lore, just for luck." }),
+    CX, 23, { align: "center", color: g.PAPER });
+  for (var i = 0; i < SECTIONS.length; i++) {
+    var y = 58 + i * 55;
+    if (i === counterCursor) g.rect(7, y - 5, 202, 43, g.MID);
+    g.text(i === counterCursor ? "›" : " ", 11, y + 1, { color: g.INK });
+    g.text(SECTIONS[i].name, 27, y + 1, { color: g.INK });
+    g.text(sectionSummary(SECTIONS[i].id), 27, y + 20, { color: g.DARK });
+    g.line(8, y + 45, 208, y + 45, g.DARK);
+  }
+  g.text(T({ zh: "↑↓ 选 · A 进入", en: "↑↓ pick · A open" }), CX, 218,
+    { align: "center", color: g.INK });
+}
+
+function updateFortune() {
+  syncSlipDate();
+  if (game.pressed("b")) { backToCounter(); return; }
+  if (slipState.slip !== null && !slipState.animating) {
+    if (game.pressed("up")) { slipScroll = Math.max(0, slipScroll - 1); sfx("move"); }
+    if (game.pressed("down")) { slipScroll++; sfx("move"); }
+    if (game.pressed("start") || (game.pointer.pressed && game.pointer.y >= 210)) appendSlip();
+  } else if (game.pressed("a") || (game.pointer.pressed && game.pointer.y >= 45 && game.pointer.y <= 208)) {
+    drawSlip();
+  }
+}
+function drawCup(g) {
+  /* The same rattle is shortened with reduced motion, rather than removed. */
+  var shift = slipState.animating ? Math.round(Math.sin(game.time * 46) * 3) : 0;
+  g.origin(shift, 0);
+  g.circle(CX, 168, 40, g.DARK, true);
+  g.rect(CX - 45, 94, 90, 61, g.MID);
+  g.line(CX - 45, 154, CX - 37, 168, g.INK);
+  g.line(CX - 37, 168, CX + 37, 168, g.INK);
+  g.line(CX + 37, 168, CX + 45, 154, g.INK);
+  g.line(CX - 46, 95, CX + 46, 95, g.INK);
+  g.line(CX - 48, 92, CX + 48, 92, g.INK);
+  for (var i = 0; i < 7; i++) {
+    var x = CX - 26 + i * 9, top = 49 + (i % 3) * 6;
+    g.line(x, top, x + 1, 105, g.INK);
+    g.rect(x - 1, top, 4, 5, g.PAPER);
+  }
+  g.origin(0, 0);
+}
+function fortuneFooter(g) {
+  var line;
+  if (!loadComplete) line = T({ zh: "存档读取中…", en: "Reading save…" });
+  else if (loadFailed) line = T({ zh: "存档读不出，今天不会保存", en: "Could not read the save; today won't be saved" });
+  else if (slipState.slip === null) line = T({ zh: "A 抽签 · 点签筒 · 摇一摇", en: "A draw · tap the cup · shake" });
+  else if (typeof PAD === "undefined" || !PAD.notes) line = T({
+    zh: "这台掌机太老，不能写记事本。", en: "This handheld is too old to write notes."
+  });
+  else if (appendBusy) line = T({ zh: "正在写入…", en: "Saving…" });
+  else if (appendStatus === "denied") line = T({ zh: "没有写入 · 今天已抽", en: "Not saved · drawn today" });
+  else if (slipState.written) line = T({ zh: "已写入", en: "Saved" });
+  else line = T({ zh: "START 写入记事本", en: "START to notes" });
+  g.rect(0, 210, W, 30, g.PAPER);
+  var lines = g.wrap(line, 208);
+  for (var i = 0; i < lines.length && i < 2; i++) {
+    g.text(lines[i], CX, 211 + i * 13, { align: "center", color: g.DARK });
+  }
+}
+function drawFortune(g) {
+  syncSlipDate();
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 19, g.INK);
+  g.text(T({ zh: "每日一签", en: "Fortune" }), CX, 2, { align: "center", color: g.PAPER });
+  g.text(prettyDate(slipState.dateKey), CX, 23, { align: "center", color: g.DARK });
+  if (slipState.slip === null) {
+    drawCup(g);
+    if (slipState.animating) {
+      g.text(T({ zh: "摇签中…", en: "Shaking…" }), CX, 185, { align: "center", color: g.INK });
+    }
+  } else {
+    var item = slipItem(), grade = item.grade[game.lang];
+    g.frame(8, 43, 200, 166, g.INK);
+    g.text(T({ zh: "第 " + item.num + " 签", en: "No. " + item.num }), 16, 48, { color: g.INK });
+    g.text(grade, 200, 48, { align: "right", color: g.INK });
+    var lines = [], j, wrapped;
+    for (j = 0; j < item.verse[game.lang].length; j++) {
+      wrapped = g.wrap(item.verse[game.lang][j], 180);
+      lines = lines.concat(wrapped);
+    }
+    lines.push("");
+    wrapped = g.wrap(item.meaning[game.lang], 180);
+    lines = lines.concat(wrapped);
+    var lineH = g.lineHeight || 14, max = Math.floor(142 / lineH);
+    slipScroll = Math.min(slipScroll, Math.max(0, lines.length - max));
+    g.clip(13, 69, 190, 136);
+    for (j = slipScroll; j < lines.length && j < slipScroll + max; j++) {
+      g.text(lines[j], 18, 70 + (j - slipScroll) * lineH, { color: g.INK });
+    }
+    g.clip();
+  }
+  fortuneFooter(g);
+}
+
+game.scene("counter", {
+  enter: function () { section = "counter"; syncMotion(); },
+  update: updateCounter,
+  draw: drawCounter
+});
+game.scene("fortune", {
+  enter: function () { section = "fortune"; slipScroll = 0; syncMotion(); },
+  update: updateFortune,
+  draw: drawFortune
+});
 game.scene("compass", {
-  update: update,
+  enter: function () { section = "compass"; syncMotion(); },
+  update: function (dt) {
+    if (game.pressed("b") && !panel) { backToCounter(); return; }
+    update(dt);
+  },
   draw: function (g) {
     var dt = shownDate(), p = pillarOf(dt);
     g.clear(g.PAPER);
@@ -494,5 +793,5 @@ game.scene("compass", {
   }
 });
 
-game.start("compass");
-sensorStart();
+readSlip();
+game.start("counter");

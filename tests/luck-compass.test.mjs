@@ -77,6 +77,7 @@ function bootApp(lang, withMotion) {
   };
   if (withMotion) pad.motion = { start: () => Promise.resolve("on"), stop() {}, zero() {} };
   const app = boot(APP, { pad, seed: 1 });
+  app.ctx.get("openSection")("compass");
   return { app, tilt(t) { (listeners.tilt || []).forEach((fn) => fn(t)); } };
 }
 
@@ -129,4 +130,108 @@ test("with a working compass the key line does not claim the turning keys", asyn
     assert.ok(!key.includes("←→"));
     assert.ok(g.measure(key) <= SCREEN_W, `${lang}: ${key} is too wide`);
   }
+});
+
+function dailySlipData() {
+  const html = read("registry/apps/daily-slip/index.html");
+  const at = html.indexOf("var DATA =") + "var DATA =".length;
+  const start = html.indexOf("[", at);
+  let depth = 0, quote = "", escaped = false, end = -1;
+  for (let i = start; i < html.length; i++) {
+    const c = html[i];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === quote) quote = "";
+    } else if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "[") depth++;
+    else if (c === "]" && --depth === 0) { end = i + 1; break; }
+  }
+  assert.ok(end > start, "found daily-slip DATA array");
+  return JSON.parse(JSON.stringify(vm.runInNewContext("(" + html.slice(start, end) + ")")));
+}
+
+function bootStored(lang, loadValue, rejectLoad) {
+  const listeners = {};
+  const saves = new Map(), appends = [];
+  const pad = {
+    lang,
+    on(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
+    off() {},
+    isDown() { return false; },
+    sfx() {},
+    load(key) { return rejectLoad ? Promise.reject(new Error("broken")) : Promise.resolve(loadValue || saves.get(key) || null); },
+    save(key, value) { saves.set(key, { ...value }); },
+    notes: { append(title, text) { appends.push({ title, text }); return Promise.resolve("saved"); } }
+  };
+  const app = boot(APP, { pad, seed: 1 });
+  function press(button) {
+    (listeners.press || []).forEach((fn) => fn(button));
+    app.frame();
+    (listeners.release || []).forEach((fn) => fn(button));
+    app.frame();
+  }
+  return { app, saves, appends, press };
+}
+
+test("the moved slips and daily slot formula exactly match daily-slip", () => {
+  const source = vm.createContext({ console });
+  vm.runInContext(read("registry/apps/luck-compass/src/slips.js"), source);
+  const slips = source.SLIPS;
+  const original = dailySlipData();
+  assert.equal(slips.DATA.length, 108);
+  assert.deepEqual(JSON.parse(JSON.stringify(slips.DATA)), original);
+  assert.equal(slips.count, 108);
+  function dailySlot(dateKey) {
+    let sum = 0;
+    for (let i = 0; i < dateKey.length; i++) sum += dateKey.charCodeAt(i) * (i + 1);
+    return sum % original.length;
+  }
+  for (let i = 0; i < 400; i++) {
+    const d = new Date(Date.UTC(2025, 0, 1 + i));
+    const key = [d.getUTCFullYear(), String(d.getUTCMonth() + 1).padStart(2, "0"),
+      String(d.getUTCDate()).padStart(2, "0")].join("-");
+    assert.equal(slips.slotFor(key), dailySlot(key), key);
+  }
+});
+
+test("counter opens fortune; a daily draw is saved once and START writes its exact note", async () => {
+  const env = bootStored("zh");
+  await settle();
+  const initial = drawnLines(env.app);
+  assert.ok(initial.includes("每日一签"));
+  assert.ok(initial.includes("罗盘"));
+  env.app.ctx.get("openSection")("fortune");
+  env.press("a");
+  for (let i = 0; i < 60; i++) env.app.frame();
+  await settle();
+  const key = env.app.ctx.get("todayKey")();
+  const index = env.app.ctx.get("SLIPS").slotFor(key);
+  assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: false });
+  env.press("a");
+  assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: false });
+  env.press("start");
+  await settle();
+  const item = env.app.ctx.get("SLIPS").DATA[index];
+  assert.equal(env.appends.length, 1);
+  assert.equal(env.appends[0].title, "每日一签");
+  assert.equal(env.appends[0].text, key + "  第" + item.num + "签  " + item.grade.zh + "\n" +
+    item.verse.zh.join("\n") + "\n" + item.meaning.zh);
+  assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: true });
+});
+
+test("a rejected slip load is never overwritten, and B returns from both sections", async () => {
+  const env = bootStored("zh", null, true);
+  await settle();
+  env.app.ctx.get("openSection")("fortune");
+  env.press("a");
+  for (let i = 0; i < 60; i++) env.app.frame();
+  await settle();
+  assert.equal(env.app.ctx.get("loadFailed"), true);
+  assert.equal(env.saves.has("slip"), false);
+  env.press("b");
+  assert.equal(env.app.ctx.get("section"), "counter");
+  env.app.ctx.get("openSection")("compass");
+  env.press("b");
+  assert.equal(env.app.ctx.get("section"), "counter");
 });
