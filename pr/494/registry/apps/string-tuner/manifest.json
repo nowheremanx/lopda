@@ -4,7 +4,7 @@
   "name": "调音器",
   "glyph": "调",
   "category": "productivity",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "给吉他、贝斯、尤克里里、小提琴、二胡、琵琶等调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。",
   "i18n": {
     "zh": {

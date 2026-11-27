@@ -615,7 +615,7 @@
         "......0000......",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.1.1",
       "released": "2026-11-27",
       "updated": "2026-11-27",
       "description": "给吉他、贝斯、尤克里里、小提琴、二胡、琵琶等调弦：标准、Drop D、DADGAD、Open G 等定弦，也有半音模式。拨一根弦，看指针。",
@@ -635,8 +635,8 @@
         "mic"
       ],
       "path": "apps/string-tuner/index.html",
-      "sha256": "39980fd3db74a474c56b14448e5a58a59c86726b5a01cb75527b3b1aa51b0c86",
-      "bytes": 28504
+      "sha256": "3ffa54be09cfb86cef0200829ff50a3089b4cb5187463552f2cd0a7a46b72d5d",
+      "bytes": 28503
     },
     {
       "spec": "lopda/1",
