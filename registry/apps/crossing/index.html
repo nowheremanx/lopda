@@ -1548,14 +1548,18 @@ var ART = (function () {
       later(900 + k * 550, function () { fingerTo(i); });
       later(1200 + k * 550, function () { addIndex(i); PAD.sfx("tick"); });
     });
-    later(1200 + idx.length * 550 + 300, function () { fingerEl.hidden = true; submit(); });
+    later(1200 + idx.length * 550 + 300, function () { fingerEl.hidden = true; demoTaught(); submit(); });
     later(1200 + idx.length * 550 + 2600, demoEnd);
   }
+  /* The demo's word is the demo's gift, given once: the save that writes it (fillWord saves) must also write taught,
+     or a player who leaves on the "your turn" card sees the demo again on the next open and is handed one more
+     word each time. Practice shows the demo whatever taught says and does not set it. */
+  function demoTaught() { if (state.mode !== "practice") taught = true; }
   function demoEnd() {
     demoTimers.forEach(clearTimeout); demoTimers = [];
     fingerEl.hidden = true;
     if (phase !== "demo") return;
-    if (demoWord && state.done.indexOf(demoWord.word) < 0) { state.entry = []; fillWord(demoWord); }   /* skipped: fill it now */
+    if (demoWord && state.done.indexOf(demoWord.word) < 0) { demoTaught(); state.entry = []; fillWord(demoWord); }   /* skipped: fill it now */
     phase = "demoEnd";
     showCover(TXT.demoEnd, TXT.start);
   }
