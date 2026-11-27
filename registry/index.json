@@ -29,7 +29,7 @@
       ],
       "version": "1.4.2",
       "released": "2026-10-28",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
       "i18n": {
         "en": {
@@ -130,9 +130,9 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.2",
+      "version": "0.4.3",
       "released": "2026-10-10",
-      "updated": "2026-11-26",
+      "updated": "2026-11-27",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -143,8 +143,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "1fff14ff0a42577ae60d784f4b10388cacc89e5422564c57a59cba7818ad4678",
-      "bytes": 301183
+      "sha256": "ac047fc0c3e758f509e5b413d3c00427c547d0d0fd3b5f79c6d9283047ef942b",
+      "bytes": 305748
     },
     {
       "spec": "lopda/1",
@@ -171,9 +171,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.3",
+      "version": "0.1.4",
       "released": "2026-10-28",
-      "updated": "2026-11-26",
+      "updated": "2026-11-27",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -184,8 +184,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "2f1946120f61940a64342e3719a76f5fc66d72c4163120817f7ebf0266174faa",
-      "bytes": 244650
+      "sha256": "2d7e16ab1364dacb67f3cdf47e7bd143e7b4d3afdb97d461ce8d80abf75a8d75",
+      "bytes": 245842
     },
     {
       "spec": "lopda/1",
@@ -214,7 +214,7 @@
       ],
       "version": "2.1.4",
       "released": "2026-10-21",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "节奏故事：十首古典曲、三幕剧情、四种结局。A 吹竽、B 敲磬；国王睁眼时停手，闭上再起手。",
       "i18n": {
         "en": {
@@ -255,7 +255,7 @@
       ],
       "version": "2.0.3",
       "released": "2026-10-21",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
       "i18n": {
         "en": {
@@ -294,9 +294,9 @@
         "................",
         "................"
       ],
-      "version": "0.2.0",
+      "version": "0.2.1",
       "released": "2026-10-27",
-      "updated": "2026-11-24",
+      "updated": "2026-11-27",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -310,8 +310,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "40bfdaae570d9d21d181a185515da5ca5839694f3e60bdf727b26793099e88ea",
-      "bytes": 98096
+      "sha256": "a44db4d55ba8302d918255363ed4ead0778d1570519b529f72df4e29e73effa6",
+      "bytes": 101837
     },
     {
       "spec": "lopda/1",
@@ -385,7 +385,7 @@
       ],
       "version": "1.1.2",
       "released": "2026-10-28",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "曹操从华容道脱身：全关开放，记录步数，附八课大师教程与逐步提示。",
       "i18n": {
         "zh": {
@@ -430,7 +430,7 @@
       ],
       "version": "1.6.1",
       "released": "2026-10-17",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
       "i18n": {
         "zh": {
@@ -477,7 +477,7 @@
       ],
       "version": "1.8.2",
       "released": "2026-10-07",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "15×15 棋盘，你执黑先手和电脑下，可以悔棋；也能通过电波和另一台掌机对战。",
       "i18n": {
         "en": {
@@ -521,7 +521,7 @@
       ],
       "version": "1.8.1",
       "released": "2026-10-24",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
       "i18n": {
         "zh": {
@@ -664,7 +664,7 @@
       ],
       "version": "1.2.1",
       "released": "2026-10-11",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "八位数商务计算器，连续运算、百分比和记忆键。",
       "i18n": {
         "en": {
@@ -834,7 +834,7 @@
       ],
       "version": "3.0.1",
       "released": "2026-10-08",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "短篇视觉小说。雨夜的小站，车晚点五十分钟，爸送你去上大学。十分钟读完。",
       "i18n": {
         "zh": {
