@@ -50,6 +50,10 @@ function cartHeader(u8){
   if(x!==u8[0x14D]) return {ok:false, why:tr("cart.badsum")};
   return {ok:true, title:t.trim(), dual:!!(cgb&0x80)};
 }
+/* cartridge types (header byte 0x147) with a battery behind their RAM. Only these keep a save: the core copies out
+   the RAM of no other kind (emulator_write_ext_ram returns early), so reading one gives uninitialised bytes (issue #295) */
+var GB_BATTERY=[0x03,0x06,0x09,0x0D,0x0F,0x10,0x13,0x1B,0x1E,0x22,0xFE,0xFF];
+function hasBattery(u8){ return GB_BATTERY.indexOf(u8[0x147])>=0; }
 /* black-and-white only: clear the colour and Super Game Boy flags on our private copy */
 function asMono(u8){
   var r=new Uint8Array(u8); if(r[0x143]&0x80) r[0x143]=0; r[0x146]=0;
@@ -76,10 +80,10 @@ function renderCarts(){
     var row=document.createElement("div"); row.className="row cart-acts";
     var note=document.createElement("p"); note.className="hint cart-note"; note.hidden=true;
     var exp=document.createElement("button"); exp.type="button"; exp.className="btn ghost"; exp.textContent=tr("cart.export");
-    exp.disabled=!(S.db && SAVES[c.id] && SAVES[c.id].sram);
+    exp.disabled=!(S.db && c.battery!==false && SAVES[c.id] && SAVES[c.id].sram);
     exp.onclick=function(){ exportSav(c); };
     var imp=document.createElement("button"); imp.type="button"; imp.className="btn ghost cart-imp"; imp.textContent=tr("cart.import");
-    imp.disabled=!S.db;
+    imp.disabled=!S.db || c.battery===false;
     imp.onclick=function(){
       if(imp.dataset.armed){ importSav(c); return; }
       PENDING={cart:c}; var f=$("cart-sav-file"); f.value=""; f.click();
@@ -131,6 +135,7 @@ function romOf(c){
 /* the cartridge RAM size, as the core counts it: the cartridge powered on for a moment with nothing run */
 function ramSize(c){
   return Promise.all([gbModule(),romOf(c)]).then(function(r){
+    if(!hasBattery(r[1])) return 0;   /* no battery, no save to bring in */
     var m=r[0], data=asMono(r[1]), size=(data.length+0x7fff)&~0x7fff, p=m._malloc(size), e=0;
     try{
       var h=new Uint8Array(m.HEAP8.buffer,p,size); h.fill(0); h.set(data);
@@ -167,6 +172,9 @@ function importSav(c){
 }
 $("cart-file").onchange=function(){
   var f=this.files&&this.files[0]; this.value=""; if(!f) return;
+  /* the size first: the picker lists any file (.gb has no type on iOS), and a wrong pick such as a video must not be read
+     into memory just to be turned down (issue #298); cartHeader checks the same bounds again on the bytes */
+  if(f.size<0x8000 || f.size>8*1024*1024){ toast(tr("cart.badsize")); sfx("err"); return; }
   f.arrayBuffer().then(function(buf){
     var u8=new Uint8Array(buf), h=cartHeader(u8);
     if(!h.ok){ toast(h.why); sfx("err"); return; }
@@ -174,7 +182,7 @@ $("cart-file").onchange=function(){
       var id=hex.slice(0,24), name=noEmoji(f.name.replace(/\.(gbc?|bin)$/i,"")).slice(0,40)||h.title||tr("cart.default");
       var have=CARTS.filter(function(x){ return x.id===id; })[0];
       if(have){ toast(tr("cart.dupe")); return; }
-      var meta={name:name, title:h.title, bytes:u8.length, added:Date.now(), dual:h.dual};
+      var meta={name:name, title:h.title, bytes:u8.length, added:Date.now(), dual:h.dual, battery:hasBattery(u8)};
       var write = S.db ? put(S.refs.roms.doc(id),{rom:b64(u8)}).then(function(ok){ return ok && put(S.refs.carts.doc(id),meta); }) : Promise.resolve(true);
       return write.then(function(ok){
         if(!ok) return;
@@ -226,6 +234,10 @@ function gbStart(c,rom,save){
   var col=function(t){ var c=TONES[t]; return ((255<<24)|(c[2]<<16)|(c[1]<<8)|c[0])>>>0; };
   for(var p=0;p<3;p++) m._emulator_set_bw_palette_simple(GB.e,p,col(3),col(2),col(1),col(0));
   GB.cart=c; GB.save=save||{}; SAVES[c.id]=GB.save;
+  /* a cartridge placed before the battery check learns it here (saved with c.played below); RAM kept for one with no
+     battery was never the game's and goes */
+  c.battery=hasBattery(data); GB.battery=c.battery;
+  if(!GB.battery && GB.save.sram){ delete GB.save.sram; if(S.db) put(S.refs.cartsave.doc(c.id),GB.save); }
   if(GB.save.sram) gbWithFile(m._ext_ram_file_data_new(GB.e),function(fd,buf){ var s=unb64(GB.save.sram); if(s.length===buf.length){ buf.set(s); m._emulator_read_ext_ram(GB.e,fd); } });
   var cv=$("cart-cv"); GB.ctx=cv.getContext("2d"); GB.img=GB.ctx.createImageData(160,144);
   GB.ctx.fillStyle="rgb("+TONES[3].join(",")+")"; GB.ctx.fillRect(0,0,160,144);
@@ -278,7 +290,7 @@ function gbAudio(){
 }
 var GB_JOY={up:"_set_joyp_up",down:"_set_joyp_down",left:"_set_joyp_left",right:"_set_joyp_right",a:"_set_joyp_A",b:"_set_joyp_B",start:"_set_joyp_start",select:"_set_joyp_select"};
 function gbJoy(b,down){ if(GB.e && GB_JOY[b]) GB.mod[GB_JOY[b]](GB.e,down?1:0); }
-function gbRamDue(){ return GB.dirty || GB.poll; }
+function gbRamDue(){ return GB.battery && (GB.dirty || GB.poll); }
 /* the cartridge RAM into GB.save.sram; true when it changed */
 function gbReadSram(){
   if(!GB.e) return false; GB.dirty=false;

@@ -283,8 +283,12 @@ function exportNegative(){
   };
   var done=function(){ D.busy=null; D.neg=null; toMenu("export"); renderSheet(); render(); };
   if(job.blob){ done(); save(job.blob); return; }
+  /* leaving the darkroom (HOME) bumps D.gen: a negative finished after that is dropped, so no share sheet or save
+     dialog opens over another screen (issue #304), the same gate as printOut and printAll */
+  var gen=D.gen;
   busy(tr("dk.exporting"));
-  job.promise.then(save,function(e){ toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); }).then(done);
+  job.promise.then(function(b){ if(gen===D.gen) return save(b); },function(e){ if(gen!==D.gen) return; toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); })
+    .then(function(){ if(gen===D.gen) done(); });
 }
 /* the sealed places go, the times and pictures stay; prints made from the old place are dropped */
 function erasePlaces(){
