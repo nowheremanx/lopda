@@ -623,34 +623,39 @@ function loadFilm(){
   }).catch(function(e){ F.ready=true; toast(tr("cam.readfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 
-var camLinked=false, bootTimer=null;
+/* the boot screen's timers. Leaving mid-boot (HOME) and coming back starts a new run: stopBoot clears the old
+   run's timeout and interval and bumps bootRun, so a callback from an old run sees it is stale and stops. */
+var camLinked=false, bootTimer=null, bootIv=null, bootRun=0;
+function stopBoot(){ clearTimeout(bootTimer); clearInterval(bootIv); bootTimer=bootIv=null; bootRun++; }
 function camBoot(){
-  var box=$("cam-boot"), reduce=window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  stopBoot();
+  var run=bootRun, box=$("cam-boot"), reduce=window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
   if(camLinked || reduce){ camLinked=true; return; }
   var film = F.roll ? tr("cam.boot.filmof",{name:stockLabel(F.stock), stock:stockName(F.res), n:F.frames.length, size:F.size}) : tr("cam.boot.nofilm");
   var shake=tr("cam.boot.shake"), sep=I18N.lang==="zh"?" ： ":": ";
   var lines=[[tr("cam.boot.slot"),"…",380],[tr("cam.boot.found"),tr("cam.boot.lens"),420],[shake,"",0],[tr("cam.boot.fw"),"CAM-OS 1.03",300],[tr("cam.boot.film"),film,360],["",tr("cam.boot.done"),500]];
   box.textContent=""; box.hidden=false;
   var skip=document.createElement("div"); skip.className="skip"; skip.textContent=tr("cam.boot.skip");
-  var done=function(){ clearTimeout(bootTimer); clearInterval(bootTimer); camLinked=true; box.hidden=true; box.onclick=null; };
+  var done=function(){ stopBoot(); camLinked=true; box.hidden=true; box.onclick=null; };
   box.onclick=done;
   var i=0;
   (function next(){
-    if(box.hidden) return;
+    if(box.hidden || run!==bootRun) return;
     if(i>=lines.length){ bootTimer=setTimeout(done,700); return; }
     var L=lines[i++], d=document.createElement("div"); d.className="ln";
     box.insertBefore(d,skip.parentNode?skip:null);
     if(!skip.parentNode) box.appendChild(skip);
     if(L[0]===shake){
       var n=0; d.className="ln bar8";
-      bootTimer=setInterval(function(){
+      bootIv=setInterval(function(){
+        if(run!==bootRun) return;
         n++; if(n===1) sfx("modem"); d.textContent=shake+" ["+"█".repeat(n)+"░".repeat(10-n)+"]";
-        if(n>=10){ clearInterval(bootTimer); d.textContent=shake+" [██████████] OK"; bootTimer=setTimeout(next,240); sfx("ok"); }
+        if(n>=10){ clearInterval(bootIv); bootIv=null; d.textContent=shake+" [██████████] OK"; bootTimer=setTimeout(next,240); sfx("ok"); }
       },70);
       return;
     }
     d.textContent=L[0] ? L[0]+" … " : "";
-    bootTimer=setTimeout(function(){ d.textContent=(L[0]?L[0]+(L[1]!=="…"?sep:" "):"")+L[1]; bootTimer=setTimeout(next,L[2]); },260);
+    bootTimer=setTimeout(function(){ if(run!==bootRun) return; d.textContent=(L[0]?L[0]+(L[1]!=="…"?sep:" "):"")+L[1]; bootTimer=setTimeout(next,L[2]); },260);
   })();
 }
 /* the old roll and every frame left from it go, with one line to say so */
@@ -792,8 +797,17 @@ function buildRolls(){
   }
   CAM.roll=Math.max(0,STOCK_ORDER.indexOf(nextStockId));
   paintRolls();
-  requestAnimationFrame(function(){ pickRoll(CAM.roll,false); });
+  requestAnimationFrame(function(){ fitRolls(); pickRoll(CAM.roll,false); });
 }
+/* the chosen roll is drawn at full size, so canister + label must fit the strip's height; on a short screen
+   (iPhone SE in Safari, 320 wide) the canister shrinks instead of the label being cut (sdk/UI.md) */
+function fitRolls(){
+  var box=$("rolls"), c=box.children[0]; if(!c || !box.clientHeight) return;
+  var lab=c.querySelector(".lab").offsetHeight;
+  var h=Math.max(48,Math.min(128,Math.floor(box.clientHeight-lab-6-2)));
+  box.style.setProperty("--can-h",h+"px");
+}
+window.addEventListener("resize",function(){ if(!$("cam-load").hidden) fitRolls(); });
 function pickRoll(i,smooth){
   var box=$("rolls"), c=box.children[i]; if(!c) return;
   CAM.roll=i; paintRolls();
@@ -874,8 +888,8 @@ LP.padRoute("cam",function(b,down){ if($("v-cam").hidden) return false; camButto
 LP.builtin({id:"camera", label:"app.camera", icon:"camera", view:"cam",
   open:function(){ openCam(); },
   tag:function(){ return F.roll?(F.frames.length+"/"+F.size):""; },
-  leave:function(){ stopLive(); LP.keepAwake(false); },
-  lang:function(){ paintRolls(); if(!$("v-cam").hidden) renderCam(); },
+  leave:function(){ stopBoot(); stopLive(); LP.keepAwake(false); },
+  lang:function(){ paintRolls(); fitRolls(); if(!$("v-cam").hidden) renderCam(); },
   padLayout:function(){ if(!$("v-cam").hidden) camLayout(); },
   ready:function(){ loadFilm().then(function(){ if(!$("v-home").hidden) LP.renderHome(); if(!$("v-cam").hidden) renderCam(); }); },
   nostore:function(){ F.nostore=true; F.ready=true; if(!$("v-cam").hidden) renderCam(); },

@@ -22,7 +22,8 @@ var M={
   list:[], sizes:{}, cache:{}, schema:{},
   current:null, seq:0, saveTimer:0, dirty:false, askYes:null, dataAskYes:null, seedPromise:null,
   idea:"", ideaLoaded:false, ideaTouched:false, ideaTimer:0, askTimer:0,
-  askFor:null, askTouched:false, verPick:null, verSeq:0, reviseBusy:false
+  askFor:null, askTouched:false, verPick:null, verSeq:0, reviseBusy:false,
+  gone:{}, listed:false   /* gone: ids deleted this session, so a late write cannot bring one back (issues #407, #408) */
 };
 
 var ICON=["................","..000000000000..","..033333333330..","..030000000030..","..030333330030..","..030300030030..","..030300330030..","..030333000030..","..030000000030..","..030333300030..","..030000000030..","..033333333330..","..000000000000..","................","................","................"];
@@ -104,6 +105,7 @@ function listScripts(){
   if(!refs()) return Promise.resolve([]);
   return M.items.get().then(function(q){
     M.list=q.docs.map(function(d){ var o=own(d.data())||{}; o.id=d.id; return o; });
+    M.listed=true;
     M.list.sort(function(a,b){ return (b.updated||0)-(a.updated||0); });
     return M.list;
   });
@@ -130,7 +132,7 @@ function loadScript(id){
   });
 }
 function saveScript(s){
-  if(!s || !s.id) return Promise.resolve(false);
+  if(!s || !s.id || M.gone[s.id]) return Promise.resolve(false);
   var now=Date.now();
   if(!s.created) s.created=now;
   s.updated=now;
@@ -149,6 +151,9 @@ function saveScript(s){
 }
 function deleteScript(id){
   if(!refs()) return Promise.resolve();
+  /* a script still being written is stopped: its answer has nowhere to go (issue #407) */
+  M.gone[id]=true;
+  if(G.job && G.s && G.s.id===id) G.job.stop();
   /* the order is the way back: data, versions, ask draft, script last, so a failure leaves the script */
   return M.data.doc(id).delete().then(function(){
     return deleteVersions(id);
@@ -160,7 +165,9 @@ function deleteScript(id){
     M.list=M.list.filter(function(x){ return x.id!==id; });
     delete M.sizes[id]; delete M.cache[id]; delete M.schema[id];
     delete S.kv[PREFIX+id];
-  });
+    /* the sensors, camera and word book it was allowed go with it (issue #409) */
+    if(LP.sensorGrants) LP.sensorGrants.revoke(PREFIX+id);
+  },function(e){ delete M.gone[id]; throw e; });
 }
 
 /* ---------- versions and ask drafts: what a revision must never lose ----------
@@ -240,7 +247,7 @@ function loadAsk(id){
 }
 function saveAskNow(id, text){
   clearTimeout(M.askTimer); M.askTimer=0;
-  if(!id || !refs()) return Promise.resolve(false);
+  if(!id || M.gone[id] || !refs()) return Promise.resolve(false);
   text=String(text==null?"":text);
   if(!text) return clearAsk(id);
   return put(M.asks.doc(id),{v:1, text:text, updated:Date.now()});
@@ -363,7 +370,11 @@ LP.scripts={
   deleteData:deleteData,
   info:dataInfo,
   setSchema:setDataSchema,
-  size:function(id){ return M.sizes[id]||0; }
+  size:function(id){ return M.sizes[id]||0; },
+  /* for Settings' list of allowed programs (issue #409): a script's name, or null; whether it still exists, or null
+     before the library has been read */
+  nameOf:function(id){ for(var k=0;k<M.list.length;k++) if(M.list[k].id===id) return M.list[k].name||null; return null; },
+  exists:function(id){ if(M.gone[id]) return false; if(!M.listed) return null; return M.list.some(function(x){ return x.id===id; }); }
 };
 
 /* ---------- library ---------- */
@@ -496,7 +507,10 @@ function promptIdea(){
 /* The chin pad is opt-in for local scripts: showing it costs about 120 px of height, and a
    touch-only game (fruit ninja) does not need it. It appears only when the code reads the pad.
    PAD.on("tilt"/"shake"/"sound") is not a button, so it leaves the pad hidden. */
-var PAD_USE=/\bPAD\s*\.\s*(?:isDown|BUTTONS)\b|\bPAD\s*\.\s*on\s*\(\s*['"`](?:press|release)['"`]/;
+/* whether a script uses the buttons, so its run shows the chin pad. Loose on purpose: PAD may be aliased (var K=PAD),
+   read with brackets or destructured, so any isDown or BUTTONS, or a "press" / "release" string, counts. A pad shown
+   for nothing costs a little room; a game with no pad cannot be played at all (issue #410) */
+var PAD_USE=/\b(?:isDown|BUTTONS)\b|['"`](?:press|release)['"`]/;
 function usesPad(code){ return PAD_USE.test(String(code||"")); }
 function copyPrompt(){
   if(M.ideaTouched || M.idea) saveIdeaSoon();
@@ -705,6 +719,7 @@ function generate(){
     if(!$("v-script-edit").hidden){ renderGen(); LP.keepAwake(false); }
   }
   G.job.then(function(all){
+    if(M.gone[s.id]){ end(); return; }
     var code=cleanCode(all);
     if(!code) throw {code:"empty"};
     s.body=code; s.name=deriveName(code,s.name);
@@ -716,6 +731,7 @@ function generate(){
       sfx("ok");
     });
   }).catch(function(e){
+    if(M.gone[s.id]){ end(); return; }
     var code=e && e.code, why=tr("scripts.gen.fail",{why:G.left && code!=="stopped" ? tr("scripts.gen.left") : LP.ai.err(e,"scripts")}),
       here=M.current===s && !$("v-script-edit").hidden;
     end();
@@ -1190,7 +1206,7 @@ function init(){
 /* ---------- built-in registration ---------- */
 LP.builtin({id:"scripts", label:"app.scripts", icon:function(){ return ICON; }, view:"scripts",
   open:function(){ show("scripts"); },
-  ready:function(){ if(LP.ai) LP.ai.watch(updateIdeaButtons); refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); },
+  ready:function(){ if(LP.ai) LP.ai.watch(updateIdeaButtons); refs(); loadIdea(); ensureSeed().then(function(){ return listScripts().catch(function(){}); }).then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); },
   enter:function(){ refs(); loadIdea(); ensureSeed().then(function(){ if(!$("v-scripts").hidden) renderLibrary(); }); renderLibrary(); updateIdeaButtons(); },
   leave:function(){ setStatus(""); },
   lang:function(){ updateIdeaButtons(); if(!$("v-scripts").hidden) renderLibrary(); }
@@ -1212,7 +1228,9 @@ LP.builtin({id:"script-data", view:"script-data", keepPad:false,
 LP.builtin({id:"script-revise", view:"script-revise", keepPad:false,
   enter:function(){ renderRevise(); },
   /* the ask draft outlives the page; an empty ask removes it */
-  leave:function(){ if(M.askFor) saveAskNow(M.askFor, askText()); },
+  /* every show() calls every leave hook: only the first leave after this page saves, so a later screen change cannot
+     write the draft of a script deleted since (issue #408) */
+  leave:function(){ if(!M.askFor) return; var id=M.askFor; M.askFor=null; saveAskNow(id, askText()); },
   lang:function(){ if(!$("v-script-revise").hidden) renderReviseButtons(); }
 });
 LP.builtin({id:"script-versions", view:"script-versions", keepPad:false,
@@ -1228,7 +1246,8 @@ LP.scripts._test={
   loadAsk:loadAsk, saveAskNow:saveAskNow, clearAsk:clearAsk,
   replaceBody:replaceBody, deleteScript:deleteScript,
   revising:revising, saveCurrent:saveCurrent, state:M, stream:G,
-  generate:generate, openScript:openScript, flushSource:flushSource
+  generate:generate, openScript:openScript, flushSource:flushSource,
+  usesPad:usesPad, listScripts:listScripts
 };
 
 init();

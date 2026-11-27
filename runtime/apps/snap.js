@@ -24,7 +24,7 @@ var FINDER=window.LopdaFinder, LENS=window.LopdaLenses, SCORE=window.LopdaScoreP
    NOFRAME_MS (or a track that ends, or stays muted MUTE_MS) the stream restarts once; a second failure closes with null */
 var WATCH_MS=250, REPLAY_MS=1500, NOFRAME_MS=3000, MUTE_MS=1000;
 var SN={req:null, stream:null, gen:0, raf:0, last:0, watch:null, lens:"w", lenses:null, exposure:0, contrast:0,
-  swapping:0, swapTimer:null, systemOk:false, padWas:false, blink:null,
+  swapping:0, swapTimer:null, systemOk:false, padWas:false, blink:null, focusWas:null,
   since:0, seen:false, replayed:false, muted:0, restarts:0};
 /* ?debug: what the finder did (LOPDA_DEBUG.snap) */
 function log(s){ var d=window.LOPDA_DEBUG; if(d) (d.snap=d.snap||[]).push(s); }
@@ -52,8 +52,11 @@ function render(){
   var sg=function(v){ return (v>0?"+":v<0?"−":"±")+Math.abs(v); };
   $("snap-who").textContent=SN.req.o.keep ? SN.req.o.name : tr("snap.who",{name:SN.req.o.name});
   $("snap-exp").textContent=tr("cam.exp",{b:sg(SN.exposure), c:sg(SN.contrast)});
-  $("snap-lens").hidden=!SN.stream;
-  $("snap-lens").textContent=LP.film.lensName(lensNow());
+  /* the lens's name once a picture comes; until then the tag says the camera is starting, so a press that cannot
+     shoot yet is not met with nothing (issue #437) */
+  var live=!!(SN.stream && SN.seen);
+  $("snap-lens").hidden=false; $("snap-lens").dataset.live=live?"1":""; $("snap-lens").dataset.stream=SN.stream?"1":"";
+  $("snap-lens").textContent=live ? LP.film.lensName(lensNow()) : tr("snap.starting");
 }
 /* the finder as large as the box allows, 8:7, whole CSS pixels */
 function layout(){
@@ -79,6 +82,10 @@ function open(o){
   $("snap").hidden=false;
   /* the camera's keys: the chin pad shows while the finder is open, whatever the app asked for */
   SN.padWas=!$("gamepad").hidden; LP.showPad(true);
+  /* a keyboard's keys go where the focus is: with the app's frame focused they would land in the app and never reach
+     the finder (issue #436). The finder takes the focus and gives it back when it closes */
+  SN.focusWas=document.activeElement;
+  try{ $("snap").focus({preventScroll:true}); }catch(e){}
   render(); layout();
   /* whatever way the app left the front (HOME, another program, closed, removed, its frame gone), the next look lets go */
   SN.watch=setInterval(function(){
@@ -149,7 +156,7 @@ function tick(t){
   var v=$("snap-video");
   if(v.readyState<2 || !v.videoWidth) return;
   draw(frame(v));
-  if(!SN.seen){ SN.seen=true; SN.restarts=0; log("live"); }
+  if(!SN.seen){ SN.seen=true; SN.restarts=0; log("live"); render(); }
   if(SN.swapping && Date.now()>=SN.swapping) endSwap();
 }
 function frame(v){
@@ -162,9 +169,13 @@ function fullFrame(v){
   for(var i=0;i<gray.length;i++) gray[i]=Math.max(0,Math.min(255,Math.round(lum[i]*255)));
   return {w:w,h:h,gray:gray};
 }
+/* not ready yet (no stream, a lens changing, no picture): a tick, as the camera program's shutter does while it starts,
+   and the press counts as a gesture to ask the stream to play */
+function notYet(){ sfx("tick"); if(SN.stream && !SN.seen) play("press"); }
 function shoot(){
   var v=$("snap-video");
-  if(!SN.req || !SN.stream || SN.swapping || v.readyState<2 || !v.videoWidth) return;
+  if(!SN.req) return;
+  if(!SN.stream || SN.swapping || v.readyState<2 || !v.videoWidth){ notYet(); return; }
   var r=SN.req, px=frame(v);
   /* the shutter: the sound, the finder blinks dark, and it closes */
   sfx("shutter"); draw(px); $("snap-shut").hidden=false;
@@ -185,12 +196,15 @@ function finish(v,linger,extraFrame){
   clearTimeout(SN.blink);
   if(linger) SN.blink=setTimeout(close,linger); else close();
   LP.releaseButtons(); LP.showPad(SN.padWas);
+  var was=SN.focusWas; SN.focusWas=null;
+  if(was && was.focus && was!==document.body && document.contains(was) && $("snap").contains(document.activeElement)) try{ was.focus({preventScroll:true}); }catch(e){}
   if(r.o.keep) r.o.done(v,extraFrame||null);
   else r.o.done(v);
 }
 /* SELECT: the next lens. The finder goes dark until the new lens gives a picture, as in the camera program */
 function nextLens(){
-  if(!SN.stream || SN.swapping) return;
+  if(!SN.req) return;
+  if(!SN.stream || SN.swapping){ notYet(); return; }
   SN.lens=LENS.next(lenses(),SN.lens).id; sfx("tap");
   $("snap-shut").hidden=false; SN.swapping=Date.now()+160;
   clearTimeout(SN.swapTimer); SN.swapTimer=setTimeout(endSwap,2500);
