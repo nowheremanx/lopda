@@ -3153,7 +3153,7 @@ test("sound: one volume with five steps; an old 'sound off' setting becomes volu
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
-test("settings: eleven 44 px rows fit 331x359 down to AI 线路; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
+test("settings: twelve 44 px rows fit 331x359 down to AI 线路; the share QR and about page open and go back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
   await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
   await p.waitForFunction(() => window.LP && window.LP.S.db);
@@ -3168,7 +3168,7 @@ test("settings: eleven 44 px rows fit 331x359 down to AI 线路; the share QR an
     return { rows: rows.map((r) => { const b = r.getBoundingClientRect(); return { top: b.top - box.top, bottom: b.bottom - box.top, h: b.height }; }),
       scroll: v.scrollWidth, client: v.clientWidth };
   });
-  assert.equal(menu.rows.length, 11);
+  assert.equal(menu.rows.length, 12);   /* 12 with the controller row of the test PR (手柄) */
   assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
   assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
   /* 系统声音 is the tenth (decisions.md section 41): the first screen still fits down to AI 线路, and 备份与恢复
