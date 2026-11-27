@@ -60,10 +60,10 @@ var T={
   sheet:"", copyTo:-1, built:false, exporting:false,
   /* 12.15: undo/redo (memory), persistent versions and the project library */
   history:[], redo:[], snap:null, historySilent:false,
-  versions:[], versionsOk:false, versionPick:0, projects:null, projectsLoading:false,
+  versions:[], versionsOk:false, versionsLoad:null, versionsFail:false, versionPick:0, projects:null, projectsLoading:false,
   projectFolder:"", templatePick:"", deletePick:"", importData:null, guidePage:0,
   /* 12.16: the assistant's one request and the preview waiting for 采用 */
-  aiBusy:false, aiJob:null, aiPreview:null, aiNote:"", aiTrouble:null, scoreText:"", scoreNote:"", scorePages:[], scorePagePick:-1,
+  aiBusy:false, aiJob:null, aiPreview:null, tapeGen:0, aiNote:"", aiTrouble:null, scoreText:"", scoreNote:"", scorePages:[], scorePagePick:-1,
   aiCard:"", aiStage:"", aiSig:null, aiMark:false, aiT0:0, aiLast:0, aiTick:0,
   /* the player: one chain clock, chainPat is what is scheduled, playPat is what the ears hear */
   playing:false, mode:"", playPat:0, chainPat:0, pendingPat:-1, queued:-1, boundaryGlobal:0,
@@ -269,7 +269,7 @@ function loadStore(){
         var fn=rawFolders[fi];
         if(typeof fn!=="string") continue;
         fn=clipName(fn.trim(),SONGS.NAME_MAX);
-        if(!fn || fn==="demo" || cleanFolders.indexOf(fn)>=0) continue;
+        if(!fn || reservedFolder(fn) || cleanFolders.indexOf(fn)>=0) continue;
         cleanFolders.push(fn);
       }
     }
@@ -307,10 +307,10 @@ function loadStore(){
    A version is a full song in data/users/local/studio/versions/<project id>, newest first, ten at most. The undo stack
    in memory is for the last few taps; versions survive a reload and are what an AI edit stores before it lands. */
 function loadVersions(id){
-  T.versions=[]; T.versionsOk=false;
+  T.versions=[]; T.versionsOk=false; T.versionsFail=false;
   var r=refs();
-  if(!r || !id){ T.versionsOk=true; return Promise.resolve(); }
-  return r.versions.doc(id).get().then(function(sn){
+  if(!r || !id){ T.versionsOk=true; T.versionsLoad=null; return Promise.resolve(); }
+  return (T.versionsLoad=r.versions.doc(id).get().then(function(sn){
     if(T.id!==id) return;
     var data=sn.exists ? own(sn.data()) : null, list=data && Array.isArray(data.versions) ? data.versions : [], i, got, v;
     for(i=0;i<list.length && T.versions.length<10;i++){
@@ -323,9 +323,9 @@ function loadVersions(id){
     if(T.sheet==="versions") renderSheet();
   },function(){
     if(T.id!==id) return;
-    T.versions=[]; T.versionsOk=false;
+    T.versions=[]; T.versionsOk=false; T.versionsFail=true;
     if(T.sheet==="versions") renderSheet();
-  });
+  }));
 }
 function writeVersions(){
   var r=refs();
@@ -335,11 +335,22 @@ function writeVersions(){
     return false;
   });
 }
+/* The stored list is written whole, so a save before the list has been read would replace up to ten versions with
+   one (#448): the song is copied now, the write waits for the read, and a failed read saves nothing. */
 function saveVersion(label){
   if(!T.loaded || !T.song || !T.id || !T.metaOk) return Promise.resolve(false);
-  T.versions.unshift({at:Date.now(),name:label||"",song:JSON.parse(JSON.stringify(T.song))});
-  if(T.versions.length>10) T.versions.length=10;
-  return writeVersions();
+  var id=T.id, entry={at:Date.now(),name:label||"",song:JSON.parse(JSON.stringify(T.song))};
+  function put(){
+    T.versions.unshift(entry);
+    if(T.versions.length>10) T.versions.length=10;
+    return writeVersions();
+  }
+  if(T.versionsOk) return put();
+  return (T.versionsLoad||Promise.resolve()).then(function(){
+    if(T.id!==id) return false;
+    if(!T.versionsOk){ toast(tr("studio.version.unread")); return false; }
+    return put();
+  });
 }
 
 /* ---------- folders and the built-in demo folder (12.17) ---------- */
@@ -355,7 +366,10 @@ function templateById(id){
   for(i=0;i<list.length;i++) if(list[i].id===id) return list[i];
   return null;
 }
-function folderOf(song){ return song && typeof song.folder==="string" ? song.folder : ""; }
+/* "demo" and "copies" are the two virtual folders (12.17, 12.18), never a user's: a tape that carries one of those names
+   (an older rename, a workspace from elsewhere) lives in My tapes, where it can be seen and moved (#446) */
+function reservedFolder(name){ return name==="demo" || name==="copies"; }
+function folderOf(song){ return song && typeof song.folder==="string" && !reservedFolder(song.folder) ? song.folder : ""; }
 function folderLabel(folder){
   if(folder==="demo") return tr("studio.folder.demo");
   if(folder==="copies") return tr("studio.folder.copies");
@@ -449,7 +463,7 @@ function newProject(){
   if(!r || !T.metaOk || !T.loaded) return;
   flush();
   song=SONGS.newSong(Date.now());
-  song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
+  song.folder=reservedFolder(T.projectFolder) ? "" : T.projectFolder;
   id=LP.uid();
   writeProject(id,song).then(function(ok){
     if(!ok) return;
@@ -491,7 +505,7 @@ function useTemplate(){
   song=t.make(Date.now());
   song.name=tr(t.label);
   song.template=t.id;
-  song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
+  song.folder=reservedFolder(T.projectFolder) ? "" : T.projectFolder;
   id=LP.uid();
   writeProject(id,song).then(function(ok){
     if(!ok) return;
@@ -502,7 +516,7 @@ function useTemplate(){
 }
 function addFolder(name){
   name=clipName(String(name||"").trim(),SONGS.NAME_MAX);
-  if(!T.metaOk || !T.meta || !name || name==="demo") return false;
+  if(!T.metaOk || !T.meta || !name || reservedFolder(name)) return false;
   T.meta.folders=T.meta.folders||[];
   if(T.meta.folders.indexOf(name)>=0) return false;
   T.meta.folders.push(name);
@@ -512,7 +526,7 @@ function addFolder(name){
 }
 function renameFolderTo(name){
   var old=T.projectFolder, next=clipName(String(name||"").trim(),SONGS.NAME_MAX), i, writes=[];
-  if(!T.metaOk || !T.meta || !old || old==="demo" || !next || next==="demo" || next===old) return false;
+  if(!T.metaOk || !T.meta || !old || reservedFolder(old) || !next || reservedFolder(next) || next===old) return false;
   T.meta.folders=T.meta.folders||[];
   if(T.meta.folders.indexOf(next)>=0) return false;
   for(i=0;i<T.meta.folders.length;i++) if(T.meta.folders[i]===old) T.meta.folders[i]=next;
@@ -531,7 +545,7 @@ function renameFolderTo(name){
 }
 function deleteFolder(){
   var old=T.projectFolder, i, writes=[];
-  if(!T.metaOk || !T.meta || !old || old==="demo") return;
+  if(!T.metaOk || !T.meta || !old || reservedFolder(old)) return;
   T.meta.folders=(T.meta.folders||[]).filter(function(x){ return x!==old; });
   saveMeta();
   for(i=0;i<(T.projects||[]).length;i++){
@@ -674,6 +688,7 @@ function setSong(song){
   if(!song) return;
   if(T.playing && T.ctx) reanchor(song.bpm);
   T.song=song;
+  T.tapeGen=(T.tapeGen||0)+1;   /* a loaded, opened or cleared tape: an AI edit asked of the one before it no longer fits */
   if(T.tape) T.tape.set(song.tape);
   if(!T.song.patterns || !T.song.patterns[T.pat]) T.pat=0;
   /* a different tape may be shorter: keep every in-memory cursor inside it */
@@ -2433,6 +2448,7 @@ function scoreLostText(code){
 function renderAiSheet(sh){
   var head=sheetHead(tr("studio.ai.title")), i;
   head.className+=" st-sheet-head";
+  if(aiPreviewStale(T.aiPreview)) T.aiPreview=null;
   if(T.aiPreview){
     var pr=el("div","st-ai-preview");
     pr.appendChild(el("p","st-ai-reply",T.aiPreview.reply||tr("studio.ai.done")));
@@ -2585,9 +2601,15 @@ function renderScoreSheet(sh){
   back.onclick=function(){ closeSheet(); };
   row.insertBefore(read,row.firstChild); row.appendChild(back); sh.appendChild(row);
 }
+/* an edit preview belongs to the tape it was asked of; after another tape was opened, or this one cleared, its changes
+   would land on the wrong music (#444). A draft is a new tape of its own and fits any time. */
+function aiPreviewStale(pv){
+  return !!(pv && !isAiDraft(pv) && pv.gen!==T.tapeGen);
+}
 function applyAiPreview(play){
   var pv=T.aiPreview;
   if(!pv || !T.loaded || !T.song) return;
+  if(aiPreviewStale(pv)){ T.aiPreview=null; toast(tr("studio.ai.stale")); renderSheet(); return; }
   if(!(pv.ops&&pv.ops.length) && !isAiDraft(pv)){ toast(pv.reply||tr("studio.ai.done")); return; }
   var out=pv.song ? {song:pv.song} : EDIT.applyAll(T.song,pv.ops||[]);
   if(out.error){ toast(tr("studio.ai.bad")); return; }
@@ -2606,7 +2628,13 @@ function applyAiPreview(play){
   saveVersion(tr("studio.ai.before"));
   T.aiPreview=null;
   T.aiNote="";
+  /* the whole song changes, as with undo or a restored version: the transport stops first, so a new tempo or tape
+     colour is never played against the old timeline and 采用并试听 starts from the top (#449) */
+  if(T.rec!=="off") stopRecording();
+  if(T.playing) stopPlay();
   T.song=out.song;
+  clampCursors();
+  T.painted=null;
   touch();
   T.sheet="";
   renderAll();
@@ -2640,6 +2668,7 @@ function askAi(text,mode){
   T.aiPreview=null;
   T.aiCard=""; T.aiStage=""; T.aiSig=null; T.aiMark=false;
   T.aiT0=T.aiLast=Date.now();
+  var gen=T.tapeGen;
   renderSheet();
   function onSignal(s){
     T.aiSig=s; T.aiLast=Date.now(); T.aiMark=!T.aiMark;
@@ -2670,8 +2699,10 @@ function askAi(text,mode){
   }
   job.then(function(res){
     end();
-    T.aiPreview={reply:res.reply||tr("studio.ai.done"),ops:res.ops||[],draft:!!res.draft,card:T.aiCard};
+    T.aiPreview={reply:res.reply||tr("studio.ai.done"),ops:res.ops||[],draft:!!res.draft,card:T.aiCard,gen:gen};
     T.aiNote=text;
+    /* another tape was opened while the AI worked: its edit is for the tape that is gone */
+    if(aiPreviewStale(T.aiPreview)){ T.aiPreview=null; toast(tr("studio.ai.stale")); renderSheet(); return; }
     /* the sheet may have been closed while the AI worked: the preview waits in it */
     if(T.sheet!=="ai") toast(tr("studio.ai.ready"));
     renderSheet();
@@ -2764,7 +2795,10 @@ function renderSheet(){
     eh.className+=" st-sheet-head";
     var eul=el("ul","lcd-menu");
     if(T.meta) sheetRow(eul,tr(T.meta.deep?"studio.deep.on":"studio.deep.off"),"",function(){ toggleDeep(); });
-    if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){ openSheet("versions"); });
+    if(T.loaded) sheetRow(eul,tr("studio.versions"),String(T.versions.length),function(){
+      if(T.versionsFail && T.id) loadVersions(T.id);      /* a failed read is tried again, not left on 读取中 */
+      openSheet("versions");
+    });
     var clearTrackNow=screenTrack();
     if(T.song && T.loaded && clearTrackNow) sheetRow(eul,tr("studio.clear.track",{track:screenName(clearTrackNow)}),"",function(){ clearCurrentTrack(); });
     if(T.loaded) sheetRow(eul,tr("studio.clear.tape"),"",function(){ openSheet("new"); });
@@ -3370,8 +3404,12 @@ function copyTo(target){
   setPat(target);
   toast(tr("studio.pat.copied",{p:patLabel(target)}));
 }
-/* a new or demo tape: same path as a tab tap, drums screen, pattern A, keeps the beat if one is playing (12.9) */
+/* a new or demo tape: same path as a tab tap, drums screen, pattern A, keeps the beat if one is playing (12.9).
+   It is the same tape cleared, not a new one (12.15.1): it stays in its folder and keeps its versions, and what it held
+   is saved first as one more version, like a restore (#445). */
 function swapTape(song){
+  if(T.song) song.folder=folderOf(T.song);
+  saveVersion(tr("studio.clear.before"));
   stopRepeatAll();
   if(T.rec!=="off") stopRecording();      /* the take belongs to the tape being replaced (12.24) */
   screenTo("drums");            /* the same path as a tab tap: an unfinished tour ends unseen */
@@ -3380,8 +3418,6 @@ function swapTape(song){
   T.queued=-1; T.pendingPat=-1; T.boundaryGlobal=0; T.chainPat=0; T.playPat=0;
   setSong(song);
   T.projectFolder=folderOf(song);
-  T.versions=[]; T.versionsOk=true;
-  if(T.id && T.metaOk) writeVersions();
   if(T.playing){ T.lastTick=Math.max(T.lastTick,T.heard+1); T.painted=null; }
   T.dirty=true;
   T.sheet="";
@@ -3588,7 +3624,7 @@ function importJson(file){
       return;
     }
     song=got.song;
-    song.folder=T.projectFolder==="demo" ? "" : T.projectFolder;
+    song.folder=reservedFolder(T.projectFolder) ? "" : T.projectFolder;
     delete song.template;          /* a demo copy from elsewhere is the user's own tape here */
     flush();
     id=LP.uid();
@@ -3660,8 +3696,11 @@ function readWorkspace(file){
     toast(tr("common.readfail",{msg:String((e&&e.message)||e).slice(0,120)}));
   });
 }
+/* Replace, not merge (12.15.3): every tape and version here is deleted, then the zip's are written. What was here is
+   read first and kept in memory; if any delete or write fails, the zip's documents are taken out again and the old ones
+   written back, like a restore in Settings, so a failed import never leaves half of each (#447). */
 function applyWorkspaceImport(){
-  var plan=T.importData, r=refs(), i, jobs=[];
+  var plan=T.importData, r=refs(), i, jobs=[], old={items:[],versions:[]};
   if(!plan || !r || !T.metaOk) return;
   if(T.playing) stopPlay();
   stopRepeatAll();
@@ -3670,11 +3709,32 @@ function applyWorkspaceImport(){
   T.sheet="";
   renderSheet();
   T.exporting=true;
+  function rollback(){
+    var undo=[], had={items:{},versions:{}}, k;
+    function quiet(p){ return p.then(null,function(){}); }
+    for(k=0;k<old.items.length;k++) had.items[old.items[k].id]=1;
+    for(k=0;k<old.versions.length;k++) had.versions[old.versions[k].id]=1;
+    for(k=0;k<plan.items.length;k++) if(!had.items[plan.items[k].id]) undo.push(quiet(r.items.doc(plan.items[k].id).delete()));
+    for(k=0;k<plan.versions.length;k++) if(!had.versions[plan.versions[k].id]) undo.push(quiet(r.versions.doc(plan.versions[k].id).delete()));
+    return Promise.all(undo).then(function(){
+      var back=[];
+      for(k=0;k<old.items.length;k++) back.push(r.items.doc(old.items[k].id).set(old.items[k].data));
+      for(k=0;k<old.versions.length;k++) back.push(r.versions.doc(old.versions[k].id).set(old.versions[k].data));
+      return Promise.all(back);
+    });
+  }
+  var reading=true;
   r.items.get().then(function(items){
-    for(i=0;i<items.docs.length;i++) jobs.push(r.items.doc(items.docs[i].id).delete());
+    for(i=0;i<items.docs.length;i++){
+      /* the open tape may be ahead of its stored copy (a save is waiting): keep what is on screen */
+      old.items.push({id:items.docs[i].id,data:items.docs[i].id===T.id && T.song ? JSON.parse(JSON.stringify(T.song)) : items.docs[i].data()});
+    }
     return r.versions.get();
   }).then(function(versions){
-    for(i=0;i<versions.docs.length;i++) jobs.push(r.versions.doc(versions.docs[i].id).delete());
+    for(i=0;i<versions.docs.length;i++) old.versions.push({id:versions.docs[i].id,data:versions.docs[i].data()});
+    reading=false;
+    for(i=0;i<old.items.length;i++) jobs.push(r.items.doc(old.items[i].id).delete());
+    for(i=0;i<old.versions.length;i++) jobs.push(r.versions.doc(old.versions[i].id).delete());
     return Promise.all(jobs);
   }).then(function(){
     var writes=[];
@@ -3684,7 +3744,13 @@ function applyWorkspaceImport(){
     for(i=0;i<plan.versions.length;i++){
       (function(v){ writes.push(r.versions.doc(v.id).set({v:1,versions:v.versions})); })(plan.versions[i]);
     }
-    return Promise.all(writes);
+    return Promise.all(writes).then(null,function(e){
+      return rollback().then(function(){ throw e; },function(){ throw e; });
+    });
+  },function(e){
+    /* nothing was deleted yet if the read failed; a failed delete puts back what is already gone */
+    if(reading) throw e;
+    return rollback().then(function(){ throw e; },function(){ throw e; });
   }).then(function(){
     T.meta={toured:plan.meta.toured||{},hushTip:!!plan.meta.hushTip,guideTip:!!plan.meta.guideTip,deep:plan.meta.deep===true,
       folders:Array.isArray(plan.meta.folders)?plan.meta.folders.filter(function(x){return typeof x==="string";}):[],current:plan.current};
