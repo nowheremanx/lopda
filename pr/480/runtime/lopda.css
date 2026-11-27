@@ -898,6 +898,12 @@ textarea::placeholder{color:var(--ink-2)}
 .st-scr{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:1px 0;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:13px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}
 .st-scr.on{background:var(--ink);color:var(--lcd)}
 .st-scr-name{max-width:100%;overflow:hidden;text-overflow:ellipsis}
+/* the longest names (调音台, Chords, Melody) are 3 em wide: on a narrow screen the type shrinks until they fit a tab
+   ((width - 5 gaps) / 6 - 4 px of border, over 3), never past the 13 px it has where there is room (issue #326) */
+@supports (width:1cqw){
+  .st-screens{container-type:inline-size}
+  .st-scr{font-size:min(13px,(100cqw - 34px)/18)}
+}
 .st-scr .st-dot{width:4px;height:4px}
 .st-scr.on .st-dot.on{background:var(--lcd)}
 /* a note cell writes its pitch in paper on ink; the selected cell has a thick inner frame */
@@ -1101,6 +1107,11 @@ textarea::placeholder{color:var(--ink-2)}
 .radio-write-page input::placeholder{color:var(--ink-2)}
 .radio-write-actions{display:flex;gap:6px;margin-top:auto}
 .radio-write-actions .btn{flex:1;min-height:44px}
+/* the keyboard is up (html.kb): the screen can be as short as about 160 px, so the bar's title and count stand for the
+   label and the hints, and 发送 / 返回 sit right under the field instead of at the bottom (issue #385) */
+html.kb .radio-write-page{gap:6px;padding:4px 10px;overflow-y:auto}
+html.kb .radio-write-page>.radio-field,html.kb .radio-write-page>.hint{display:none}
+html.kb .radio-write-actions{margin-top:0}
 .radio-draw-page{gap:4px;padding:4px}
 #radio-draw-cv{display:block;width:260px;height:260px;flex:none;margin:0 auto;border:2px solid var(--ink);image-rendering:pixelated;touch-action:none}
 .radio-draw-hint{margin:0;text-align:center;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1121,14 +1132,16 @@ textarea::placeholder{color:var(--ink-2)}
 .radio-check input{width:22px;height:22px;accent-color:var(--ink)}
 .radio-field{display:flex;align-items:center;gap:8px;min-height:36px}
 .radio-field>span{flex:0 0 64px;font-size:13px;color:var(--ink-2)}
-.radio-field select{flex:1;min-width:0;min-height:38px;font-family:var(--f-lcd);font-size:15px;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);border-radius:0;padding:4px 28px 4px 6px;-webkit-appearance:none;appearance:none}
+/* 44 px and 16 px type (sdk/UI.md 3-4): below 16 px iPhone Safari zooms the page on focus (issue #333) */
+.radio-meter-page .radio-field{min-height:44px}
+.radio-field select{flex:1;min-width:0;min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:2px solid var(--ink);border-radius:0;padding:4px 28px 4px 6px;-webkit-appearance:none;appearance:none}
 .radio-test-actions{display:flex;gap:4px}
 .radio-test-actions .btn{flex:1;min-width:0;min-height:44px;padding:4px 2px;font-size:13px}
 .radio-meter{height:12px;border:2px solid var(--ink);background:var(--lcd);overflow:hidden}
 .radio-meter span{display:block;height:100%;width:0;background:var(--ink)}
 .radio-hex{font-size:13px;line-height:1.4;word-break:break-all;border:2px solid var(--ink-2);padding:3px 5px;min-height:18px;white-space:pre-wrap;margin:0}
 .radio-scope{display:block;width:100%;height:80px;border:2px solid var(--ink);background:var(--lcd)}
-.radio-field select{background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);background-position:calc(100% - 15px) 16px,calc(100% - 10px) 16px;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.radio-field select{background-image:linear-gradient(45deg,transparent 50%,var(--ink) 50%),linear-gradient(135deg,var(--ink) 50%,transparent 50%);background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat}
 #v-radio.radio-draw-on .radio-bar{display:none}
 /* the project library, versions, guide and assistant sheets (12.15, 12.16) */
 .st-name{width:100%;box-sizing:border-box;height:44px;padding:6px 8px;background:var(--lcd);color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:16px;line-height:1.2}
@@ -1223,9 +1236,12 @@ textarea::placeholder{color:var(--ink-2)}
 .tn-scale::after{content:"";position:absolute;left:-480px;right:-480px;top:50px;height:2px;background:var(--ink)}
 .tn-mark{position:absolute;top:0;bottom:0;width:0}
 .tn-mark::before{content:"";position:absolute;left:-1px;top:30px;width:3px;height:26px;background:var(--ink)}
-.tn-label{position:absolute;top:4px;left:0;transform:translateX(-50%);max-width:164px;padding:1px 5px;border:0;background:transparent;color:var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
-.tn-mark.low .tn-label{top:74px}
-.tn-mark.near .tn-label{background:var(--ink);color:var(--lcd)}
+/* the button is a 44 px tall, transparent tap area (sdk/UI.md 3, issue #332); the printed name sits where it always did:
+   upper names at 4-26 px inside 0-44, lower ones at 74-96 inside 54-98, so the two rows never share a tap area */
+.tn-label{position:absolute;top:0;left:0;transform:translateX(-50%);display:flex;justify-content:center;align-items:flex-start;box-sizing:border-box;min-width:44px;height:44px;max-width:164px;padding:4px 0 0;margin:0;border:0;background:transparent;color:var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:20px;cursor:pointer}
+.tn-mark.low .tn-label{top:54px;padding-top:20px}
+.tn-label-t{display:block;min-width:0;max-width:100%;padding:1px 5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tn-mark.near .tn-label-t{background:var(--ink);color:var(--lcd)}
 .tn-num{position:absolute;top:56px;left:0;transform:translateX(-50%);font-style:normal;font-family:var(--f-pix);font-size:14px;line-height:14px;color:var(--ink-2)}
 .tn-mark.low .tn-num{top:56px}
 .tn-needle{position:absolute;left:50%;top:0;bottom:0;width:3px;margin-left:-1px;background:var(--ink);z-index:3;pointer-events:none}
