@@ -275,6 +275,10 @@ textarea::placeholder{color:var(--ink-2)}
 .set-menu .set-subnote{margin:0;padding:0 0 0 34px;font-size:12px;line-height:1.2}
 .set-open{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:0;background:none;border:0;border-bottom:1px dashed var(--ink-2);color:inherit;font:inherit;text-align:left;cursor:pointer}
 .set-open:active{background:var(--lcd-2)}
+.set-pad-page{gap:8px}
+.set-pad-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.set-pad-row .set-state{font-size:13px;max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#set-pad-who{word-break:break-all}
 .set-share-page{align-items:center;text-align:center;gap:10px}
 .set-share-qr{display:block;background:var(--lcd);border:2px solid var(--ink);padding:4px;image-rendering:pixelated;image-rendering:crisp-edges}
 .set-share-url{margin:0;font-family:var(--f-pix);font-size:17px;word-break:break-all;-webkit-user-select:text;user-select:text}

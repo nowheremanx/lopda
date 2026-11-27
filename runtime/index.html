@@ -104,6 +104,11 @@
           <span class="set-label" data-i18n="key.label">暗房钥匙</span>
           <span class="set-state">›</span>
         </button>
+        <button class="set-open" id="set-pad-open" type="button">
+          <span class="set-ico" id="set-pad-ico" aria-hidden="true"></span>
+          <span class="set-label" data-i18n="pad.title">手柄</span>
+          <span class="set-state">›</span>
+        </button>
         <button class="set-open" id="set-share-open" type="button">
           <span class="set-ico" id="set-share-ico" aria-hidden="true"></span>
           <span class="set-label" data-i18n="set.share">分享</span>
@@ -172,6 +177,22 @@
         </div>
         <p class="hint" id="set-storage" data-i18n="set.counting">本机存档：计算中…</p>
         <p class="hint" data-i18n="bk.saves">程序存档也在备份里；卸载程序不会删掉存档。</p>
+      </div>
+    </section>
+
+    <!-- CONTROLLER (proof of concept): tap a key, then press what should be that key on a controller or a remote -->
+    <section class="view" id="v-set-pad" hidden>
+      <div class="bar">
+        <button class="btn ghost back" id="set-pad-back" type="button" aria-label="返回">◂</button>
+        <h2 data-i18n="pad.title">手柄</h2>
+      </div>
+      <div class="settings set-pad-page">
+        <p class="hint" id="set-pad-who"></p>
+        <p class="hint" data-i18n="pad.hint">点一个键，再按手柄或遥控器上你想用的那个键。</p>
+        <ul class="set-pad-list" id="set-pad-list"></ul>
+        <p class="hint" id="set-pad-live"></p>
+        <p class="hint" id="set-pad-msg"></p>
+        <button class="btn ghost" id="set-pad-reset" type="button" data-i18n="pad.reset">恢复默认</button>
       </div>
     </section>
 
