@@ -160,6 +160,26 @@ test("models() names a refused answer and no network", async () => {
   await assert.rejects(down.h.models({ provider: "openrouter" }), { code: "offline" });
 });
 
+test("models() gives up a list that never arrives, aborts the request and leaves no timer behind (issue #416)", async () => {
+  let aborted = false;
+  const fire = async (t, ms) => { await new Promise((r) => setTimeout(r, 5)); const x = t.find((y) => y.ms === ms && y.f); assert.ok(x, "a time limit is set"); x.f(); };
+  const never = host((u, o) => new Promise((_, no) => o.signal.addEventListener("abort", () => { aborted = true; no(Object.assign(new Error("aborted"), { name: "AbortError", code: 20 })); })));
+  const p1 = never.h.models({ provider: "openrouter" });
+  await fire(never.timers, AI.LIST_MS);
+  await assert.rejects(p1, { code: "listtimeout" });
+  assert.equal(aborted, true);
+  /* a body that never finishes is given up too */
+  const stuck = host(() => Promise.resolve({ ok: true, status: 200, json: () => new Promise(() => {}) }));
+  const p2 = stuck.h.models({ provider: "openrouter", wait: 50 });
+  await fire(stuck.timers, 50);
+  await assert.rejects(p2, { code: "listtimeout" });
+  /* an answer in time clears the limit */
+  const fast = host(() => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ data: [] }) }));
+  assert.deepEqual(await fast.h.models({ provider: "openrouter" }), { data: [] });
+  assert.ok(fast.timers.every((t) => t.f === null), "the timer is cleared");
+  assert.equal(AI.LIST_MS, 20000);
+});
+
 /* the provider table: five addresses, each one its own key's only destination */
 
 test("PROVIDERS lists the five providers, each with a chat completions address and a model list", () => {
