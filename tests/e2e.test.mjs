@@ -749,18 +749,18 @@ test("files: the runtime's dialog guards PAD.exportFile and PAD.importFile (pain
   const app = p.frameLocator("#run-frame");
   await app.locator("#cv").waitFor();
   /* cancel: nothing leaves, the app hears "cancelled" and stays quiet */
-  await app.locator("#exp").click();
+  await app.locator("#more").click(); await app.locator("#exp").click();
   assert.match(await p.textContent("#file-ask p"), /^导出「lopda-\d{8}-\d{4}\.png」？$/);
   await p.click("#file-no");
   await p.waitForSelector("#file-ask .box", { state: "detached" });
   /* OK: on a desktop the file downloads */
-  await app.locator("#exp").click();
+  await app.locator("#more").click(); await app.locator("#exp").click();
   const [d] = await Promise.all([p.waitForEvent("download"), p.click("#file-ok")]);
   assert.match(d.suggestedFilename(), /^lopda-\d{8}-\d{4}\.png$/);
   const png = await (await import("node:fs/promises")).readFile(await d.path());
   assert.equal(png.readUInt32BE(16), 768, "8x upscale");
   /* import: OK opens the system file picker; the picture comes back as four tones */
-  await app.locator("#imp").click();
+  await app.locator("#more").click(); await app.locator("#imp").click();
   assert.equal(await p.textContent("#file-ok"), "选文件");
   const [chooser] = await Promise.all([p.waitForEvent("filechooser"), p.click("#file-ok")]);
   await chooser.setFiles({ name: "x.png", mimeType: "image/png", buffer: png });
