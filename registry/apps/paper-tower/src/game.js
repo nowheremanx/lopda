@@ -588,7 +588,8 @@ function drawForecast(g) {
   var tag = fc.ability ? tname(D.ABILITY_NAMES[fc.ability]) : "";
   var text = !fc.can ? t("攻不破", "No damage") : fc.win ? t("损耗 {n}", "Lose {n}").replace("{n}", fc.loss) : t("会倒下", "You would fall");
   if (tag) text += " " + tag;
-  var w = 70;
+  /* the box grows with its text (English ability names are long), from the right edge leftwards */
+  var w = Math.min(VIEW_W - 4, g.measure(text) + 12);
   g.window(VIEW_W - w - 2, HUD + 4, w, 18, { thin: true });
   g.text(text, VIEW_W - w + 4, HUD + 7);
 }
@@ -636,7 +637,7 @@ async function helpPages() {
     t("有些小房间门口站着怪，里面是宝物。先看损耗，再决定进不进。", "Some small rooms keep a monster at the door and treasure inside. Read the cost before you enter."),
     t("菜单里的「道具」能用炸弹和圣水。炸弹对守页的怪无效。", "The Items entry spends bombs and holy water. Bombs do not work on keepers."),
     t("打不过就回商店。三间墨铺，越买越贵，货也有限。", "Stuck? Go back to a shop. Three shops, rising prices, limited stock."),
-    t("败北不会结束游戏：塔把你折回本页入口，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance and takes a fifth of your gold."),
+    t("败北不会结束游戏：塔把你折回本页入口，生命不回满，只收两成金币。", "Defeat is not the end: the tower folds you back to this page's entrance, heals nothing and takes a fifth of your gold."),
     t("三根灯芯在三、七、十一页的折缝里。带齐了，蠹王会弱一些。", "Three wicks wait in the seams of pages three, seven and eleven. With all three, the King is weaker.")
   ]));
 }
@@ -1011,7 +1012,10 @@ game.scene("battle", {
     drawSprite(g, A[m.art], m.boss ? 86 : 96, 44, ms, null);
     g.text(t("生命", "HP"), 8, 112, { color: g.PAPER });
     bar(g, 32, 112, 120, 8, pct(B.heroShown, B.hero0), g.PAPER);
-    g.text(B.heroShown + "/" + B.hero0, 80, 121, { align: "center", color: g.MID });
+    /* the one number to watch in a fight: paper on a flat ink band, never mid on the dither (sdk/UI.md 4) */
+    var hpText = B.heroShown + "/" + B.hero0, hpW = g.measure(hpText) + 8;
+    g.rect(80 - Math.ceil(hpW / 2), 121, hpW, 14, g.INK);
+    g.text(hpText, 80, 121, { align: "center", color: g.PAPER });
     if (B.floatT > 0 && B.float) g.text(B.float, B.floatX, B.floatY, { align: "center", color: g.PAPER });
     if (B.phase === "result") drawBattleResult(g);
   }
