@@ -1072,6 +1072,30 @@ GM.spriteCanvas = function (spr) {
   return c;
 };
 
+/* Paint a sprite into a canvas of the page: the background tone, then the sprite (scaled to fit and centred when
+   fit is set, nearest pixel), all through one ImageData and putImageData. Never drawImage one canvas onto another
+   after putImageData: Safari swaps red and blue on that path (CLAUDE.md), and the olive tones turn teal. */
+GM.paintSprite = function (c, spr, bg, fit) {
+  var W = c.width, H = c.height, ctx = c.getContext("2d"), img = ctx.createImageData(W, H), d = img.data;
+  var k = fit ? Math.min(W / spr.w, H / spr.h) : 1;
+  var iw = Math.round(spr.w * k), ih = Math.round(spr.h * k);
+  var x0 = fit ? Math.round((W - iw) / 2) : 0, y0 = fit ? Math.round((H - ih) / 2) : 0;
+  var back = GM.RGB[bg] || GM.RGB[GM.PAPER], x, y, o, t, rgb;
+  for (o = 0; o < d.length; o += 4) { d[o] = back[0]; d[o + 1] = back[1]; d[o + 2] = back[2]; d[o + 3] = 255; }
+  for (y = 0; y < ih; y++) {
+    if (y0 + y < 0 || y0 + y >= H) continue;
+    for (x = 0; x < iw; x++) {
+      if (x0 + x < 0 || x0 + x >= W) continue;
+      t = spr.b[Math.min(spr.h - 1, Math.floor(y / k)) * spr.w + Math.min(spr.w - 1, Math.floor(x / k))];
+      if (t === GM.CLEAR) continue;
+      rgb = GM.RGB[t] || back;
+      o = ((y0 + y) * W + x0 + x) * 4;
+      d[o] = rgb[0]; d[o + 1] = rgb[1]; d[o + 2] = rgb[2];
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+};
+
 GM.iconCanvas = function () {
   if (GM._iconCv) return GM._iconCv;
   var b = new Uint8Array(16 * 16);
