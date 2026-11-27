@@ -64,7 +64,7 @@
   #cover-list[hidden] { display: none; }
   #cover-list li { box-sizing: border-box; height: 24px; line-height: 24px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     border-bottom: 1px solid #7d8a58; letter-spacing: 2px; text-transform: uppercase; touch-action: manipulation; }
-  #cover-foot { font-size: 13px; line-height: 1.4; color: #4a5a32; text-align: center; white-space: pre-line; }
+  #cover-foot { font-size: 14px; line-height: 1.4; color: #4a5a32; text-align: center; white-space: pre-line; }
   #cover-foot[hidden] { display: none; }
   /* The title and the round picker use the results card's own cover column, so every screen speaks the same
      language: paper, ink, one inverted cursor. The title rows are taller than the results rows because a
@@ -80,13 +80,13 @@
   #cover.title #cover-list li .ico { flex: none; width: 16px; height: 16px; display: flex; }
   #cover.title #cover-list li .rname { margin-left: 12px; text-align: left; }
   #cover.title #cover-list li .label { margin-left: 12px; display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2; }
-  #cover.title #cover-list li .prog { margin-left: auto; font-size: 13px; color: #4a5a32; }
+  #cover.title #cover-list li .prog { margin-left: auto; font-size: 14px; color: #4a5a32; }
   #cover.title #cover-list li.sel { background: #1f2a14; color: #a3ad7e; }
   #cover.title #cover-list li.sel .prog { color: #a3ad7e; }
   #cover.title #cover-list li.locked { padding-left: 12px; color: #4a5a32; border: 2px dashed #4a5a32; }
   /* the locked row's name sits in .label, which already has the icon's 12px gap: its own margin would double it */
   #cover.title #cover-list li.locked .label .rname { margin-left: 0; }
-  #cover.title #cover-list li.locked .lock { font-size: 12px; }
+  #cover.title #cover-list li.locked .lock { font-size: 14px; }
   #cover.title #cover-list li.locked.sel { color: #a3ad7e; border-color: #a3ad7e; }
   #cover.pick { gap: 6px; padding: 8px; }
   #cover.pick #cover-text { font-size: 13px; line-height: 1.2; }
@@ -141,6 +141,7 @@
     color: #1f2a14; box-shadow: inset 0 1px 0 #4a5a32; }
   #cover-detail.dark { color: #4a5a32; }
   #cover.done #cover-detail { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+  #cover.done #cover-btn2 { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; padding: 8px 14px; }
   #cover.done #cover-btn.outline { background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: none; padding: 8px 20px; }
   @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
   .shake { animation: shake 0.22s linear; }
@@ -238,13 +239,13 @@ var ART = (function () {
       practice: "练习", practiceTitle: "会玩了！", practiceBack: "回主界面",
       practiceKeys: "方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱。\n结算卡上 A 收进生词本，B 移出。\n关卡里没输入字母时按 B 回主界面。",
       leave: "回到主界面？", leaveYes: "回去", leaveNo: "留下",
-      goal: "划过字母拼单词，填满右边的格子",
+      goal: "划过字母拼单词，填满右边的格子", goalKeys: "A 加字母 · B 删 · START 提交 · SELECT 打乱",
       demo: "看：按住字母，划过 {w}",
       demoEnd: "拼对了，词就填进格子，下面显示中文，还会读出来。\n\n轮到你了：找出格子里剩下的词。",
       start: "开始",
-      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。\n结算卡：A 收进生词本，B 移出。",
+      help: "玩法\n\n按住字母盘上的一个字母，不松手划过别的字母，拼出一个英文单词，松手提交。\n拼对格子里的词，它就填进格子，下面显示中文并读出来；填上的词点一下可以再看一遍。填满格子就过关。\n不在格子里的真词是奖励词，每个换 1 个提示。点「提示」看一个空词的中文。\n按键：方向键选字母，A 加上，B 删掉一个，START 提交，SELECT 打乱字母。\n结算卡：A 收进生词本，B 移出；在「下一关」上按 B 回标题。",
       ok: "知道了",
-      done: "第 {n} 关完成", doneBtn: "下一关", bonus: "奖励词 {w}：提示 +1", bonusPractice: "奖励词 {w}：练习不加提示",
+      done: "第 {n} 关完成", doneBtn: "下一关", titleBtn: "标题", bonus: "奖励词 {w}：提示 +1", bonusPractice: "奖励词 {w}：练习不加提示",
       sum: "奖励词 {b} 个 · 提示 {n}",
       bookAdded: "已加入生词本", bookRemoved: "已移出生词本", bookDenied: "没有允许使用生词本", bookFull: "生词本满了",
       bookTip: "A 收进生词本 · B 移出",
@@ -261,13 +262,13 @@ var ART = (function () {
       practice: "PRACTICE", practiceTitle: "You've got it!", practiceBack: "BACK TO TITLE",
       practiceKeys: "Arrows pick a letter, A adds, B deletes, START sends, SELECT shuffles.\nOn the results card A adds to the word book, B removes.\nB with nothing typed goes back to the title.",
       leave: "Back to the title?", leaveYes: "LEAVE", leaveNo: "STAY",
-      goal: "Swipe letters into words to fill the grid",
+      goal: "Swipe letters into words to fill the grid", goalKeys: "A add · B del · START send · SELECT mix",
       demo: "Watch: hold and slide {w}",
       demoEnd: "A right word fills in, its meaning shows below, and you hear it.\n\nYour turn: find the other words in the grid.",
       start: "START",
-      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in, its meaning below. Tap it to hear it again. Fill the grid to clear.\nAny other real word is a bonus: 1 hint; HINT shows an open word.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.\nResults: A adds, B removes.",
+      help: "HOW TO PLAY\n\nHold a letter, slide across others to spell; let go to send it.\nA right word fills in, its meaning below. Tap it to hear it again. Fill the grid to clear.\nAny other real word is a bonus: 1 hint; HINT shows an open word.\nKeys: arrows pick, A add, B delete, START send, SELECT shuffle.\nResults: A adds, B removes; B on NEXT goes to the title.",
       ok: "OK",
-      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", bonus: "Bonus word {w}: hint +1", bonusPractice: "Bonus word {w}: no hint in practice",
+      done: "ROUND {n} CLEAR", doneBtn: "NEXT ROUND", titleBtn: "TITLE", bonus: "Bonus word {w}: hint +1", bonusPractice: "Bonus word {w}: no hint in practice",
       sum: "Bonus words {b} · hints {n}",
       bookAdded: "Added to word book", bookRemoved: "Removed from word book", bookDenied: "Word book not allowed", bookFull: "The word book is full",
       bookTip: "A: add to word book · B: remove",
@@ -696,7 +697,9 @@ var ART = (function () {
     coverList.hidden = false;
     coverBtn.textContent = TXT.doneBtn;
     coverBtn.hidden = false;
-    coverBtn2.hidden = true;
+    /* the way back to the title between rounds: the round is already saved, so it needs no question */
+    coverBtn2.textContent = TXT.titleBtn;
+    coverBtn2.hidden = false;
     coverActions.hidden = false;
     coverEl.hidden = false;
     renderPick();
@@ -1069,6 +1072,18 @@ var ART = (function () {
     titleGuardAt = Date.now() + 300;
     showTitle();
   }
+  /* the results card's way out: B on NEXT, or the TITLE button. Every word of the round is saved already. */
+  function doneToTitle() {
+    if (phase !== "done") return;
+    PAD.sfx("tap");
+    bookSeq++;                       /* a word-book answer still on its way must not land on the title */
+    bookBusy = false;
+    coverEl.classList.remove("done");
+    hideCover();
+    save();
+    titleGuardAt = Date.now() + 300;
+    showTitle();
+  }
   function cancelLeave() {
     coverEl.classList.remove("confirm");
     hideCover();
@@ -1181,6 +1196,8 @@ var ART = (function () {
   }
 
   function renderKeys() {
+    /* the footer says what the hands are using: the swipe for touch, the keys once the player presses one */
+    goalEl.textContent = keyMode ? TXT.goalKeys : TXT.goal;
     var keys = wheelEl.querySelectorAll(".key"), i;
     for (i = 0; i < keys.length; i++) {
       var idx = +keys[i].getAttribute("data-i");
@@ -1381,21 +1398,41 @@ var ART = (function () {
     });
   }
   /* pointerup, not pointerdown: a press on the grid may still turn into a scroll, and only a tap should answer.
-     The pointerdown only remembers where the tap began, so a drag that ends over a cell is not a tap. */
+     The pointerdown only remembers where the tap began, so a drag that ends over a cell is not a tap.
+     The cells of a 7-letter round are only 18 px, far under a finger, so the press picks the filled cell nearest
+     to it (up to 8 px outside a cell, the 1 px gaps included), and a finger may wobble 24 px before the tap
+     becomes a drag. A crossing cell first shows the word that was not just read, so the second word of a
+     crossing needs one tap, not two. */
+  var TAP_SLOP = 8, TAP_MOVE = 24;
+  function cellNear(x, y) {
+    var cells = boardEl.querySelectorAll(".cell.on"), best = null, bestD = Infinity, i, b, dx, dy, d;
+    for (i = 0; i < cells.length; i++) {
+      b = cells[i].getBoundingClientRect();
+      dx = Math.max(b.left - x, 0, x - b.right);
+      dy = Math.max(b.top - y, 0, y - b.bottom);
+      if (dx > TAP_SLOP || dy > TAP_SLOP) continue;
+      d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = cells[i]; }
+    }
+    return best;
+  }
   boardEl.addEventListener("pointerdown", function (e) {
-    var el = phase === "play" && e.target && e.target.closest ? e.target.closest(".cell.on") : null;
-    tapDown = el && boardEl.contains(el) ? { el: el, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
+    var el = phase === "play" ? cellNear(e.clientX, e.clientY) : null;
+    tapDown = el ? { el: el, x: e.clientX, y: e.clientY, id: e.pointerId } : null;
   });
   boardEl.addEventListener("pointerup", function (e) {
     var down = tapDown;
     tapDown = null;
     if (!down || phase !== "play" || e.pointerId !== down.id) return;
-    var el = e.target && e.target.closest ? e.target.closest(".cell.on") : null;
-    if (el !== down.el || Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > 12) return;
+    if (Math.abs(e.clientX - down.x) + Math.abs(e.clientY - down.y) > TAP_MOVE) return;
+    var el = down.el;
     var r = +el.getAttribute("data-r"), c = +el.getAttribute("data-c");
     var words = wordsAt(r, c), key = r + "," + c;
     if (!words.length) return;
-    if (tapCell !== key) { tapCell = key; tapTurn = 0; } else tapTurn = (tapTurn + 1) % words.length;
+    if (tapCell !== key) {
+      tapCell = key;
+      tapTurn = words.length > 1 && noteKind === "tap" && words[0].word === noteWord ? 1 : 0;
+    } else tapTurn = (tapTurn + 1) % words.length;
     showMeaning(words[tapTurn].word);
   });
   boardEl.addEventListener("pointercancel", function () { tapDown = null; });
@@ -1629,6 +1666,7 @@ var ART = (function () {
   });
   coverBtn2.addEventListener("click", function () {
     if (phase === "leave") leaveToTitle();          /* LEAVE is the leave panel's second button */
+    else if (phase === "done") doneToTitle();       /* TITLE is the results card's second button */
   });
   /* The word rows are 32 px tall, still under the 44 px touch rule: the whole row width is the target. A tap on
      the right 44 px is the word book toggle (and selects the word); a tap elsewhere selects and reads it.
@@ -1837,7 +1875,9 @@ var ART = (function () {
     if (phase === "done") {
       /* the ring is [NEXT, word1 .. wordN]; it starts on NEXT and Up/Down cycle. START always starts the next round.
          On a word row: A adds a hollow word or reads a filled one, B only removes, SELECT flips it; Left and Right
-         are quiet. B on NEXT is quiet too. Touch keeps its two ends: the right 44 px toggles, the rest reads. */
+         are quiet. B is back: on a word in the book it removes it, on another word it returns the cursor to NEXT,
+         and on NEXT it goes to the title (the TITLE button does the same). Touch keeps its two ends: the right
+         44 px toggles, the rest reads. */
       if (b === "down" || b === "up") { movePick(b === "down" ? 1 : -1); return; }
       if (b === "select") { toggleBook(); return; }
       if (b === "a") {
@@ -1846,7 +1886,12 @@ var ART = (function () {
         else setBook(pick - 1, true);
         return;
       }
-      if (b === "b") { if (pick > 0 && bookMarks[pick - 1] === true) setBook(pick - 1, false); return; }
+      if (b === "b") {
+        if (pick === 0) doneToTitle();
+        else if (bookMarks[pick - 1] === true) setBook(pick - 1, false);
+        else { pick = 0; renderPick(); PAD.sfx("tick"); }
+        return;
+      }
       if (b === "start") nextRound();
       return;
     }

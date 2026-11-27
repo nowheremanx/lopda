@@ -74,3 +74,22 @@ test("gomoku: a side with stones says its count and its colour after a reconnect
   await settle();
   assert.deepEqual(g.sent, ["n,1", "c,2"]);
 });
+
+test("gomoku: undo while the computer thinks takes back black's stone, and white never moves (#321)", () => {
+  const sounds = [];
+  const g = bootGomoku();
+  g.t.get("PAD").sfx = (n) => sounds.push(n);
+  g.press("st");
+  g.press("ud");                                  /* nothing to take back yet: an error sound, not silence */
+  assert.equal(sounds.pop(), "err");
+  g.press("c", g.point(3, 3));
+  g.t.advance(100);                               /* inside the computer's 0.45 s think */
+  g.press("ud");
+  assert.equal(sounds.pop(), "miss");
+  assert.equal(stones(g.state().board), 0, "black's stone is gone");
+  g.t.advance(1500);
+  assert.equal(stones(g.state().board), 0, "and no white stone comes later");
+  g.press("c", g.point(4, 4));                    /* the game goes on as before */
+  g.t.advance(1500);
+  assert.equal(stones(g.state().board), 2);
+});
