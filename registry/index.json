@@ -355,8 +355,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/daily-box/index.html",
-      "sha256": "3c4d5ab845a34ce0274297b7cca594e8ba9b627d3dafd61e89bf3115787ab1dc",
-      "bytes": 189290
+      "sha256": "150dfaac8a41001af1ef0efdc497bd14bebe361acbaba7947a1f5ee1d95ebe08",
+      "bytes": 189575
     },
     {
       "spec": "lopda/1",

@@ -1341,22 +1341,24 @@ function drawTri(g, x, y, dir, color) {
   }
 }
 
-/* lopix12 has no 2x size: the name is drawn once at 1x where the footer goes (the footer covers it
-   later in the frame), read back, and doubled onto the picture's flat dark block, top left, as paper
-   with an ink shadow one pixel down and right. */
-function drawTitleName(g, name) {
-  var w = g.measure(name), pts = [], x, y, i;
-  g.text(name, 0, 130, { color: g.INK });
-  for (y = 0; y < 12; y++) for (x = 0; x < w; x++) if (g.get(x, 130 + y) === g.INK) pts.push([x, y]);
-  var bw = Math.max(2 * w + 12, 78), x0 = 2 + Math.round((bw - 2 * w) / 2);
-  g.rect(2, 2, bw, 32, g.DARK);
-  for (i = 0; i < pts.length; i++) g.rect(x0 + 1 + pts[i][0] * 2, 7 + pts[i][1] * 2, 2, 2, g.INK);
-  for (i = 0; i < pts.length; i++) g.rect(x0 + pts[i][0] * 2, 6 + pts[i][1] * 2, 2, 2, g.PAPER);
+/* lopix12 has no 2x size: each line of the name is drawn once at 1x where the footer goes (the
+   footer covers it later in the frame), read back, and doubled into the dark of the picture, top
+   left, as paper with an ink-dark shadow one pixel down and right. Two short lines keep the name
+   off the lamp's light. */
+function drawTitleName(g, lines) {
+  for (var n = 0; n < lines.length; n++) {
+    var w = g.measure(lines[n]), pts = [], x, y, i, y0 = 4 + n * 26;
+    g.rect(0, 128, 160, 16, g.PAPER);
+    g.text(lines[n], 0, 130, { color: g.INK });
+    for (y = 0; y < 12; y++) for (x = 0; x < w; x++) if (g.get(x, 130 + y) === g.INK) pts.push([x, y]);
+    for (i = 0; i < pts.length; i++) g.rect(9 + pts[i][0] * 2, y0 + 1 + pts[i][1] * 2, 2, 2, g.DARK);
+    for (i = 0; i < pts.length; i++) g.rect(8 + pts[i][0] * 2, y0 + pts[i][1] * 2, 2, 2, g.PAPER);
+  }
 }
 
 function drawTitle(g) {
   g.sprite(BOX_TITLE_ART.picture(), 0, 0);
-  drawTitleName(g, T({ zh: "每日推箱", en: "DailyBox" }));
+  drawTitleName(g, game.lang === "en" ? ["Daily", "Box"] : ["每日", "推箱"]);
 
   var labels = [T({ zh: "今天", en: "Today" }), T({ zh: "日历", en: "Calendar" })];
   var todayRec = saved.days[dayKey(new Date())];
