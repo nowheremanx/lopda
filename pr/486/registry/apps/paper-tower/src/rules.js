@@ -203,13 +203,14 @@ PT.RULES = (function () {
     return true;
   }
 
-  /* no game over: the tower folds you back to this page's entrance, a little poorer */
+  /* no game over: the tower folds you back to this page's entrance, a little poorer. A lost fight
+     never touched S.hp (fight() refuses it), so the life stays what it was before the fight:
+     falling is never a way to heal, and with no gold left it still costs a death on the rank */
   function revive(S) {
     var p = findChar(S.floor, "<") || { x: S.x, y: S.y };
     var lost = Math.floor(S.gold * 0.2);
     S.gold -= lost;
     S.deaths++;
-    S.hp = S.hpMax;
     S.x = p.x; S.y = p.y;
     return { lost: lost, x: p.x, y: p.y };
   }
