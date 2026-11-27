@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>点阵画板</title>
+<!-- Copyright (c) 2026 Haowei Wu. MIT License.
+     Lo-PDA community app (lopda/1). The official example of the "files" permission: PAD.importFile / PAD.exportFile. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:monospace;color:#1f2a14;touch-action:none;user-select:none;-webkit-user-select:none}
+/* tight, even spacing: the fixed tool rows leave 202 px of canvas at 331x359, in both languages */
+#app{position:relative;display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:4px 8px;gap:4px}
+#bar{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;line-height:1.2;font-weight:bold}
+#state{font-size:13px;font-weight:normal}
+#stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+/* the sheet number is a button inside the title line: 44 px tall to the thumb, 15 px to the layout */
+#sheet{font-size:15px;min-height:44px;min-width:44px;margin:-15px -8px;padding:0 8px;background:transparent;color:#1f2a14;border:0;box-shadow:none;text-decoration:underline;text-underline-offset:3px}
+#sheet:active{transform:none}
+/* the mirror's guide: a thin mid-tone line over the canvas's middle, never part of the drawing */
+#wrap{position:relative;line-height:0}
+#guide{position:absolute;top:3px;bottom:3px;left:calc(50% - 0.5px);width:1px;background:#7d8a58;pointer-events:none}
+/* the script sets the pixel size (a square as large as the stage allows); the fallback keeps it visible */
+#cv{width:240px;height:240px;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid #1f2a14;box-shadow:4px 4px 0 #1f2a14;background:#a3ad7e;touch-action:none;display:block}
+/* five equal columns in every row: a label never pushes the next row's buttons onto a line of their own */
+.tools{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+/* 4 px of the flex gap plus 4 px here: 8 px between the two rows' targets, as UI.md asks */
+#t2{margin-top:4px}
+button{box-sizing:border-box;font-family:monospace;font-size:13px;font-weight:bold;min-height:44px;min-width:0;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:0 2px;cursor:pointer;white-space:nowrap;overflow:hidden;box-shadow:3px 3px 0 #4a5a32}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
+button.ghost{background:transparent;color:#1f2a14;box-shadow:none}
+button.sw{width:100%;height:44px;padding:0;box-shadow:none}
+button.sw[aria-checked="true"]{outline:3px solid #1f2a14;outline-offset:2px}
+#sw0{background:#1f2a14}#sw1{background:#4a5a32}#sw2{background:#7d8a58}#sw3{background:#a3ad7e}
+#tool{grid-column:span 2}
+#more{font-size:20px}
+/* the two pop-up menus: a column of 44 px rows that opens just above the bottom row, over the canvas.
+   A tap anywhere outside closes it (the clear layer under it catches that tap, so it draws nothing). */
+#scrim{position:absolute;inset:0;z-index:1}
+.pop{position:absolute;z-index:2;display:flex;flex-direction:column;gap:8px;padding:8px;background:#a3ad7e;border:2px solid #1f2a14;box-shadow:4px 4px 0 #1f2a14}
+.pop button{text-align:left;padding:0 10px}
+/* the tool menu is two columns, so it covers less of the picture; the mirror switch takes a whole row */
+#toolpop{left:8px;width:220px;display:grid;grid-template-columns:1fr 1fr}
+#tmir{grid-column:span 2}
+#morepop{right:8px;width:150px}
+#msg{min-height:15px;font-size:13px;line-height:15px;text-align:center}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="bar"><span><span id="title">点阵画板</span> · <button id="sheet">1/6</button></span><span id="state">96×96 · 4 色</span></div>
+<div id="stage"><div id="wrap"><canvas id="cv" width="96" height="96"></canvas><div id="guide" class="hide"></div></div></div>
+<div id="msg"></div>
+<div class="tools" id="t1">
+<button class="sw" id="sw0" data-c="0" role="radio" aria-checked="true"></button>
+<button class="sw" id="sw1" data-c="1" role="radio" aria-checked="false"></button>
+<button class="sw" id="sw2" data-c="2" role="radio" aria-checked="false"></button>
+<button class="sw" id="sw3" data-c="3" role="radio" aria-checked="false"></button>
+<button class="ghost" id="size"></button>
+</div>
+<div class="tools" id="t2">
+<button class="ghost" id="tool" aria-haspopup="true"></button>
+<button class="ghost" id="undo"></button>
+<button class="ghost" id="redo"></button>
+<button class="ghost" id="more" aria-haspopup="true">⋯</button>
+</div>
+<div id="scrim" class="hide"></div>
+<!-- the tool menu: four tools (the one in hand is filled) and the mirror switch -->
+<div class="pop hide" id="toolpop">
+<button class="ghost" id="tpen"></button>
+<button class="ghost" id="tline"></button>
+<button class="ghost" id="tbox"></button>
+<button class="ghost" id="tfill"></button>
+<button class="ghost" id="tmir"></button>
+</div>
+<!-- the rarer actions: files and clear (clear asks for a second tap, in place) -->
+<div class="pop hide" id="morepop">
+<button class="ghost" id="imp"></button>
+<button class="ghost" id="exp"></button>
+<button class="ghost" id="clr"></button>
+</div>
+</div>
+<script>
+(function(){
+"use strict";
+/* two languages from PAD.lang; older runtimes have none, so Chinese is the default */
+var LANG=(typeof PAD!=="undefined"&&PAD.lang==="en")?"en":"zh";
+var TXT={
+  zh:{title:"点阵画板",fine:"细",bold:"粗",undo:"撤销",redo:"重做",imp:"导入",exp:"导出",clr:"清空",yes:"确认清空",
+      noundo:"没有可以撤销的了。",noredo:"没有可以重做的了。",imported:"已转成 96×96 四色点阵。",badimg:"这张图读不出来，换一张试试。",
+      exported:"导出好了。",fail:"文件操作失败。",saving:"保存中…",saved:"96×96 · 已保存",ink:"墨",dark:"深",mid:"浅",paper:"底色（橡皮）",
+      pen:"笔",line:"直线",box:"方框",fill:"油漆桶",mirOnL:"镜像：开",mirOffL:"镜像：关",more:"更多",mirOn:"镜像开：左右两边一起画。",mirOff:"镜像关了。",
+      sheetAria:"换下一张",sheetN:"第 {n} 张",readFail:"这张读不出来，先画别的几张。"},
+  en:{title:"Paint",fine:"Fine",bold:"Bold",undo:"Undo",redo:"Redo",imp:"Import",exp:"Export",clr:"Clear",yes:"Clear it",
+      noundo:"Nothing to undo.",noredo:"Nothing to redo.",imported:"Turned into 96×96, four tones.",badimg:"Can't read that image. Try another.",
+      exported:"Exported.",fail:"File action failed.",saving:"Saving…",saved:"96×96 · saved",ink:"Ink",dark:"Dark",mid:"Light",paper:"Paper (eraser)",
+      pen:"Pen",line:"Line",box:"Box",fill:"Fill",mirOnL:"Mirror: on",mirOffL:"Mirror: off",more:"More",mirOn:"Mirror on: both halves at once.",mirOff:"Mirror off.",
+      sheetAria:"Next sheet",sheetN:"Sheet {n}",readFail:"Can't read this sheet. Draw on another one."}
+}[LANG];
+function $(id){return document.getElementById(id);}
+
+var W=96, SHEETS=6;
+/* the four tones as RGB, index 0 = ink .. 3 = paper */
+var TONES=[[31,42,20],[74,90,50],[125,138,88],[163,173,126]];
+/* 4x4 Bayer matrix for ordered dithering (same as the old built-in) */
+var BAYER=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+/* tool: "pen" | "line" | "box" | "fill"; size 1 (fine) or 3 (bold) for pen, line and box;
+   mirror: every mark is also made at x -> 95 - x, the left-right reflection around the middle (x = 48) */
+var px=new Uint8Array(W*W).fill(3), color=0, size=1, tool="pen", mirror=false;
+var undo=[], redo=[], drawing=false, last=null, start=null, base=null, saveTimer=null;
+/* sheet: the open sheet, 1-6. ready: its saved picture has been read (or there was none), so it may be
+   drawn on and saved. Nothing draws while a sheet is loading: a stroke must never replace a picture
+   that simply had not arrived yet. */
+var sheet=1, ready=false, loadSeq=0;
+var cv=$("cv"), ctx=cv.getContext("2d"), img=ctx.createImageData(W,W);
+
+document.title=TXT.title; document.documentElement.lang=LANG;
+$("title").textContent=TXT.title; $("undo").textContent=TXT.undo; $("redo").textContent=TXT.redo;
+$("imp").textContent=TXT.imp; $("exp").textContent=TXT.exp; $("clr").textContent=TXT.clr;
+$("tpen").textContent=TXT.pen; $("tline").textContent=TXT.line; $("tbox").textContent=TXT.box; $("tfill").textContent=TXT.fill;
+$("more").setAttribute("aria-label",TXT.more);
+$("sheet").setAttribute("aria-label",TXT.sheetAria);
+["ink","dark","mid","paper"].forEach(function(k,i){ $("sw"+i).setAttribute("aria-label",TXT[k]); });
+$("state").textContent="96×96 · 4 "+(LANG==="en"?"tones":"色");
+
+/* the bottom-left button names the tool in hand; the triangle says it opens a menu.
+   The width button (细 / 粗) sits with the colours and serves the pen, the line and the box. */
+function toolLabels(){
+  $("tool").textContent=TXT[tool]+" \u25B2";
+  $("size").textContent=size===1?TXT.fine:TXT.bold;
+  ["pen","line","box","fill"].forEach(function(t){ $("t"+t).classList.toggle("ghost",t!==tool); });
+  $("tmir").textContent=mirror?TXT.mirOnL:TXT.mirOffL;
+  $("tmir").classList.toggle("ghost",!mirror);
+  $("guide").classList.toggle("hide",!mirror);
+}
+toolLabels();
+
+var msgTimer=null;
+function say(t){ $("msg").textContent=t; clearTimeout(msgTimer); msgTimer=setTimeout(function(){ $("msg").textContent=""; },2500); }
+
+/* the largest square the stage allows, in whole CSS pixels */
+function fit(){
+  var s=$("stage"), side=Math.max(96,Math.floor(Math.min(s.clientWidth,s.clientHeight)-14));
+  cv.style.width=cv.style.height=side+"px";
+}
+window.addEventListener("resize",fit); fit();
+
+function render(){
+  var d=img.data;
+  for(var i=0;i<px.length;i++){ var t=TONES[px[i]]; d[i*4]=t[0]; d[i*4+1]=t[1]; d[i*4+2]=t[2]; d[i*4+3]=255; }
+  ctx.putImageData(img,0,0);
+}
+/* 20 steps each way; a new stroke, an import or a clear throws away the redo side, as paper would */
+function capPush(stack,snap){ stack.push(snap); if(stack.length>20) stack.shift(); }
+function pushUndo(){ capPush(undo,px.slice()); redo.length=0; }
+
+/* ---------- the marks ---------- */
+function put(x,y){ if(x>=0&&y>=0&&x<W&&y<W) px[y*W+x]=color; }
+/* one pen dot, 1 or 3 px square; with the mirror on, its reflection too */
+function dot(x,y){
+  var r=size===1?0:1;
+  for(var j=-r;j<=r;j++) for(var i=-r;i<=r;i++){ put(x+i,y+j); if(mirror) put(W-1-(x+i),y+j); }
+}
+/* Bresenham, so a fast stroke leaves no gaps between pointer events */
+function line(x0,y0,x1,y1){
+  var dx=Math.abs(x1-x0), dy=-Math.abs(y1-y0), sx=x0<x1?1:-1, sy=y0<y1?1:-1, err=dx+dy;
+  for(;;){ dot(x0,y0); if(x0===x1&&y0===y1) break; var e2=2*err; if(e2>=dy){ err+=dy; x0+=sx; } if(e2<=dx){ err+=dx; y0+=sy; } }
+}
+/* an outline from corner to corner; the bold pen makes it 3 px thick */
+function box(x0,y0,x1,y1){ line(x0,y0,x1,y0); line(x1,y0,x1,y1); line(x1,y1,x0,y1); line(x0,y1,x0,y0); }
+/* 4-way flood fill of the tapped tone: it spreads up, down, left and right, never through a corner,
+   and stops wherever another tone begins. An explicit stack, so a big area cannot overflow the call stack. */
+function flood(x,y){
+  if(x<0||y<0||x>=W||y>=W) return;
+  var from=px[y*W+x];
+  if(from===color) return;
+  var stack=[y*W+x];
+  while(stack.length){
+    var k=stack.pop();
+    if(px[k]!==from) continue;
+    px[k]=color;
+    var kx=k%W;
+    if(kx>0) stack.push(k-1);
+    if(kx<W-1) stack.push(k+1);
+    if(k>=W) stack.push(k-W);
+    if(k<W*W-W) stack.push(k+W);
+  }
+}
+function fill(x,y){ flood(x,y); if(mirror) flood(W-1-x,y); }
+
+function pos(ev){
+  var r=cv.getBoundingClientRect();
+  return [Math.floor((ev.clientX-r.left)/r.width*W), Math.floor((ev.clientY-r.top)/r.height*W)];
+}
+/* a line or a box: the picture as it was at the press, with the shape from the press to here on top.
+   Every move draws the preview again; the release keeps the last one. One undo step, pushed at the press. */
+function shape(p){
+  px=base.slice();
+  if(tool==="line") line(start[0],start[1],p[0],p[1]); else box(start[0],start[1],p[0],p[1]);
+  render();
+}
+cv.addEventListener("pointerdown",function(ev){
+  ev.preventDefault();
+  if(!ready || drawing) return;
+  try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
+  var p=pos(ev);
+  if(tool==="fill"){
+    /* a tap on the tone already in hand changes nothing, so it costs no undo step */
+    var k=p[1]*W+p[0], m=p[1]*W+(W-1-p[0]);
+    if(px[k]===color && (!mirror || px[m]===color)) return;
+    pushUndo(); fill(p[0],p[1]); render(); saveSoon(); return;
+  }
+  pushUndo();
+  drawing=true; last=start=p;
+  if(tool==="pen"){ dot(p[0],p[1]); render(); }
+  else { base=px.slice(); shape(p); }
+});
+cv.addEventListener("pointermove",function(ev){
+  if(!drawing) return;
+  var p=pos(ev);
+  if(tool==="pen"){ line(last[0],last[1],p[0],p[1]); last=p; render(); }
+  else shape(p);
+});
+function end(){ if(!drawing) return; drawing=false; base=null; saveSoon(); }
+cv.addEventListener("pointerup",end); cv.addEventListener("pointercancel",end);
+
+/* ---------- the two rows: colours and tools ---------- */
+Array.prototype.forEach.call(document.querySelectorAll(".sw"),function(b){
+  b.onclick=function(){
+    color=+b.getAttribute("data-c");
+    Array.prototype.forEach.call(document.querySelectorAll(".sw"),function(o){ o.setAttribute("aria-checked",o===b?"true":"false"); });
+  };
+});
+$("size").onclick=function(){ size=size===1?3:1; toolLabels(); };
+
+/* ---------- the two menus ---------- */
+function closeMenus(){
+  ["toolpop","morepop","scrim"].forEach(function(id){ $(id).classList.add("hide"); });
+  $("clr").textContent=TXT.clr; clearArmed=false;
+}
+function openMenu(id){
+  closeMenus();
+  /* open just above the bottom row, whatever the screen's height */
+  var t2=$("t2"), app=$("app");
+  $(id).style.bottom=(app.clientHeight-t2.offsetTop+8)+"px";
+  $("scrim").classList.remove("hide"); $(id).classList.remove("hide");
+}
+$("scrim").addEventListener("pointerdown",function(ev){ ev.preventDefault(); closeMenus(); });
+$("tool").onclick=function(){ if($("toolpop").classList.contains("hide")) openMenu("toolpop"); else closeMenus(); };
+$("more").onclick=function(){ if($("morepop").classList.contains("hide")) openMenu("morepop"); else closeMenus(); };
+["pen","line","box","fill"].forEach(function(t){
+  $("t"+t).onclick=function(){ tool=t; toolLabels(); closeMenus(); };
+});
+$("tmir").onclick=function(){ mirror=!mirror; toolLabels(); closeMenus(); say(mirror?TXT.mirOn:TXT.mirOff); };
+
+$("undo").onclick=function(){
+  var prev=undo.pop();
+  if(!prev){ say(TXT.noundo); return; }
+  capPush(redo,px.slice()); px=prev; render(); saveSoon();
+};
+$("redo").onclick=function(){
+  var next=redo.pop();
+  if(!next){ say(TXT.noredo); return; }
+  capPush(undo,px.slice()); px=next; render(); saveSoon();
+};
+/* clear needs two taps and no confirm(), which sandboxed apps cannot call: the first turns the row into
+   the question, the second clears; closing the menu takes the question back */
+var clearArmed=false;
+$("clr").onclick=function(){
+  if(!clearArmed){ clearArmed=true; $("clr").textContent=TXT.yes; return; }
+  closeMenus(); if(!ready) return;
+  pushUndo(); px=new Uint8Array(W*W).fill(3); render(); saveSoon();
+};
+
+/* ---------- persistence ----------
+   Each sheet is its 9216 pixels as a digit string under one PAD key: sheet 1 is "px" (the key every
+   version before 1.3.0 used, so an old drawing opens as sheet 1, unchanged), sheets 2-6 are "px2" ... "px6".
+   A sheet's key is written only after something is drawn on it. "sheet" remembers the open one. */
+function keyOf(n){ return n===1?"px":"px"+n; }
+function write(){
+  saveTimer=null;
+  if(!ready) return;
+  PAD.save(keyOf(sheet),Array.prototype.join.call(px,""));
+  $("state").textContent=TXT.saved;
+}
+function saveSoon(){
+  $("state").textContent=TXT.saving;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(write,1000);
+}
+/* a waiting save goes out now: before another sheet replaces px, and when the page goes away */
+function flush(){ if(saveTimer){ clearTimeout(saveTimer); write(); } }
+window.addEventListener("pagehide",flush);
+
+function openSheet(n){
+  flush();
+  sheet=n; ready=false; drawing=false; base=null;
+  px=new Uint8Array(W*W).fill(3); undo=[]; redo=[];
+  $("sheet").textContent=n+"/"+SHEETS;
+  render();
+  var seq=++loadSeq;
+  PAD.load(keyOf(n)).then(function(s){
+    if(seq!==loadSeq) return;
+    if(typeof s==="string" && s.length===W*W && !/[^0-3]/.test(s)){
+      for(var i=0;i<s.length;i++) px[i]=s.charCodeAt(i)-48;
+      render();
+    }
+    ready=true;
+  },function(){
+    /* the stored picture could not be read: keep this sheet closed to drawing, so nothing overwrites it */
+    if(seq===loadSeq) say(TXT.readFail);
+  });
+}
+$("sheet").onclick=function(){
+  var n=sheet%SHEETS+1;
+  openSheet(n); PAD.save("sheet",n); say(TXT.sheetN.replace("{n}",n));
+};
+PAD.load("sheet").then(function(v){
+  var n=Math.floor(+v);
+  openSheet(n>=1&&n<=SHEETS?n:1);
+},function(){ openSheet(1); });
+
+/* ---------- files permission ----------
+   PAD.importFile / PAD.exportFile need "permissions": ["files"] in manifest.json; without it they reject.
+   Every call makes the runtime ask the player on its own dialog first, so the app never touches the
+   file system and cannot read or write anything silently. One file is at most 2 MB. Older runtimes
+   have no such functions, so feature-detect and hide the buttons instead of failing. */
+var HAS_FILES=typeof PAD.exportFile==="function" && typeof PAD.importFile==="function";
+if(!HAS_FILES){ $("imp").classList.add("hide"); $("exp").classList.add("hide"); }
+
+/* PAD.importFile({accept:["image/*"]}) -> Promise<{name, type, data} | null>
+   null means the player cancelled; an image arrives as a data: URL. Then: crop to a square,
+   stretch contrast, Bayer-dither to the four tones. */
+function importImage(){
+  PAD.importFile({accept:["image/*"]}).then(function(f){
+    if(!f || typeof f.data!=="string") return;
+    var im=new Image();
+    im.onload=function(){ fromImage(im); };
+    im.onerror=function(){ say(TXT.badimg); };
+    im.src=f.data;
+  }).catch(function(){ say(TXT.fail); });
+}
+function fromImage(im){
+  var iw=im.naturalWidth, ih=im.naturalHeight, side=Math.min(iw,ih);
+  if(!side){ say(TXT.badimg); return; }
+  if(!ready) return;
+  var c=document.createElement("canvas"); c.width=c.height=W;
+  var x=c.getContext("2d"); x.imageSmoothingEnabled=true;
+  x.drawImage(im,(iw-side)/2,(ih-side)/2,side,side,0,0,W,W);
+  var d=x.getImageData(0,0,W,W).data, lum=new Float32Array(W*W), lo=1, hi=0;
+  for(var i=0;i<lum.length;i++){ var v=(0.2126*d[i*4]+0.7152*d[i*4+1]+0.0722*d[i*4+2])/255; lum[i]=v; if(v<lo) lo=v; if(v>hi) hi=v; }
+  var span=Math.max(0.05,hi-lo);
+  pushUndo();
+  for(var y=0;y<W;y++) for(var xx=0;xx<W;xx++){
+    var k=y*W+xx, v2=(lum[k]-lo)/span, t=(BAYER[(y%4)*4+(xx%4)]+0.5)/16-0.5;
+    px[k]=Math.max(0,Math.min(3,Math.round(v2*3+t)));
+  }
+  render(); saveSoon(); say(TXT.imported);
+}
+$("imp").onclick=function(){ closeMenus(); importImage(); };
+
+/* PAD.exportFile({name, type, data}) -> Promise<"saved" | "cancelled">
+   data is a data: URL (binary files such as this PNG) or plain text. Say nothing on "cancelled". */
+function exportPng(){
+  var S=8, big=document.createElement("canvas"); big.width=big.height=W*S;
+  var bx=big.getContext("2d"), bi=bx.createImageData(W*S,W*S), bd=bi.data;
+  /* write the big pixels directly: drawImage of a canvas onto a canvas swaps red and blue in Safari */
+  for(var y=0;y<W*S;y++) for(var x=0;x<W*S;x++){
+    var t=TONES[px[((y/S)|0)*W+((x/S)|0)]], o=(y*W*S+x)*4;
+    bd[o]=t[0]; bd[o+1]=t[1]; bd[o+2]=t[2]; bd[o+3]=255;
+  }
+  bx.putImageData(bi,0,0);
+  var n=new Date(), p=function(v){ return String(v).padStart(2,"0"); };
+  var name="lopda-"+n.getFullYear()+p(n.getMonth()+1)+p(n.getDate())+"-"+p(n.getHours())+p(n.getMinutes())+".png";
+  PAD.exportFile({name:name,type:"image/png",data:big.toDataURL("image/png")}).then(function(r){
+    if(r==="saved") say(TXT.exported);
+  }).catch(function(){ say(TXT.fail); });
+}
+$("exp").onclick=function(){ closeMenus(); exportPng(); };
+
+})();
+</script>
+</body>
+</html>
