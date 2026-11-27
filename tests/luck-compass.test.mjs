@@ -227,7 +227,7 @@ test("with a working compass the key line does not claim the turning keys", asyn
 
 function bootStored(lang, loadValue, rejectLoad) {
   const listeners = {};
-  const saves = new Map(), appends = [];
+  const saves = new Map(), saveCalls = [], appends = [];
   const pad = {
     lang,
     on(type, fn) { (listeners[type] = listeners[type] || []).push(fn); },
@@ -235,7 +235,7 @@ function bootStored(lang, loadValue, rejectLoad) {
     isDown() { return false; },
     sfx() {},
     load(key) { return rejectLoad ? Promise.reject(new Error("broken")) : Promise.resolve(loadValue || saves.get(key) || null); },
-    save(key, value) { saves.set(key, { ...value }); },
+    save(key, value) { saves.set(key, { ...value }); saveCalls.push({ key, value: { ...value } }); },
     notes: { append(title, text) { appends.push({ title, text }); return Promise.resolve("saved"); } }
   };
   const app = boot(APP, { pad, seed: 1 });
@@ -245,7 +245,7 @@ function bootStored(lang, loadValue, rejectLoad) {
     (listeners.release || []).forEach((fn) => fn(button));
     app.frame();
   }
-  return { app, saves, appends, press };
+  return { app, saves, saveCalls, appends, press };
 }
 
 test("the moved slips match their frozen catalogue and daily slot formula", () => {
@@ -307,13 +307,15 @@ test("counter opens fortune; a daily draw is saved once and START writes its exa
   assert.ok(initial.includes("罗盘"));
   env.app.ctx.get("openSection")("fortune");
   env.press("a");
-  for (let i = 0; i < 60; i++) env.app.frame();
+  for (let i = 0; i < 150; i++) env.app.frame();
   await settle();
   const key = env.app.ctx.get("todayKey")();
   const index = env.app.ctx.get("SLIPS").slotFor(key);
   assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: false });
-  env.press("a");
-  assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: false });
+  assert.equal(env.saveCalls.filter((call) => call.key === "slip").length, 1, "drawing persists once");
+  const buttons = drawnLines(env.app);
+  assert.ok(buttons.includes("写入记事本"));
+  assert.ok(buttons.includes("不写"));
   env.press("start");
   await settle();
   const item = env.app.ctx.get("SLIPS").DATA[index];
@@ -322,6 +324,57 @@ test("counter opens fortune; a daily draw is saved once and START writes its exa
   assert.equal(env.appends[0].text, key + "  第" + item.num + "签  " + item.grade.zh + "\n" +
     item.verse.zh.join("\n") + "\n" + item.meaning.zh);
   assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: true });
+});
+
+test("Right then A skips without writing or changing the saved draw; Left then A writes once", async () => {
+  const skipped = bootStored("zh");
+  await settle();
+  skipped.app.ctx.get("openSection")("fortune");
+  skipped.press("a");
+  for (let i = 0; i < 150; i++) skipped.app.frame();
+  await settle();
+  const original = { ...skipped.saves.get("slip") };
+  skipped.press("right");
+  skipped.press("a");
+  await settle();
+  assert.equal(skipped.app.ctx.get("slipSkipped"), true);
+  assert.deepEqual(skipped.appends, []);
+  assert.deepEqual(skipped.saves.get("slip"), original, "skip does not save a new choice");
+  assert.ok(drawnLines(skipped.app).includes("今天已抽 · 明天再来"));
+  skipped.press("a");
+  assert.deepEqual(skipped.appends, [], "the hidden choice cannot be confirmed again");
+
+  const written = bootStored("zh");
+  await settle();
+  written.app.ctx.get("openSection")("fortune");
+  written.press("a");
+  for (let i = 0; i < 150; i++) written.app.frame();
+  await settle();
+  written.press("right");
+  written.press("left");
+  written.press("a");
+  await settle();
+  assert.equal(written.appends.length, 1);
+  assert.equal(written.saves.get("slip").written, true);
+});
+
+test("slip text and both choices fit, and a tap on Skip marks only this visit", async () => {
+  for (const lang of ["zh", "en"]) {
+    const env = bootStored(lang);
+    await settle();
+    env.app.ctx.get("openSection")("fortune");
+    env.app.ctx.get("slipState").slip = 0;
+    const lines = drawnLines(env.app), g = env.app.ctx.get("game").g;
+    for (const line of lines) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
+    assert.ok(lines.includes(lang === "zh" ? "写入记事本" : "To notes"));
+    assert.ok(lines.includes(lang === "zh" ? "不写" : "Skip"));
+    if (lang === "zh") {
+      env.app.pointer("pointerdown", 160, 190, 216, 240);
+      env.app.frame();
+      assert.equal(env.app.ctx.get("slipSkipped"), true);
+      assert.equal(env.appends.length, 0);
+    }
+  }
 });
 
 test("a rejected slip load is never overwritten, and B returns from both sections", async () => {
@@ -340,7 +393,7 @@ test("a rejected slip load is never overwritten, and B returns from both section
   assert.equal(env.app.ctx.get("section"), "counter");
 });
 
-test("the counter starts with the almanac, and its day links to the same compass day", async () => {
+test("almanac A and taps do nothing; page navigation stays on the almanac", async () => {
   const env = bootStored("zh");
   await settle();
   const first = drawnLines(env.app);
@@ -354,17 +407,12 @@ test("the counter starts with the almanac, and its day links to the same compass
   assert.equal(env.app.ctx.get("almanacOffset"), 1);
   env.press("start");
   assert.equal(env.app.ctx.get("almanacOffset"), 0);
-  for (let i = 0; i < 20; i++) env.press("down");
   env.press("a");
-  assert.equal(env.app.ctx.get("section"), "compass");
-  assert.equal(env.app.ctx.get("offset"), env.app.ctx.get("almanacOffset"));
-  env.press("b");
-  env.press("a");
-  for (let i = 0; i < 20; i++) env.press("down");
-  const godsY = 56 + (env.app.ctx.get("almanacGodsLine") - env.app.ctx.get("almanacScroll")) * 14 + 4;
-  env.app.pointer("pointerdown", 100, godsY, 216, 240);
+  assert.equal(env.app.ctx.get("section"), "almanac");
+  env.app.pointer("pointerdown", 100, 140, 216, 240);
   env.app.frame();
-  assert.equal(env.app.ctx.get("section"), "compass", "tapping the visible gods row opens its matching compass");
+  assert.equal(env.app.ctx.get("section"), "almanac", "tapping the page does not open the compass");
+  assert.equal(env.app.ctx.get("offset"), 0);
 });
 
 test("almanac SELECT opens the glossary and B returns to the same day", async () => {
@@ -373,11 +421,10 @@ test("almanac SELECT opens the glossary and B returns to the same day", async ()
   env.app.ctx.get("openSection")("almanac");
   env.press("right");
   const day = env.app.ctx.get("almanacOffset");
-  const keyLine = drawnLines(env.app).find((line) => line.includes("A神位") || line.includes("A gods"));
-  assert.ok(keyLine, "the almanac key line remains visible");
-  const selectLine = drawnLines(env.app).find((line) => line.includes("SELECT 词条") || line.includes("SELECT terms"));
-  assert.ok(selectLine, "the glossary action is shown");
-  assert.ok(env.app.ctx.get("game").g.measure(selectLine) <= SCREEN_W);
+  const keyLines = drawnLines(env.app).filter((line) => line.includes("SELECT") || line.includes("START"));
+  assert.ok(keyLines.some((line) => line.includes("SELECT")));
+  assert.ok(!keyLines.some((line) => line.includes("神位") || line.includes("gods")));
+  for (const line of keyLines) assert.ok(env.app.ctx.get("game").g.measure(line) <= SCREEN_W);
   env.press("select");
   assert.equal(env.app.ctx.get("almanacGlossary"), true);
   const lines = drawnLines(env.app);
@@ -385,6 +432,44 @@ test("almanac SELECT opens the glossary and B returns to the same day", async ()
   env.press("b");
   assert.equal(env.app.ctx.get("almanacGlossary"), false);
   assert.equal(env.app.ctx.get("almanacOffset"), day);
+});
+
+test("the almanac touch scroller tracks pixels and clamps at both ends", async () => {
+  const env = bootStored("zh");
+  await settle();
+  env.app.ctx.get("openSection")("almanac");
+  env.app.frame();
+  env.app.pointer("pointerdown", 100, 135, 216, 240);
+  env.app.frame();
+  env.app.pointer("pointermove", 100, 75, 216, 240);
+  env.app.frame();
+  env.app.pointer("pointerup", 100, 75, 216, 240);
+  env.app.frame();
+  const scroller = env.app.ctx.get("almanacScroller");
+  assert.ok(scroller.offset >= 55 && scroller.offset <= 65, `-60px drag -> ${scroller.offset}px`);
+  env.app.pointer("pointerdown", 100, 135, 216, 240);
+  env.app.frame();
+  env.app.pointer("pointermove", 100, -465, 216, 240);
+  env.app.frame();
+  env.app.pointer("pointerup", 100, -465, 216, 240);
+  env.app.frame();
+  assert.equal(scroller.offset, scroller.max, "a long drag clamps to the final pixel");
+});
+
+test("the almanac page peels from the bottom-right: page beneath at the corner, flap past the fold, old page beyond", async () => {
+  const env = bootStored("zh");
+  await settle();
+  env.app.ctx.get("openSection")("almanac");
+  env.app.frame();
+  const g = env.app.ctx.get("game").g;
+  /* stand-in pages of one flat tone each: tomorrow dark, today paper; the flap is mid */
+  env.app.ctx.get("(drawAlmanacPage = function (g, offset) { g.rect(8, 36, 200, 171, offset === 1 ? g.DARK : g.PAPER); })");
+  env.app.ctx.get("drawPeel")(g, 1, 0, 0, 0.25);
+  const len = Math.hypot(199, 170), ux = -199 / len, uy = -170 / len, d = 0.25 * (len + 8);
+  const at = (dist) => g.get(Math.round(207 + ux * dist), Math.round(206 + uy * dist));
+  assert.equal(at(d * 0.4), g.DARK, "beside the corner the page beneath shows");
+  assert.equal(at(d * 1.5), g.MID, "past the fold lies the folded-back flap");
+  assert.equal(at(d * 2.6), g.PAPER, "beyond the flap the old page is still there");
 });
 
 test("all drawn almanac strings for 2026-11-27 fit the 216px canvas in both languages", () => {
@@ -398,20 +483,16 @@ test("all drawn almanac strings for 2026-11-27 fit the 216px canvas in both lang
     for (let i = 0; i > delta; i--) app.ctx.get("moveAlmanac")(-1);
     const g = app.ctx.get("game").g, lines = drawnLines(app);
     for (const line of lines) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
-    const allRows = app.ctx.get("pageLines")(g, { y: 2026, m: 11, d: 27, week: 5 },
+    const layout = app.ctx.get("pageLayout")(g, { y: 2026, m: 11, d: 27, week: 5 },
       app.ctx.get("ALMANAC").day(2026, 11, 27));
-    for (const line of allRows) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
-    if (lang === "en") assert.ok(allRows.some((line) => line.includes("Horse")));
-    else assert.ok(allRows.includes("农历十月十九"));
-    const godsAt = app.ctx.get("almanacGodsLine"), godsCount = app.ctx.get("almanacGodsLineCount");
-    assert.equal(godsCount, 2);
-    assert.ok(!allRows[godsAt].includes("…") && !allRows[godsAt + 1].includes("…"));
-    assert.ok(allRows[godsAt].includes("喜神") && allRows[godsAt].includes("财神"));
-    assert.ok(allRows[godsAt + 1].includes("福神"));
-    assert.ok(allRows.some((line) => line.includes("治病")), "the activity remains an unbroken term");
-    assert.ok(!allRows.some((line) => /治$/.test(line) || /^病/.test(line)), "activity terms do not split");
-    const continuation = app.ctx.get("almanacRowIndents");
-    assert.ok(continuation.some((indent) => indent > 0), "continued activity rows indent beneath their terms");
+    const allRows = [layout.dateLine, layout.lunar, layout.pillars]
+      .concat(layout.boxes.flatMap((box) => [box.title, ...box.lines]))
+      .concat(layout.rows.flatMap((row) => [row.label, row.text]));
+    for (const line of allRows) if (line) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
+    assert.deepEqual(layout.boxes.map((box) => box.title), ["宜", "忌"]);
+    if (lang === "en") assert.ok(layout.pillars.includes("Horse"));
+    else assert.equal(layout.lunar, "农历十月十九");
+    assert.ok(layout.boxes[0].lines.some((line) => line.includes("治病")), "activity terms stay whole");
   }
 });
 

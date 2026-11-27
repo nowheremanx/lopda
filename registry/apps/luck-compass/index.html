@@ -2253,6 +2253,8 @@ function drawPanel(g, stem) {
 
 var slipState = { dateKey: todayKey(), slip: null, written: false, animating: false };
 var loadComplete = false, loadFailed = false, slipScroll = 0, appendBusy = false, appendStatus = "";
+var slipChoice = 0, slipSkipped = false, slipRevealAt = -1;
+var slipAnimAt = -1, slipAnimSpan = 0.82, slipLiftSpan = 0.62;
 var REDUCED_MOTION = typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 var SECTIONS = [
@@ -2277,14 +2279,87 @@ var counterCursor = 0;
 var almanacOffset = 0, almanacScroll = 0, almanacGlossary = false, almanacGlossaryScroll = 0;
 /* the tear: forward, the old page peels up from its bottom edge and comes away at the binding, showing the
    new page beneath; back, yesterday's page rolls down over today's. Nothing slides sideways. */
-var TEAR_TIME = 0.45, TEAR_TIME_REDUCED = 0.12;
+var TEAR_TIME = 0.6, TEAR_TIME_REDUCED = 0.15;
 var almanacTear = 0, almanacTearDir = 1, almanacTearFrom = 0, almanacTearScroll = 0;
-var almanacGodsLine = -1, almanacGodsLineCount = 0, almanacGodsFocused = false;
-var almanacRowIndents = [];
+var almanacLayout = null, almanacTotalHeight = 0, almanacTodayMask = null;
 var WEEK_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 var WEEK_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var MONTH_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var ZODIAC_EN = ["Rat", "Ox", "Tiger", "Rabbit", "Dragon", "Snake", "Horse", "Goat", "Monkey", "Rooster", "Dog", "Pig"];
+
+/* All reading views share one pixel scroller. Keys advance one text line; a touch
+   follows the finger exactly and keeps only a brief, clamped flick afterwards. */
+function makeScroller(offset) {
+  return { offset: offset || 0, max: 0, down: false, moved: false, startY: 0, lastY: 0,
+    velocity: 0, held: 0, next: 0, direction: 0 };
+}
+var slipScroller = makeScroller(), almanacScroller = makeScroller(),
+  glossaryScroller = makeScroller(), guaScroller = makeScroller(),
+  guaExplainScroller = makeScroller(), baziExplainScroller = makeScroller();
+var scrollGestureMoved = false;
+function scrollUpdate(sc, area, total, dt, lineHeight) {
+  var p = game.pointer, max = Math.max(0, total - area.h), dir = 0, releasedNow = false;
+  sc.max = max;
+  sc.offset = Math.max(0, Math.min(max, sc.offset));
+  if (game.pressed("up") || game.btn("up")) dir = -1;
+  else if (game.pressed("down") || game.btn("down")) dir = 1;
+  if (dir) {
+    if (dir !== sc.direction || game.pressed(dir < 0 ? "up" : "down")) {
+      sc.offset += dir * lineHeight;
+      sc.held = 0; sc.next = 0.34; sc.direction = dir;
+      sfx("move");
+    } else {
+      sc.held += dt;
+      if (sc.held >= sc.next) { sc.offset += dir * lineHeight; sc.next += 0.09; sfx("move"); }
+    }
+  } else { sc.direction = 0; sc.held = 0; }
+  if (p.pressed) {
+    scrollGestureMoved = false;
+    sc.down = p.y >= area.y && p.y <= area.y + area.h;
+    sc.moved = false; sc.startY = p.y; sc.lastY = p.y; sc.velocity = 0;
+    if (sc.down) sc.velocity = 0;
+  } else if (p.down && sc.down) {
+    var dy = p.y - sc.lastY;
+    sc.offset -= dy;
+    sc.velocity = dt > 0 ? -dy / dt : 0;
+    sc.lastY = p.y;
+    if (Math.abs(p.y - sc.startY) > 6) { sc.moved = true; scrollGestureMoved = true; }
+  } else if (p.released && sc.down) {
+    if (Math.abs(p.y - sc.startY) > 6) { sc.moved = true; scrollGestureMoved = true; }
+    sc.down = false;
+    releasedNow = true;
+  }
+  if (!sc.down && !p.pressed && !releasedNow && Math.abs(sc.velocity) > 8) {
+    sc.offset += sc.velocity * dt;
+    sc.velocity *= Math.pow(0.001, dt / 0.4);
+    if (sc.offset <= 0 || sc.offset >= max) sc.velocity = 0;
+  }
+  sc.offset = Math.max(0, Math.min(max, sc.offset));
+  return sc.offset;
+}
+function scrollTapAllowed() { return !scrollGestureMoved; }
+function drawScrollbar(g, sc, area, total) {
+  if (total <= area.h) return;
+  var h = Math.max(8, Math.floor(area.h * area.h / total));
+  var y = area.y + Math.floor((area.h - h) * sc.offset / Math.max(1, sc.max));
+  g.rect(area.x + area.w - 3, area.y, 2, area.h, g.MID);
+  g.rect(area.x + area.w - 3, y, 2, h, g.INK);
+}
+function fillPoly(g, pts, tone) {
+  var minY = 10000, maxY = -10000, i, j, intersections, y, x;
+  for (i = 0; i < pts.length; i++) { minY = Math.min(minY, pts[i].y); maxY = Math.max(maxY, pts[i].y); }
+  for (y = Math.ceil(minY); y <= Math.floor(maxY); y++) {
+    intersections = [];
+    for (i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      var a = pts[j], b = pts[i];
+      if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y))
+        intersections.push(a.x + (y - a.y) * (b.x - a.x) / (b.y - a.y));
+    }
+    intersections.sort(function (a, b) { return a - b; });
+    for (i = 0; i + 1 < intersections.length; i += 2)
+      for (x = Math.ceil(intersections[i]); x <= Math.floor(intersections[i + 1]); x++) g.pixel(x, y, tone);
+  }
+}
 
 function pad2(n) { return n < 10 ? "0" + n : String(n); }
 function todayKey() {
@@ -2305,6 +2380,7 @@ function syncSlipDate() {
   slipState.written = false;
   slipState.animating = false;
   slipScroll = 0;
+  slipScroller.offset = 0;
   appendStatus = "";
   syncMotion();
 }
@@ -2322,6 +2398,7 @@ function syncGuaDate() {
   guaState.animating = false;
   guaAppendStatus = "";
   guaScroll = 0;
+  guaScroller.offset = 0;
   syncMotion();
 }
 function saveGua() {
@@ -2366,6 +2443,7 @@ function tossGuaLine() {
     guaState.written = false;
     guaState.animating = false;
     guaScroll = 0;
+    guaScroller.offset = 0;
     saveGua();
     sfx("ok");
     syncMotion();
@@ -2409,16 +2487,26 @@ function drawSlip() {
   if (!loadComplete || slipState.slip !== null || slipState.animating) return;
   slipState.animating = true;
   syncMotion();
-  var span = REDUCED_MOTION ? 0.12 : 0.82;
-  var ticks = REDUCED_MOTION ? [0, 0.03, 0.06, 0.09] : [0, 0.21, 0.42, 0.65];
+  var span = REDUCED_MOTION ? 0.08 : 0.82;
+  var lift = REDUCED_MOTION ? 0.08 : 0.62;
+  var settle = REDUCED_MOTION ? 0.02 : 0.16;
+  slipAnimAt = game.time;
+  slipAnimSpan = span;
+  slipLiftSpan = lift;
+  var ticks = REDUCED_MOTION ? [0, 0.025] : [0, 0.21, 0.42];
   for (var i = 0; i < ticks.length; i++) {
     game.after(ticks[i], function () { sfx("tick"); });
   }
-  game.after(span, function () {
+  game.after(span + settle, function () { sfx("tick"); });
+  game.after(span + settle + lift, function () {
     slipState.slip = SLIPS.slotFor(slipState.dateKey);
     slipState.written = false;
     slipState.animating = false;
     slipScroll = 0;
+    slipScroller.offset = 0;
+    slipChoice = 0;
+    slipSkipped = false;
+    slipRevealAt = game.time;
     appendStatus = "";
     saveSlip();
     sfx("ok");
@@ -2427,7 +2515,7 @@ function drawSlip() {
 }
 function appendSlip() {
   syncSlipDate();
-  if (slipState.slip === null || slipState.animating || appendBusy) return;
+  if (slipState.slip === null || slipState.animating || slipState.written || appendBusy) return;
   if (typeof PAD === "undefined" || !PAD.notes || typeof PAD.notes.append !== "function") return;
   appendBusy = true;
   var title = game.lang === "en" ? "Daily fortune" : "每日一签";
@@ -2438,6 +2526,7 @@ function appendSlip() {
     appendBusy = false;
     slipState.written = answer === "saved";
     appendStatus = answer === "saved" ? "saved" : "denied";
+    slipSkipped = false;
     saveSlip();
     if (answer === "saved") sfx("ok");
     else sfx("err");
@@ -2448,6 +2537,12 @@ function appendSlip() {
     saveSlip();
     sfx("err");
   });
+}
+function skipSlip() {
+  if (slipState.slip === null || slipState.animating || slipState.written) return;
+  slipSkipped = true;
+  appendStatus = "";
+  sfx("tap");
 }
 function openSection(id) {
   if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac" &&
@@ -2568,72 +2663,76 @@ function fitPageText(g, text, width) {
   while (out.length > 1 && g.measure(out) > max) out = out.substring(0, out.length - 2) + "…";
   return out;
 }
-function pageLines(g, dt, info) {
-  var lunar = info.lunar, p = info.pillars, monthName = ALMANAC.name(p.month), dayName = ALMANAC.name(p.day);
-  var rows = [], rowIndents = [], keepWhole = [], i, lines, line;
-  function addRow(text, indent, keep) {
-    rows.push(text);
-    rowIndents.push(indent || 0);
-    keepWhole.push(!!keep);
-  }
-  function addActivities(label, terms) {
-    var indent = g.measure(label + " "), current = label + " ", hasTerm = false, offset = 0, term, candidate;
-    if (!terms.length) terms = ["无"];
-    for (var k = 0; k < terms.length; k++) {
-      term = terms[k];
-      candidate = current + (hasTerm ? " " : "") + term;
-      if (g.measure(candidate) <= 192 - offset) {
-        current = candidate;
-        hasTerm = true;
-      } else {
-        if (hasTerm) addRow(current, offset, true);
-        current = term;
-        offset = indent;
-        hasTerm = true;
-      }
+function pageLayout(g, dt, info) {
+  var p = info.pillars, lunar = info.lunar, monthName = ALMANAC.name(p.month), dayName = ALMANAC.name(p.day);
+  var layout = { boxes: [], rows: [], height: 0 }, y = 0, left = 14, right = 210, i;
+  var dateLine = game.lang === "en" ?
+    MONTH_EN[dt.m - 1] + " " + dt.y + " · " + WEEK_EN[dt.week] :
+    dt.y + "年" + dt.m + "月 · " + WEEK_ZH[dt.week];
+  layout.dateLine = fitPageText(g, dateLine, 196);
+  layout.lunar = game.lang === "en" ?
+    "Lunar " + (lunar ? lunar.month + "/" + lunar.day : "unavailable") :
+    almanacLunarText(lunar);
+  layout.pillars = game.lang === "en" ?
+    "Pillars " + ALMANAC.name(p.year) + " " + monthName + " " + dayName + " · " + ZODIAC_EN[p.year % 12] :
+    ALMANAC.name(p.year) + "年 " + monthName + "月 " + dayName + "日 属" + info.zodiac;
+  layout.dateMask = makeDayMask(g, String(dt.d));
+  y = 78;
+  g.line(left, y, right - 2, y, g.DARK);
+  y += 5;
+  function termLines(terms, width) {
+    var out = [], current = "";
+    if (!terms || !terms.length) terms = ["无"];
+    for (var n = 0; n < terms.length; n++) {
+      var next = current ? current + " " + terms[n] : terms[n];
+      if (current && g.measure(next) > width) { out.push(current); current = terms[n]; }
+      else current = next;
     }
-    addRow(current, offset, true);
+    if (current) out.push(current);
+    return out;
   }
-  if (game.lang === "en") {
-    addRow(lunar ? "Lunar " + (lunar.leap ? "leap " : "") + lunar.month + "/" + lunar.day : "Lunar date unavailable");
-    addRow("Pillars " + ALMANAC.name(p.year) + "年 " + monthName + "月 " + dayName + "日");
-    addRow("Zodiac " + ZODIAC_EN[p.year % 12]);
-    addRow(info.term >= 0 ? ALMANAC.TERM_NAMES[info.term] :
-      info.nextTerm.days + " days to " + (info.nextTerm.j >= 0 ? ALMANAC.TERM_NAMES[info.nextTerm.j] : "冬至"));
-    addRow("Jianchu " + info.jianchu + " · " + info.god + " " + (info.huangdao ? "黄道" : "黑道"));
-    addRow("Clash (" + info.chong.pillar + ")" + info.chong.zodiac + " · Sha " + info.sha);
-    addRow("Pengzu " + info.pengzu[0]);
-    addRow("Pengzu " + info.pengzu[1]);
-    addActivities("Do", info.yi);
-    addActivities("Avoid", info.ji);
-  } else {
-    addRow(almanacLunarText(lunar));
-    addRow("干支 " + ALMANAC.name(p.year) + "年 " + monthName + "月 " + dayName + "日");
-    addRow("生肖 属" + info.zodiac);
-    addRow(info.term >= 0 ? ALMANAC.TERM_NAMES[info.term] :
-      "距 " + (info.nextTerm.j >= 0 ? ALMANAC.TERM_NAMES[info.nextTerm.j] : "冬至") + " 还有 " + info.nextTerm.days + " 天");
-    addRow("建除 " + info.jianchu + "日 · " + info.god + " " + (info.huangdao ? "黄道" : "黑道"));
-    addRow("冲 (" + info.chong.pillar + ")" + info.chong.zodiac + " 煞" + info.sha);
-    addRow(info.pengzu[0]);
-    addRow(info.pengzu[1]);
-    addActivities("宜", info.yi);
-    addActivities("忌", info.ji);
+  var yi = termLines(info.yi, 84), ji = termLines(info.ji, 84);
+  var boxH = Math.max(31, 15 + Math.max(yi.length, ji.length) * 12);
+  layout.boxes.push({ x: left, y: y, w: 94, h: boxH, title: "宜", lines: yi });
+  layout.boxes.push({ x: 114, y: y, w: 94, h: boxH, title: "忌", lines: ji });
+  y += boxH + 5;
+  function row(label, value) {
+    var labelWidth = g.measure(label + " "), wrapped = g.wrap(value, 190 - labelWidth);
+    for (var k = 0; k < wrapped.length; k++) {
+      layout.rows.push({ label: k === 0 ? label : "", text: fitPageText(g, wrapped[k], 190 - (k === 0 ? labelWidth : 0)), y: y });
+      y += 13;
+    }
+    y += 1;
   }
+  var term = info.term >= 0 ? ALMANAC.TERM_NAMES[info.term] :
+    (game.lang === "en" ? "in " + info.nextTerm.days + " days: " : "距 ") +
+      (info.nextTerm.j >= 0 ? ALMANAC.TERM_NAMES[info.nextTerm.j] : "冬至") +
+      (game.lang === "en" ? "" : " " + info.nextTerm.days + " 天");
+  row(game.lang === "en" ? "Term" : "节气", term);
+  row(game.lang === "en" ? "Jianchu" : "值日",
+    info.jianchu + "日 · " + info.god + (info.huangdao ? "黄道" : "黑道"));
+  row(game.lang === "en" ? "Clash" : "冲煞",
+    "冲" + info.chong.zodiac + " 煞" + info.sha);
+  row(game.lang === "en" ? "Pengzu" : "彭祖", info.pengzu[0]);
+  row(game.lang === "en" ? "Pengzu" : "彭祖", info.pengzu[1]);
   var gods = LUCK.gods(p.day % 10);
-  var godItems = ["喜神 " + dirName(gods.xi), "财神 " + dirName(gods.cai), "福神 " + dirName(gods.fu)];
-  almanacGodsLine = rows.length;
-  almanacGodsLineCount = 2;
-  addRow(godItems[0] + " · " + godItems[1], 0, true);
-  addRow(godItems[2], 0, true);
-  for (i = 0; i < rows.length; i++) if (!keepWhole[i]) rows[i] = fitPageText(g, rows[i], 192 - rowIndents[i]);
-  almanacRowIndents = rowIndents;
-  return rows;
+  row(game.lang === "en" ? "Gods" : "神位",
+    "喜神 " + dirName(gods.xi) + " · 财神 " + dirName(gods.cai) + " · 福神 " + dirName(gods.fu));
+  layout.height = y + 2;
+  almanacTotalHeight = layout.height;
+  return layout;
 }
-function openAlmanacCompass() {
-  if (almanacGodsLine + almanacGodsLineCount <= almanacScroll ||
-      almanacGodsLine >= almanacScroll + 10) return;
-  offset = almanacOffset;
-  openSection("compass");
+function makeDayMask(g, text) {
+  var w = g.measure(text), h = 14, mask = { w: w, h: h, on: [] };
+  var saved = [];
+  for (var sy = 0; sy < h; sy++) for (var sx = 0; sx < w; sx++) saved.push(g.get(sx, sy));
+  g.rect(0, 0, w, h, g.PAPER);     /* the corner may be the ink title bar: read the glyphs off paper */
+  g.text(text, 0, 0, { color: g.INK });
+  for (var y = 0; y < h; y++) for (var x = 0; x < w; x++)
+    if (g.get(x, y) === g.INK) mask.on.push(x, y);
+  var at = 0;
+  for (sy = 0; sy < h; sy++) for (sx = 0; sx < w; sx++) g.pixel(sx, sy, saved[at++]);
+  return mask;
 }
 function moveAlmanac(days) {
   var dt = almanacDate(), candidate = new Date(dt.y, dt.m - 1, dt.d + days, 12);
@@ -2642,7 +2741,7 @@ function moveAlmanac(days) {
   almanacTearScroll = almanacScroll;
   almanacOffset += days;
   almanacScroll = 0;
-  almanacGodsFocused = false;
+  almanacScroller.offset = 0;
   almanacTear = REDUCED_MOTION ? TEAR_TIME_REDUCED : TEAR_TIME;
   almanacTearDir = days > 0 ? 1 : -1;
   if (typeof PAD !== "undefined" && PAD.sfx) {
@@ -2651,36 +2750,29 @@ function moveAlmanac(days) {
     catch (e) { sfx("move"); }
   }
 }
-function updateAlmanac(dt) {
-  if (almanacTear > 0) almanacTear = Math.max(0, almanacTear - dt);
+function updateAlmanac(elapsed) {
+  if (almanacTear > 0) almanacTear = Math.max(0, almanacTear - elapsed);
   if (almanacGlossary) {
     if (game.pressed("b") || game.pressed("select")) {
       almanacGlossary = false; almanacGlossaryScroll = 0; sfx("tap"); return;
     }
-    if (game.pressed("up")) { almanacGlossaryScroll = Math.max(0, almanacGlossaryScroll - 1); sfx("move"); }
-    if (game.pressed("down")) { almanacGlossaryScroll++; sfx("move"); }
+    var grows = almanacGlossaryRows(game.g);
+    almanacGlossaryScroll = scrollUpdate(glossaryScroller, { x: 10, y: 27, w: 196, h: 174 },
+      grows.length * 14, elapsed, 14);
     return;
   }
   if (game.pressed("b")) { backToCounter(); return; }
-  if (game.pressed("select")) { almanacGlossary = true; almanacGlossaryScroll = 0; sfx("tap"); return; }
+  if (game.pressed("select")) {
+    almanacGlossary = true; almanacGlossaryScroll = 0; glossaryScroller.offset = 0; sfx("tap"); return;
+  }
   if (game.pressed("left")) moveAlmanac(-1);
   if (game.pressed("right")) moveAlmanac(1);
   if (game.pressed("start")) {
-    if (almanacOffset !== 0) { almanacOffset = 0; almanacScroll = 0; almanacGodsFocused = false; sfx("ok"); }
-  } else if (game.pressed("up")) { almanacScroll = Math.max(0, almanacScroll - 1); almanacGodsFocused = false; sfx("move"); }
-  else if (game.pressed("down")) { almanacScroll++; almanacGodsFocused = true; sfx("move"); }
-  if (game.pressed("a") && almanacGodsFocused) openAlmanacCompass();
-  var pointer = game.pointer;
-  if (pointer.pressed && pointer.y >= 56 && pointer.y < 200) {
-    var line = almanacScroll + Math.floor((pointer.y - 56) / 14);
-    if (line >= almanacGodsLine && line < almanacGodsLine + almanacGodsLineCount) {
-      almanacGodsFocused = true; openAlmanacCompass();
-    }
-  }
-  if (almanacGodsLine >= 0 && almanacGodsLine + almanacGodsLineCount > almanacScroll &&
-      almanacGodsLine < almanacScroll + 10) {
-    /* Once the final row scrolls into view it is the A-key target. */
-    if (game.pressed("down")) almanacGodsFocused = true;
+    if (almanacOffset !== 0) { almanacOffset = 0; almanacScroll = 0; almanacScroller.offset = 0; sfx("ok"); }
+  } else {
+    var date = almanacDate(), info = ALMANAC.day(date.y, date.m, date.d), layout = pageLayout(game.g, date, info);
+    almanacScroll = scrollUpdate(almanacScroller, { x: 8, y: 36, w: 200, h: 171 },
+      layout.height, elapsed, 13);
   }
 }
 function drawBinding(g) {
@@ -2689,52 +2781,98 @@ function drawBinding(g) {
   /* the stubs of pages already torn off, a ragged paper line under the strip */
   for (var x = 8; x < 208; x += 2) g.pixel(x + ((x >> 1) % 3 === 0 ? 1 : 0), 35, g.DARK);
 }
-/* the back of the paper where it curls: a dark band with a light crease and an ink edge */
-function drawCurl(g, y, h) {
-  h = Math.min(h, 207 - y);
-  if (h < 2) return;
-  g.rect(8, y, 200, h, g.DARK);
-  g.line(8, y + 1, 207, y + 1, g.MID);
-  g.line(8, y + h - 1, 207, y + h - 1, g.INK);
-  /* its shadow on the page below, a few rows of checkerboard */
-  var sh = Math.min(3, 207 - (y + h));
-  if (sh > 0) g.dither(8, y + h, 200, sh, g.DARK, 2);
-}
-/* A page other than the one the keys act on: its rows must not replace the gods row the keys use. */
 function otherPage(g, offset, scroll, bottom) {
-  var keep = [almanacGodsLine, almanacGodsLineCount, almanacRowIndents, almanacGodsFocused];
-  almanacGodsFocused = false;
   drawAlmanacPage(g, offset, scroll, bottom);
-  almanacGodsLine = keep[0]; almanacGodsLineCount = keep[1]; almanacRowIndents = keep[2]; almanacGodsFocused = keep[3];
 }
-/* one page of the block, cut off at y = bottom (the part still hanging on the binding) */
+/* A page is a compact printed tear-off calendar; its single content column scrolls. */
 function drawAlmanacPage(g, offset, scroll, bottom) {
   if (bottom <= 36) return;
   var now = new Date(), d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset, 12);
   var dt = { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), week: d.getDay() };
   if (dt.y < 1900 || dt.y > 2100) return;
-  var info = ALMANAC.day(dt.y, dt.m, dt.d), rows = pageLines(g, dt, info);
+  var info = ALMANAC.day(dt.y, dt.m, dt.d), layout = pageLayout(g, dt, info);
   g.clip(8, 36, 200, bottom - 36);
-  g.rect(8, 36, 200, 170, g.PAPER);
-  g.rect(12, 37, 25, 17, g.INK);
-  g.text(String(dt.d), 24, 38, { align: "center", color: g.PAPER });
-  var dateLine = game.lang === "en" ? MONTH_EN[dt.m - 1] + " " + dt.y + " · " + WEEK_EN[dt.week] :
-    dt.y + "年 " + dt.m + "月 · " + WEEK_ZH[dt.week];
-  g.text(fitPageText(g, dateLine), 43, 38, { color: g.INK });
-  g.clip(10, 56, 196, Math.max(0, Math.min(150, bottom - 56)));
-  var lineH = 14, max = Math.floor(150 / lineH);
-  scroll = Math.min(scroll, Math.max(0, rows.length - max));
-  if (offset === almanacOffset) almanacScroll = Math.min(almanacScroll, Math.max(0, rows.length - max));
-  for (var i = scroll; i < rows.length && i < scroll + max; i++) {
-    var y = 57 + (i - scroll) * lineH;
-    if (i >= almanacGodsLine && i < almanacGodsLine + almanacGodsLineCount && almanacGodsFocused) {
-      g.rect(10, y - 1, 196, 14, g.MID);
-    }
-    g.text(rows[i], 12 + almanacRowIndents[i], y, { color: g.INK });
+  g.rect(8, 36, 200, 171, g.PAPER);
+  var shift = Math.round(scroll || 0), mask = layout.dateMask, mx = Math.round(CX - mask.w * 1.5);
+  g.text(layout.dateLine, CX, 38 - shift, { align: "center", color: g.INK });
+  for (var mi = 0; mi < mask.on.length; mi += 2)
+    g.rect(mx + mask.on[mi] * 3, 45 + mask.on[mi + 1] * 3 - shift, 3, 3, g.INK);
+  g.text(fitPageText(g, layout.lunar, 194), CX, 88 - shift, { align: "center", color: g.INK });
+  g.text(fitPageText(g, layout.pillars, 194), CX, 101 - shift, { align: "center", color: g.INK });
+  g.line(14, 114 - shift, 206, 114 - shift, g.DARK);
+  for (var bi = 0; bi < layout.boxes.length; bi++) {
+    var box = layout.boxes[bi], by = 119 + box.y - 83 - shift;
+    g.frame(box.x, by, box.w, box.h, g.INK);
+    g.rect(box.x + 3, by + 2, 18, 13, g.INK);
+    g.text(box.title, box.x + 12, by + 2, { align: "center", color: g.PAPER });
+    for (var bl = 0; bl < box.lines.length; bl++)
+      g.text(fitPageText(g, box.lines[bl], box.w - 6), box.x + box.w / 2, by + 16 + bl * 12,
+        { align: "center", color: g.INK });
+  }
+  var boxBottom = 119 + layout.boxes[0].y - 83 + layout.boxes[0].h - shift;
+  for (var ri = 0; ri < layout.rows.length; ri++) {
+    var row = layout.rows[ri], ry = boxBottom + 5 + row.y - (layout.boxes[0].y + layout.boxes[0].h + 5);
+    var labelWidth = row.label ? g.measure(row.label + " ") : 0;
+    if (row.label) g.text(row.label, 14, ry, { color: g.DARK });
+    g.text(row.text, 14 + labelWidth, ry, { color: g.INK });
+  }
+  if (offset === almanacOffset) {
+    almanacTotalHeight = layout.height;
+    almanacScroll = Math.max(0, Math.min(almanacScroll, Math.max(0, layout.height - 171)));
+    almanacScroller.max = Math.max(0, layout.height - 171);
+    drawScrollbar(g, almanacScroller, { x: 8, y: 36, w: 200, h: 171 }, layout.height);
   }
   g.clip();
   /* the page's lower edge while it hangs loose */
   if (bottom < 207) g.line(8, bottom - 1, 207, bottom - 1, g.INK);
+}
+/* The page peel. A fold line, square to the page's diagonal, sweeps from the bottom-right corner to the
+   top-left as `amount` goes 0 to 1. Between the corner and the fold the top page is lifted, so the page beneath
+   shows there; the lifted part lies folded back over the page as a flap (its mirror image across the fold),
+   showing the paper's back. Both pages are drawn into the real buffer: the page beneath first, its pixels kept,
+   then the top page, then the kept pixels written back where the top page is lifted. */
+var PAGE = { x0: 8, y0: 36, x1: 207, y1: 206 };
+function drawPeel(g, underOffset, overOffset, overScroll, amount) {
+  var cx = PAGE.x1, cy = PAGE.y1, ux = PAGE.x0 - cx, uy = PAGE.y0 - cy;
+  var len = Math.sqrt(ux * ux + uy * uy);
+  ux /= len; uy /= len;                                   /* unit vector from the corner to the top-left */
+  var d = amount * (len + 8), x, y, at = 0, kept = [];
+  drawAlmanacPage(g, underOffset, 0, 207);
+  for (y = PAGE.y0; y <= PAGE.y1; y++) for (x = PAGE.x0; x <= PAGE.x1; x++) kept.push(g.get(x, y));
+  otherPage(g, overOffset, overScroll, 207);
+  for (y = PAGE.y0; y <= PAGE.y1; y++) for (x = PAGE.x0; x <= PAGE.x1; x++) {
+    var along = (x - cx) * ux + (y - cy) * uy, tone = kept[at++];
+    if (along < d) g.pixel(x, y, tone);
+    else if (along < d + 3 && ((x + y) & 1)) g.pixel(x, y, g.DARK);   /* the flap's shadow on the top page */
+  }
+  if (d <= 0) return;
+  /* the lifted region: the page rectangle cut by the fold, on the corner's side */
+  var corners = [{ x: PAGE.x0, y: PAGE.y0 }, { x: PAGE.x1 + 1, y: PAGE.y0 }, { x: PAGE.x1 + 1, y: PAGE.y1 + 1 },
+    { x: PAGE.x0, y: PAGE.y1 + 1 }];
+  var lifted = [], i, a, b, fa, fb;
+  function side(q) { return (q.x - cx) * ux + (q.y - cy) * uy - d; }
+  for (i = 0; i < 4; i++) {
+    a = corners[i]; b = corners[(i + 1) % 4]; fa = side(a); fb = side(b);
+    if (fa < 0) lifted.push(a);
+    if ((fa < 0) !== (fb < 0)) {
+      var t = fa / (fa - fb);
+      lifted.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  if (lifted.length < 3) return;
+  var flap = [];
+  for (i = 0; i < lifted.length; i++) {
+    var k = -2 * side(lifted[i]);
+    flap.push({ x: lifted[i].x + k * ux, y: lifted[i].y + k * uy });
+  }
+  g.clip(PAGE.x0, PAGE.y0, PAGE.x1 - PAGE.x0 + 1, PAGE.y1 - PAGE.y0 + 1);
+  fillPoly(g, flap, g.MID);
+  for (i = 0; i < flap.length; i++) {
+    a = flap[i]; b = flap[(i + 1) % flap.length];
+    var onFold = Math.abs(side(lifted[i])) < 0.5 && Math.abs(side(lifted[(i + 1) % lifted.length])) < 0.5;
+    g.line(a.x, a.y, b.x, b.y, onFold ? g.DARK : g.INK);
+  }
+  g.clip();
 }
 function drawAlmanac(g) {
   var dt = almanacDate();
@@ -2762,26 +2900,17 @@ function drawAlmanac(g) {
   var full = REDUCED_MOTION ? TEAR_TIME_REDUCED : TEAR_TIME;
   if (almanacTear > 0 && Math.abs(almanacTearFrom - almanacOffset) === 1) {
     var p = 1 - almanacTear / full, ease = p * p * (3 - 2 * p);
-    if (almanacTearDir > 0) {
-      /* forward: the new page lies still; the old one lifts from the bottom up to the binding */
-      drawAlmanacPage(g, almanacOffset, 0, 207);
-      var edge = Math.round(207 - ease * (207 - 35));
-      otherPage(g, almanacTearFrom, almanacTearScroll, edge);
-      drawCurl(g, edge, Math.round(14 * Math.sin(Math.PI * Math.min(1, p * 1.15))));
-    } else {
-      /* back: the old page stays; yesterday's rolls down over it from the binding */
-      otherPage(g, almanacTearFrom, almanacTearScroll, 207);
-      var down = Math.round(35 + ease * (207 - 35));
-      drawAlmanacPage(g, almanacOffset, 0, down);
-      if (down < 207) drawCurl(g, down, Math.round(14 * Math.sin(Math.PI * p)));
-    }
+    /* forward the old page lifts off over the new one; back, yesterday's page lays itself down over today's */
+    if (almanacTearDir > 0) drawPeel(g, almanacOffset, almanacTearFrom, almanacTearScroll, ease);
+    else drawPeel(g, almanacTearFrom, almanacOffset, 0, 1 - ease);
   } else {
     drawAlmanacPage(g, almanacOffset, almanacScroll, 207);
   }
   drawBinding(g);
-  var key = T({ zh: "←→翻页 · START今天 · A神位", en: "←→page · START today · A gods" });
-  g.text(fitPageText(g, key, 216), CX, 211, { align: "center", color: g.INK });
-  g.text(T({ zh: "SELECT 词条", en: "SELECT terms" }), CX, 226, { align: "center", color: g.INK });
+  g.text(game.lang === "en" ? "←→ page · START today" : "←→ 翻页 · START 今天",
+    CX, 211, { align: "center", color: g.INK });
+  g.text(game.lang === "en" ? "SELECT terms" : "SELECT 词条",
+    CX, 226, { align: "center", color: g.INK });
 }
 function almanacGlossaryRows(g) {
   var rows = [], width = 190;
@@ -2797,59 +2926,157 @@ function drawAlmanacGlossary(g) {
   g.clear(g.PAPER);
   g.rect(0, 0, W, 19, g.INK);
   g.text(T({ zh: "老黄历 · 词条", en: "Almanac · Glossary" }), CX, 2, { align: "center", color: g.PAPER });
-  var rows = almanacGlossaryRows(g), lineH = g.lineHeight || 14, max = Math.floor(171 / lineH);
-  almanacGlossaryScroll = Math.min(almanacGlossaryScroll, Math.max(0, rows.length - max));
+  var rows = almanacGlossaryRows(g), lineH = g.lineHeight || 14, area = { x: 10, y: 27, w: 196, h: 174 };
+  glossaryScroller.max = Math.max(0, rows.length * lineH - area.h);
+  almanacGlossaryScroll = glossaryScroller.offset;
   g.clip(10, 27, 196, 174);
-  for (var i = almanacGlossaryScroll; i < rows.length && i < almanacGlossaryScroll + max; i++) {
-    g.text(rows[i].text, 13, 28 + (i - almanacGlossaryScroll) * lineH, { color: rows[i].color });
+  for (var i = 0; i < rows.length; i++) {
+    var y = 28 + i * lineH - almanacGlossaryScroll;
+    if (y >= 15 && y < 202) g.text(rows[i].text, 13, y, { color: rows[i].color });
   }
   g.clip();
+  drawScrollbar(g, glossaryScroller, area, rows.length * lineH);
   g.text(T({ zh: "↑↓读 · B/SELECT返回", en: "↑↓ read · B/SELECT back" }), CX, 211,
     { align: "center", color: g.INK });
   g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
 }
 
-function updateFortune() {
+function fortuneLines(g) {
+  var item = slipItem(), out = [];
+  for (var i = 0; i < item.verse[game.lang].length; i++)
+    out = out.concat(g.wrap(item.verse[game.lang][i], 178));
+  out.push("");
+  return out.concat(g.wrap(item.meaning[game.lang], 178));
+}
+function slipVerseCount(g) {
+  var item = slipItem(), count = 0;
+  for (var i = 0; i < item.verse[game.lang].length; i++)
+    count += g.wrap(item.verse[game.lang][i], 178).length;
+  return count;
+}
+function slipChoiceReady() {
+  return slipRevealAt < 0 || game.time - slipRevealAt >= (REDUCED_MOTION ? .08 : .64);
+}
+function updateFortune(dt) {
   syncSlipDate();
   if (game.pressed("b")) { backToCounter(); return; }
   if (slipState.slip !== null && !slipState.animating) {
-    if (game.pressed("up")) { slipScroll = Math.max(0, slipScroll - 1); sfx("move"); }
-    if (game.pressed("down")) { slipScroll++; sfx("move"); }
-    if (game.pressed("start") || (game.pointer.pressed && game.pointer.y >= 210)) appendSlip();
+    var rows = fortuneLines(game.g), lineH = game.g.lineHeight || 14;
+    slipScroll = scrollUpdate(slipScroller, { x: 13, y: 68, w: 190, h: 102 },
+      rows.length * lineH, dt, lineH);
+    var choiceReady = slipChoiceReady();
+    if (choiceReady && !slipSkipped && !slipState.written && game.pressed("left")) { slipChoice = 0; sfx("move"); }
+    if (choiceReady && !slipSkipped && !slipState.written && game.pressed("right")) { slipChoice = 1; sfx("move"); }
+    if (game.pressed("start")) { appendSlip(); return; }
+    var pointer = game.pointer;
+    if (choiceReady && !slipSkipped && !slipState.written && pointer.pressed &&
+        pointer.y >= 176 && pointer.y <= 207 && scrollTapAllowed())
+      slipChoice = pointer.x < 108 ? 0 : 1;
+    if (choiceReady && !slipSkipped && !slipState.written &&
+        (game.pressed("a") || (pointer.pressed && pointer.y >= 176 && pointer.y <= 207 && scrollTapAllowed()))) {
+      if (slipChoice === 0) appendSlip(); else skipSlip();
+    }
   } else if (game.pressed("a") || (game.pointer.pressed && game.pointer.y >= 45 && game.pointer.y <= 208)) {
     drawSlip();
   }
+  if (!game.pointer.down) scrollGestureMoved = false;
+}
+function roundedPoly(x, y, w, h, rx, ry) {
+  return [{ x: x + rx, y: y }, { x: x + w - rx, y: y },
+    { x: x + w, y: y + ry }, { x: x + w, y: y + h - ry },
+    { x: x + w - rx, y: y + h }, { x: x + rx, y: y + h },
+    { x: x, y: y + h - ry }, { x: x, y: y + ry }];
+}
+function transformCupPoint(p, shift, angle, shiftY) {
+  var a = angle * Math.PI / 180, x = p.x - CX, y = p.y - 92;
+  return { x: CX + shift + x * Math.cos(a) - y * Math.sin(a),
+    y: 92 + x * Math.sin(a) + y * Math.cos(a) + (shiftY || 0) };
+}
+function transformedPoly(g, pts, shift, angle, tone, outline, shiftY) {
+  var out = [], i;
+  for (i = 0; i < pts.length; i++) out.push(transformCupPoint(pts[i], shift, angle, shiftY));
+  fillPoly(g, out, tone);
+  if (outline != null) for (i = 0; i < out.length; i++)   /* INK is tone 0, so test for null, not falsy */
+    g.line(out[i].x, out[i].y, out[(i + 1) % out.length].x, out[(i + 1) % out.length].y, outline);
+}
+function cupShake(t) {
+  var frames = [[0,0,0],[.08,-5,-1.3],[.18,6,1.3],[.28,-6,-1.1],[.38,5,1.1],
+    [.48,-5,-.9],[.58,4,.9],[.68,-4,-.7],[.78,3,.7],[.88,-2,-.4],[.94,2,.4],[1,0,0]];
+  var p = Math.max(0, Math.min(1, t / Math.max(.001, slipAnimSpan))), i;
+  for (i = 1; i < frames.length; i++) if (p <= frames[i][0]) {
+    var a = frames[i - 1], b = frames[i], k = (p - a[0]) / (b[0] - a[0]);
+    return { x: a[1] + (b[1] - a[1]) * k, angle: a[2] + (b[2] - a[2]) * k };
+  }
+  return { x: 0, angle: 0 };
+}
+function drawStick(g, x, bottom, height, lean, sway, tone, shift, cupAngle, shiftY) {
+  var a = (lean + sway) * Math.PI / 180, half = 2.8;
+  var dx = Math.sin(a) * height, dy = Math.cos(a) * height;
+  var pts = [{ x: x - half, y: bottom }, { x: x + half, y: bottom },
+    { x: x + dx + half, y: bottom - dy }, { x: x + dx - half, y: bottom - dy }];
+  transformedPoly(g, pts, shift, cupAngle, tone, g.INK, shiftY);
+  var bandY = bottom - dy + 7 * (216 / 331);
+  var bandX = x + dx * .9;
+  var band = [{ x: bandX - half, y: bandY }, { x: bandX + half, y: bandY },
+    { x: bandX + half, y: bandY + 2 * (216 / 331) },
+    { x: bandX - half, y: bandY + 2 * (216 / 331) }];
+  transformedPoly(g, band, shift, cupAngle, g.DARK, null, shiftY);
 }
 function drawCup(g) {
-  /* The same rattle is shortened with reduced motion, rather than removed. */
-  var shift = slipState.animating ? Math.round(Math.sin(game.time * 46) * 3) : 0;
-  g.origin(shift, 0);
-  g.circle(CX, 168, 40, g.DARK, true);
-  g.rect(CX - 45, 94, 90, 61, g.MID);
-  g.line(CX - 45, 154, CX - 37, 168, g.INK);
-  g.line(CX - 37, 168, CX + 37, 168, g.INK);
-  g.line(CX + 37, 168, CX + 45, 154, g.INK);
-  g.line(CX - 46, 95, CX + 46, 95, g.INK);
-  g.line(CX - 48, 92, CX + 48, 92, g.INK);
+  var S = 216 / 331, top = 42, idle = Math.sin(game.time * Math.PI * 2 / 5) * S;
+  var t = slipState.animating ? game.time - slipAnimAt : -1, rattle = t >= 0 && t < slipAnimSpan;
+  var shake = rattle ? cupShake(t) : { x: 0, angle: 0 };
+  var liftStart = slipAnimSpan + (REDUCED_MOTION ? .02 : .16);
+  var liftP = slipState.animating && t >= liftStart ? Math.min(1, (t - liftStart) / slipLiftSpan) : 0;
+  var shift = shake.x * S, sink = liftP * 9 * S;
+  var angle = shake.angle, baseline = top + 128 * S + idle;
+  var lens = [110, 96, 124, 106, 118, 102, 108], leans = [-6, 4, -2, 1, 5, -4, 3.5];
+  var stickLeft = [10, 24, 38, 49, 61, 75, 87];
+  var sway = [0.8, 1.2, 3.5, 3.5, 3.5, 1.2, 0.8], delay = [-.4, -1.9, -3.1, -.9, -2.5, -4.2, -1.2];
+  var swing = [1.4, 2.6, 3.5, 3.5, 3.5, 2.6, 1.4];
   for (var i = 0; i < 7; i++) {
-    var x = CX - 26 + i * 9, top = 49 + (i % 3) * 6;
-    g.line(x, top, x + 1, 105, g.INK);
-    g.rect(x - 1, top, 4, 5, g.PAPER);
+    var phase = (game.time + delay[i]) / 5 * Math.PI * 2;
+    var stickSway = Math.sin(phase) * sway[i];
+    if (rattle) {
+      var rp = (t / .13 + (i === 1 || i === 4 ? -.06 / .13 : i === 2 || i === 5 ? -.09 / .13 : 0)) * Math.PI * 2;
+      stickSway = Math.sin(rp) * swing[i];
+    }
+    drawStick(g, CX + (-50 + stickLeft[i] + 4.5) * S, baseline,
+      lens[i] * S, leans[i], stickSway, g.PAPER, shift, angle, sink);
   }
-  g.origin(0, 0);
+  if (liftP > 0) drawStick(g, CX, top + 128 * S + idle - liftP * 86 * S,
+    128 * S, liftP * 9, 0, g.PAPER, shift, 0);
+  /* CSS cup coordinates scaled by 216/331, with the same broad rim and rounded foot. */
+  var cupX = CX - 52 * S, bodyTop = top + 58 * S + idle + sink, bodyBottom = top + 140 * S + idle + sink;
+  transformedPoly(g, roundedPoly(cupX + 2, bodyTop, 104 * S - 4, 82 * S, 4 * S, 25 * S),
+    shift, angle, g.MID, g.INK);
+  var bandTop = bodyBottom - 14 * S;
+  transformedPoly(g, roundedPoly(cupX + 3, bandTop, 98 * S, 14 * S, 3 * S, 8 * S), shift, angle, g.DARK);
+  var shadowY = top + 164 * S + idle + sink;
+  for (var sy = -3; sy <= 3; sy++) {
+    var half = Math.round(30 * S * Math.sqrt(Math.max(0, 1 - sy * sy / 16)));
+    var shadow = [];
+    for (var sx = -half; sx <= half; sx++) shadow.push({ x: CX + sx, y: shadowY + sy });
+    for (sx = 0; sx < shadow.length; sx++) g.pixel(shadow[sx].x + shift, shadow[sx].y, g.DARK);
+  }
+  var rimY = top + 41 * S + idle + sink;
+  transformedPoly(g, roundedPoly(CX - 62 * S, rimY, 124 * S, 17 * S, 9 * S, 8 * S), shift, angle, g.PAPER, g.INK);
+  g.line(CX - 52 * S + shift, rimY + 5 * S, CX + 52 * S + shift, rimY + 5 * S, g.DARK);
+  if (liftP > 0) {
+    var fade = Math.min(4, Math.floor(liftP * 5));
+    if (fade > 0) g.dither(CX - 42, top + 39, 84, 110, g.PAPER, fade);
+  }
 }
 function fortuneFooter(g) {
   var line;
   if (!loadComplete) line = T({ zh: "存档读取中…", en: "Reading save…" });
   else if (loadFailed) line = T({ zh: "存档读不出，今天不会保存", en: "Could not read the save; today won't be saved" });
   else if (slipState.slip === null) line = T({ zh: "A 抽签 · 点签筒 · 摇一摇", en: "A draw · tap the cup · shake" });
-  else if (typeof PAD === "undefined" || !PAD.notes) line = T({
-    zh: "这台掌机太老，不能写记事本。", en: "This handheld is too old to write notes."
-  });
   else if (appendBusy) line = T({ zh: "正在写入…", en: "Saving…" });
   else if (appendStatus === "denied") line = T({ zh: "没有写入 · 今天已抽", en: "Not saved · drawn today" });
   else if (slipState.written) line = T({ zh: "已写入", en: "Saved" });
-  else line = T({ zh: "START 写入记事本", en: "START to notes" });
+  else if (slipSkipped) line = T({ zh: "今天已抽 · 明天再来", en: "Drawn today · come back tomorrow" });
+  else line = T({ zh: "←→选择 · A确认 · START写入", en: "←→ pick · A confirm · START notes" });
   g.rect(0, 210, W, 30, g.PAPER);
   var lines = g.wrap(line, 208);
   for (var i = 0; i < lines.length && i < 2; i++) {
@@ -2863,30 +3090,45 @@ function drawFortune(g) {
   g.text(T({ zh: "每日一签", en: "Fortune" }), CX, 2, { align: "center", color: g.PAPER });
   g.text(prettyDate(slipState.dateKey), CX, 23, { align: "center", color: g.DARK });
   if (slipState.slip === null) {
-    drawCup(g);
+    g.clip(0, 36, W, 172); drawCup(g); g.clip();   /* the rising stick stays under the date line */
     if (slipState.animating) {
       g.text(T({ zh: "摇签中…", en: "Shaking…" }), CX, 185, { align: "center", color: g.INK });
     }
   } else {
-    var item = slipItem(), grade = item.grade[game.lang];
-    g.frame(8, 43, 200, 166, g.INK);
-    g.text(T({ zh: "第 " + item.num + " 签", en: "No. " + item.num }), 16, 48, { color: g.INK });
-    g.text(grade, 200, 48, { align: "right", color: g.INK });
-    var lines = [], j, wrapped;
-    for (j = 0; j < item.verse[game.lang].length; j++) {
-      wrapped = g.wrap(item.verse[game.lang][j], 180);
-      lines = lines.concat(wrapped);
-    }
-    lines.push("");
-    wrapped = g.wrap(item.meaning[game.lang], 180);
-    lines = lines.concat(wrapped);
-    var lineH = g.lineHeight || 14, max = Math.floor(142 / lineH);
-    slipScroll = Math.min(slipScroll, Math.max(0, lines.length - max));
-    g.clip(13, 69, 190, 136);
-    for (j = slipScroll; j < lines.length && j < slipScroll + max; j++) {
-      g.text(lines[j], 18, 70 + (j - slipScroll) * lineH, { color: g.INK });
+    var item = slipItem(), grade = item.grade[game.lang], lines = fortuneLines(g), j;
+    var verseCount = slipVerseCount(g);
+    var lineH = g.lineHeight || 14, area = { x: 13, y: 68, w: 190, h: 102 };
+    slipScroller.max = Math.max(0, lines.length * lineH - area.h);
+    slipScroll = Math.max(0, Math.min(slipScroller.max, slipScroller.offset));
+    var reveal = slipRevealAt < 0 ? 1 : Math.min(1, (game.time - slipRevealAt) / (REDUCED_MOTION ? .08 : .64));
+    var revealBottom = Math.round(171 * reveal);
+    g.clip(8, 43, 200, Math.max(0, revealBottom));
+    g.frame(8, 43, 200, 128, g.INK);
+    g.frame(11, 46, 194, 122, g.DARK);
+    g.text(T({ zh: "第 " + item.num + " 签", en: "No. " + item.num }), 17, 49, { color: g.INK });
+    g.rect(146, 47, 56, 18, g.INK);
+    g.text(grade, 174, 49, { align: "center", color: g.PAPER });
+    g.clip(13, 68, 190, Math.max(0, Math.min(102, revealBottom - 25)));
+    for (j = 0; j < lines.length; j++) {
+      var lineShown = j < 3 ? reveal >= .28 + j * .16 : reveal >= .72;
+      var y = 69 + j * lineH - slipScroll;
+      if (j === verseCount) {
+        if (reveal >= .65 && y >= 55 && y <= 168)
+          for (var dot = 20; dot < 196; dot += 4) g.pixel(dot, y + 2, g.DARK);
+      } else if (lineShown && y >= 55 && y <= 168) g.text(lines[j], 18, y, { color: g.INK });
     }
     g.clip();
+    drawScrollbar(g, slipScroller, area, lines.length * lineH);
+    g.clip();
+    if (reveal >= 1 && !slipState.written && !slipSkipped && !appendBusy) {
+      var labels = [T({ zh: "写入记事本", en: "To notes" }), T({ zh: "不写", en: "Skip" })];
+      var bx = [8, 110];
+      for (var bi = 0; bi < 2; bi++) {
+        g.rect(bx[bi], 176, 98, 31, bi === slipChoice ? g.INK : g.PAPER);
+        g.frame(bx[bi], 176, 98, 31, g.INK);
+        g.text(labels[bi], bx[bi] + 49, 185, { align: "center", color: bi === slipChoice ? g.PAPER : g.INK });
+      }
+    }
   }
   fortuneFooter(g);
 }
@@ -3019,19 +3261,22 @@ function drawTossCoins(g, centerY) {
     if (!guaState.animating || Math.sin(phase) > 0) g.pixel(x, y, g.PAPER);
   }
 }
-function updateHexagram() {
+function updateHexagram(dt) {
   syncGuaDate();
   if (guaChart) { updateGuaChart(); return; }
-  if (guaExplain) { updateGuaExplain(); return; }
+  if (guaExplain) { updateGuaExplain(dt); return; }
   if (game.pressed("b")) { backToCounter(); return; }
   if (game.pressed("select")) {
-    if (guaState.lines.length === 6) { guaExplain = true; guaExplainScroll = 0; }
+    if (guaState.lines.length === 6) {
+      guaExplain = true; guaExplainScroll = 0; guaExplainScroller.offset = 0;
+    }
     else guaChart = true;
     guaPanel = false; sfx("tap"); return;
   }
   if (guaState.lines.length === 6 && !guaState.animating) {
-    if (game.pressed("up")) { guaScroll = Math.max(0, guaScroll - 1); sfx("move"); }
-    if (game.pressed("down")) { guaScroll++; sfx("move"); }
+    var visibleRows = guaTextLines(game.g), lineHeight = game.g.lineHeight || 14;
+    guaScroll = scrollUpdate(guaScroller, { x: 9, y: 81, w: 198, h: 124 },
+      visibleRows.length * lineHeight, dt, lineHeight);
     if (game.pressed("start")) appendGua();
   }
   var p = game.pointer;
@@ -3065,13 +3310,16 @@ function drawHexagram(g) {
       } else {
         drawGuaFigure(g, 81, 70, guaState.lines, 48);
       }
-      var rows = guaTextLines(g), lineH = g.lineHeight || 14, max = Math.floor(124 / lineH);
-      guaScroll = Math.min(guaScroll, Math.max(0, rows.length - max));
+      var rows = guaTextLines(g), lineH = g.lineHeight || 14;
+      guaScroller.max = Math.max(0, rows.length * lineH - 124);
+      guaScroll = guaScroller.offset;
       g.clip(9, 81, 198, 124);
-      for (var i = guaScroll; i < rows.length && i < guaScroll + max; i++) {
-        g.text(rows[i].text, 10, 82 + (i - guaScroll) * lineH, { color: rows[i].color });
+      for (var i = 0; i < rows.length; i++) {
+        var y = 82 + i * lineH - guaScroll;
+        if (y >= 68 && y < 205) g.text(rows[i].text, 10, y, { color: rows[i].color });
       }
       g.clip();
+      drawScrollbar(g, guaScroller, { x: 9, y: 81, w: 198, h: 124 }, rows.length * lineH);
     } else {
       g.text(T({ zh: "占卦 " + guaState.lines.length + "/6",
         en: "Casting " + guaState.lines.length + "/6" }), CX, 34, { align: "center", color: g.INK });
@@ -3101,22 +3349,27 @@ function guaExplainRows(g) {
   rows = rows.concat(g.wrap("彖曰：" + data.tuan, 196));
   return rows;
 }
-function updateGuaExplain() {
+function updateGuaExplain(dt) {
   if (game.pressed("b")) { guaExplain = false; guaExplainScroll = 0; sfx("tap"); return; }
   if (game.pressed("select")) { guaExplain = false; guaChart = true; guaPanel = false; sfx("tap"); return; }
-  if (game.pressed("up")) { guaExplainScroll = Math.max(0, guaExplainScroll - 1); sfx("move"); }
-  if (game.pressed("down")) { guaExplainScroll++; sfx("move"); }
+  var rows = guaExplainRows(game.g), lineH = game.g.lineHeight || 14;
+  guaExplainScroll = scrollUpdate(guaExplainScroller, { x: 10, y: 27, w: 196, h: 174 },
+    rows.length * lineH, dt, lineH);
 }
 function drawGuaExplain(g) {
   g.clear(g.PAPER);
   g.rect(0, 0, W, 19, g.INK);
   g.text(T({ zh: "八卦 · 说明", en: "I Ching · Reading" }), CX, 2, { align: "center", color: g.PAPER });
-  var rows = guaExplainRows(g), lineH = g.lineHeight || 14, max = Math.floor(171 / lineH);
-  guaExplainScroll = Math.min(guaExplainScroll, Math.max(0, rows.length - max));
+  var rows = guaExplainRows(g), lineH = g.lineHeight || 14, area = { x: 10, y: 27, w: 196, h: 174 };
+  guaExplainScroller.max = Math.max(0, rows.length * lineH - area.h);
+  guaExplainScroll = guaExplainScroller.offset;
   g.clip(10, 27, 196, 174);
-  for (var i = guaExplainScroll; i < rows.length && i < guaExplainScroll + max; i++)
-    g.text(rows[i], 13, 28 + (i - guaExplainScroll) * lineH, { color: g.INK });
+  for (var i = 0; i < rows.length; i++) {
+    var y = 28 + i * lineH - guaExplainScroll;
+    if (y >= 15 && y < 202) g.text(rows[i], 13, y, { color: g.INK });
+  }
   g.clip();
+  drawScrollbar(g, guaExplainScroller, area, rows.length * lineH);
   g.text(T({ zh: "↑↓读 · SELECT八卦图 · B返回", en: "↑↓ read · SELECT chart · B back" }), CX, 211,
     { align: "center", color: g.INK });
   g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
@@ -3314,23 +3567,28 @@ function baziExplainRows(g) {
   }
   return rows;
 }
-function updateBaziExplain() {
+function updateBaziExplain(dt) {
   if (game.pressed("b") || game.pressed("select")) {
     baziExplain = false; baziExplainScroll = 0; sfx("tap"); return;
   }
-  if (game.pressed("up")) { baziExplainScroll = Math.max(0, baziExplainScroll - 1); sfx("move"); }
-  if (game.pressed("down")) { baziExplainScroll++; sfx("move"); }
+  var rows = baziExplainRows(game.g), lineH = game.g.lineHeight || 14;
+  baziExplainScroll = scrollUpdate(baziExplainScroller, { x: 10, y: 27, w: 196, h: 174 },
+    rows.length * lineH, dt, lineH);
 }
 function drawBaziExplain(g) {
   g.clear(g.PAPER);
   g.rect(0, 0, W, 19, g.INK);
   g.text(T({ zh: "八字 · 说明", en: "Chart · Terms" }), CX, 2, { align: "center", color: g.PAPER });
-  var rows = baziExplainRows(g), lineH = g.lineHeight || 14, max = Math.floor(171 / lineH);
-  baziExplainScroll = Math.min(baziExplainScroll, Math.max(0, rows.length - max));
+  var rows = baziExplainRows(g), lineH = g.lineHeight || 14, area = { x: 10, y: 27, w: 196, h: 174 };
+  baziExplainScroller.max = Math.max(0, rows.length * lineH - area.h);
+  baziExplainScroll = baziExplainScroller.offset;
   g.clip(10, 27, 196, 174);
-  for (var i = baziExplainScroll; i < rows.length && i < baziExplainScroll + max; i++)
-    g.text(rows[i].text, 13, 28 + (i - baziExplainScroll) * lineH, { color: rows[i].color });
+  for (var i = 0; i < rows.length; i++) {
+    var y = 28 + i * lineH - baziExplainScroll;
+    if (y >= 15 && y < 202) g.text(rows[i].text, 13, y, { color: rows[i].color });
+  }
   g.clip();
+  drawScrollbar(g, baziExplainScroller, area, rows.length * lineH);
   g.text(T({ zh: "↑↓读 · B/SELECT返回", en: "↑↓ read · B/SELECT back" }), CX, 211,
     { align: "center", color: g.INK });
   g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
@@ -3403,11 +3661,13 @@ function updateBazi(dt) {
     if (game.pressed("a")) saveBazi();
     return;
   }
-  if (baziExplain) { updateBaziExplain(); return; }
+  if (baziExplain) { updateBaziExplain(dt); return; }
   if (game.pressed("b")) { backToCounter(); return; }
   if (game.pressed("a")) { beginBaziEdit(); sfx("tap"); }
   else if (game.pressed("start")) appendBazi();
-  else if (game.pressed("select")) { baziExplain = true; baziExplainScroll = 0; sfx("tap"); }
+  else if (game.pressed("select")) {
+    baziExplain = true; baziExplainScroll = 0; baziExplainScroller.offset = 0; sfx("tap");
+  }
 }
 function drawBaziPicker(g) {
   g.clear(g.PAPER);
@@ -3525,7 +3785,7 @@ game.scene("fortune", {
   draw: drawFortune
 });
 game.scene("almanac", {
-  enter: function () { section = "almanac"; almanacScroll = 0; almanacGodsFocused = false; syncMotion(); },
+  enter: function () { section = "almanac"; almanacScroll = 0; almanacScroller.offset = 0; syncMotion(); },
   update: updateAlmanac,
   draw: drawAlmanac
 });
