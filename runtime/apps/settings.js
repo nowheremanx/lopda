@@ -954,13 +954,13 @@ function box(msg,buttons,warn){
 function closeBox(){ BS.busy=false; BS.backup=null; BS.file=null; $("set-backup-box").hidden=true; $("set-backup-go").disabled=$("set-restore-go").disabled=false; }
 function okBox(msg,then){ BS.busy=false; box(msg,[{label:tr("bk.ok"), main:true, go:function(){ sfx("tap"); (then||closeBox)(); }}]); }
 
-/* a backup of `dump` (the current data unless given); `after` runs once it is saved or cancelled */
+/* a backup of `dump` (the current data unless given); `after(saved)` runs once it is saved (true) or cancelled or failed (false) */
 function startBackup(after,dump){
   var done=after||closeBox, now=Date.now();
   BS.busy=true; box(tr("bk.reading"));
   (dump ? Promise.resolve(dump) : P.dumpAll()).then(function(d){
     /* the backup carries its own time, so a restored handheld says when its data was saved */
-    var docs=d.docs.filter(function(x){ return x.path!==BMETA && x.path!==AIP && x.path!==SCORE_MODELS_PATH; }).concat([{path:BMETA, data:{last:now}}]);
+    var docs=d.docs.filter(function(x){ return x.path!==BMETA && x.path!==AIP && x.path!==SCORE_MODELS_PATH && x.path!==P.restorePath; }).concat([{path:BMETA, data:{last:now}}]);
     return BK.pack({docs:docs, files:d.files},{runtime:RUNTIME_VERSION, now:now});
   }).then(function(pk){
     box(tr("bk.ready",{size:sizeText(pk.size)}),[
@@ -968,14 +968,14 @@ function startBackup(after,dump){
         var blob=new Blob(ZIP.writeParts(pk.entries),{type:"application/zip"});
         S.downloads.save({filename:BK.fileName(now), data:blob}).then(function(){
           BS.last=now; if(S.db && !dump) put(S.db.doc(BMETA),{last:now});
-          renderLast(); toast(tr("bk.saved")); sfx("ok"); done();
-        },function(e){ toast(LP.saveErr(e)); sfx("err"); done(); });
+          renderLast(); toast(tr("bk.saved")); sfx("ok"); done(true);
+        },function(e){ toast(LP.saveErr(e)); sfx("err"); done(false); });
       }},
-      {label:tr("common.cancel"), go:function(){ sfx("tap"); done(); }}
+      {label:tr("common.cancel"), go:function(){ sfx("tap"); done(false); }}
     ],pk.size>BIG ? tr("bk.big") : "");
   }).catch(function(e){
     if(window.console) console.error("Lo-PDA backup failed", e);
-    sfx("err"); okBox(tr(e && e.code==="toolarge" ? "bk.toolarge" : "bk.failed"),after);
+    sfx("err"); okBox(tr(e && e.code==="toolarge" ? "bk.toolarge" : "bk.failed"),after ? function(){ after(false); } : null);
   });
 }
 $("set-backup-go").onclick=function(){ if(!BS.busy && S.db){ sfx("tap"); startBackup(); } };
@@ -991,14 +991,15 @@ $("set-restore-file").onchange=function(){
     });
   },function(){ sfx("err"); okBox(tr("rs.unreadable")); });
 };
-function askRestore(){
-  var bk=BS.backup, when=new Date(bk.manifest.created);
+/* saved: the answer of a 先备份 just before. Once the player asked for a copy first, the restore waits for one: after a
+   cancelled or failed backup only 先备份 (again) and 取消 are offered, with a line saying why (issue #414, owner 2026-11-27) */
+function askRestore(saved){
+  var bk=BS.backup, when=new Date(bk.manifest.created), msg;
   BS.busy=true;
-  box(tr("rs.ask",{when:isNaN(when) ? "?" : when.getFullYear()+"/"+LP.fmt(when.getTime()), docs:bk.docs.length, files:bk.files.length, size:sizeText(BS.file.size)}),[
-    {label:tr("rs.go"), main:true, go:function(){ sfx("tap"); sureRestore(); }},
-    {label:tr("rs.first"), go:function(){ sfx("tap"); startBackup(askRestore); }},
-    {label:tr("common.cancel"), go:function(){ sfx("tap"); closeBox(); }}
-  ]);
+  msg=tr("rs.ask",{when:isNaN(when) ? "?" : when.getFullYear()+"/"+LP.fmt(when.getTime()), docs:bk.docs.length, files:bk.files.length, size:sizeText(BS.file.size)});
+  var first={label:tr("rs.first"), go:function(){ sfx("tap"); startBackup(askRestore); }}, cancel={label:tr("common.cancel"), go:function(){ sfx("tap"); closeBox(); }};
+  if(saved===false){ first.main=true; box(msg,[first,cancel],tr("rs.nocopy")); return; }
+  box(msg,[{label:tr("rs.go"), main:true, go:function(){ sfx("tap"); sureRestore(); }},first,cancel]);
 }
 function sureRestore(){
   box(tr("rs.sure"),[
@@ -1133,6 +1134,8 @@ LP.builtin({id:"settings", label:"app.settings", icon:"settings", view:"settings
   lang:function(){ renderSettings(); renderSense(); renderAi(); renderLast(); renderSavesRow(); },
   ready:function(){
     readAi();
+    /* a restore the page did not live to finish: say so on every start until a restore completes (platform.js, issue #278) */
+    if(P.restorePending) P.restorePending().then(function(on){ if(on) toast(tr("rs.half")); },function(){});
     S.db.doc(BMETA).get().then(function(sn){ var d=sn.exists ? LP.own(sn.data()) : null; BS.last=d && +d.last || 0; renderLast(); }).catch(function(){});
   }});
 })();
