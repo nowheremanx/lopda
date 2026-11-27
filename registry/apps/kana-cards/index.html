@@ -4,17 +4,20 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>五十音图</title>
-<!-- Lo-PDA app (lopda/1): original kana flash cards, a small quiz, and optional Japanese speech. MIT License. -->
+<!-- Lo-PDA app (lopda/1): original kana flash cards, a daily review, a small quiz, and optional Japanese speech. MIT License. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
   body { display: flex; flex-direction: column; }
   header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 5px; padding: 5px 7px; border-bottom: 2px solid #1f2a14; font-size: 14px; }
   header b { font-size: 15px; letter-spacing: 1px; }
   /* the right slot shows a position in the table while browsing and the question number in a quiz */
-  #count, #qnum { flex: none; width: 6ch; text-align: right; white-space: nowrap; }
-  #qnum { display: none; }
+  #count, #qnum { flex: none; text-align: right; white-space: nowrap; }
+  #count { width: 6ch; }
+  /* a review shows "第 71/71 题" / "Q 71/71", the widest this slot must hold at 331 px */
+  #qnum { display: none; width: 11ch; }
   body.quiz #count { display: none; }
   body.quiz #qnum { display: block; }
+  body.home #count, body.tally #count, body.tally #qnum { display: none; }
   button { min-height: 44px; border: 2px solid #1f2a14; background: #1f2a14; color: #a3ad7e; font: inherit; font-size: 14px; font-weight: bold; }
   button.secondary { background: #a3ad7e; color: #1f2a14; }
   main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 6px 10px; box-sizing: border-box; }
@@ -35,11 +38,18 @@
   #refwrap { display: none; position: relative; flex: 1; min-height: 0; width: 100%; max-width: 300px; margin: 0 auto; }
   #reference { display: none; width: 100%; height: 100%; box-sizing: border-box; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
   #reference { grid-template-rows: repeat(16, 56px); }
-  #reference button { min-width: 0; min-height: 56px; padding: 2px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+  #reference button { min-width: 0; min-height: 56px; padding: 2px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; position: relative; }
   #reference button span:first-child { font-size: 25px; line-height: 1; }
   #reference button span:last-child { font-size: 12px; line-height: 1; }
   #reference button { background: #a3ad7e; color: #1f2a14; }
+  /* the review's box on each cell: paper, a corner tick, mid, ink; the better known, the darker */
+  #reference button.m12::after { content: ""; position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; background: #4a5a32; }
+  #reference button.selected::after { background: #a3ad7e; }
+  #reference button.m34 { background: #7d8a58; color: #1f2a14; }
+  #reference button.m5 { background: #1f2a14; color: #a3ad7e; }
   #reference button.selected { background: #1f2a14; color: #a3ad7e; border-width: 4px; }
+  /* on a mastered (ink) cell the selection is a paper ring, so the cell is still readable as ink */
+  #reference button.m5.selected { box-shadow: inset 0 0 0 3px #a3ad7e; }
   /* the list's cut edge: four rows of ink dither on the paper, denser towards the edge */
   .cue { display: none; position: absolute; left: 0; right: 0; height: 4px; z-index: 2; pointer-events: none; background-repeat: no-repeat; background-size: 100% 1px; }
   .cue.show { display: block; }
@@ -71,6 +81,26 @@
   body.list #reference { display: grid; align-content: start; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   body.list #card, body.list #prompt, body.list #options, body.list #controls, body.list #status { display: none; }
   body.card #reference, body.card #refwrap, body.quiz #reference, body.quiz #refwrap { display: none; }
+  /* the home screen: the cover and three rows, the way a handheld opens */
+  #home { display: none; flex-direction: column; align-items: stretch; gap: 6px; width: 100%; max-width: 300px; }
+  body.home #home { display: flex; }
+  body.home main, body.tally main { justify-content: flex-start; }
+  body.home #card, body.home #prompt, body.home #options, body.home #refwrap, body.home #controls,
+  body.tally #card, body.tally #prompt, body.tally #options, body.tally #refwrap, body.tally #controls { display: none; }
+  #cover { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  #bigkana { font-size: 48px; line-height: 1; }
+  #appname { font-size: 15px; letter-spacing: 2px; }
+  #rows { display: flex; flex-direction: column; gap: 6px; }
+  #rows .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px; background: #a3ad7e; color: #1f2a14; font-size: 15px; text-align: left; }
+  #rows .row.selected { background: #1f2a14; color: #a3ad7e; }
+  /* the stamp on a finished day is drawn, not typed: a bordered box, tipped a little */
+  #stamp { display: none; flex: none; border: 2px solid currentColor; padding: 0 3px; font-size: 11px; letter-spacing: 1px; transform: rotate(-6deg); }
+  #streak { color: #4a5a32; font-size: 13px; text-align: center; }
+  /* the tally after a review */
+  #tally { display: none; flex-direction: column; align-items: center; justify-content: center; gap: 9px; width: 100%; max-width: 300px; text-align: center; }
+  body.tally #tally { display: flex; flex: 1; }
+  #tally .tally-title { font-size: 18px; }
+  #tally .tally-line { font-size: 15px; }
   @media (max-height: 390px) {
     main { gap: 5px; padding-top: 4px; padding-bottom: 4px; }
     #card { height: 124px; }
@@ -78,7 +108,7 @@
   }
 </style>
 </head>
-<body>
+<body class="home">
 <header>
   <b id="title">五十音图</b>
   <button id="script" class="secondary" type="button">平假名</button>
@@ -87,7 +117,17 @@
   <span id="qnum"></span>
 </header>
 <main>
-  <div id="meta"><span id="mode">字表</span><span id="guide">↑↓←→ 选 · A 卡片 · START 小测</span></div>
+  <div id="meta"><span id="mode">首页</span><span id="guide">↑↓ 选择 · A 打开 · SELECT 切假名</span></div>
+  <section id="home">
+    <div id="cover"><div id="bigkana">あ</div><div id="appname">五十音图</div></div>
+    <div id="rows">
+      <button id="row-review" class="row" type="button"><span id="review-label">今天复习 8 个</span><span id="stamp">完了</span></button>
+      <button id="row-table" class="row" type="button"><span id="table-label">五十音表</span></button>
+      <button id="row-quiz" class="row" type="button"><span id="quiz-label">小测</span></button>
+    </div>
+    <div id="streak">连续 0 天</div>
+  </section>
+  <section id="tally" aria-live="polite"></section>
   <section id="card" aria-live="polite">
     <div id="kana">あ</div>
     <div id="romaji">a</div>
@@ -107,6 +147,194 @@
   </div>
   <div id="status" aria-live="polite"></div>
 </main>
+<script data-src="src/srs.js">
+/* 五十音图 / Kana: the daily review's rules, with no DOM, no PAD and no clock of its own.
+   The caller passes today as "YYYY-MM-DD", so the app and the tests run this same copy.
+   A kana sits in a Leitner box: 0 is new, and boxes 1-5 come back after 1, 2, 4, 8 or 16 days.
+   ES5 on purpose: the app is inlined into an iframe with no module loader. */
+var KanaSRS = (function () {
+  var DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+  var CAP = 8;
+  var WAIT = [1, 2, 4, 8, 16];
+
+  function has(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
+  function isObj(o) { return !!o && typeof o === "object" && !Array.isArray(o); }
+  function isDay(s) { return typeof s === "string" && DAY_RE.test(s); }
+  function isInt(n) { return typeof n === "number" && isFinite(n) && Math.floor(n) === n; }
+  function isCount(n) { return isInt(n) && n >= 0; }
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function sizeOf(n) { return isInt(n) && n > 0 ? n : 0; }
+
+  /* the phone's own calendar day, never the UTC one: at 07:00 in Tokyo the review is due today */
+  function dayKey(dateObj) {
+    if (!dateObj || typeof dateObj.getFullYear !== "function") return "";
+    var y = dateObj.getFullYear(), m = dateObj.getMonth() + 1, d = dateObj.getDate();
+    if (!isFinite(y) || !isFinite(m) || !isFinite(d)) return "";
+    return y + "-" + pad2(m) + "-" + pad2(d);
+  }
+
+  /* local Y/M/D arithmetic: adding 86,400,000 ms lands on the wrong day when the clocks change */
+  function addDays(day, n) {
+    if (!isDay(day)) return "";
+    var y = Number(day.slice(0, 4)), m = Number(day.slice(5, 7)), d = Number(day.slice(8, 10));
+    return dayKey(new Date(y, m - 1, d + (isInt(n) ? n : 0)));
+  }
+
+  /* stats are per kana as [tries, right]; anything else is junk from a damaged save */
+  function readStats(src, into) {
+    if (!src || typeof src !== "object" || Array.isArray(src)) return into;
+    for (var k in src) {
+      if (!has(src, k) || !/^[0-9]+$/.test(k)) continue;
+      var v = src[k];
+      if (Array.isArray(v) && v.length === 2 && isCount(v[0]) && isCount(v[1]) && v[1] <= v[0]) into[k] = [v[0], v[1]];
+    }
+    return into;
+  }
+
+  /* before boxes existed the score was all there was: a kana answered well enough gets a head start
+     and is due today, so the first review is not empty and the first cards are not all from zero */
+  function seed(scores, today) {
+    var out = {};
+    for (var k in scores) {
+      if (!has(scores, k)) continue;
+      var s = scores[k], right = s[1], wrong = s[0] - s[1], lead = right - wrong;
+      if (lead >= 3) out[k] = [2, today];
+      else if (lead >= 1) out[k] = [1, today];
+    }
+    return out;
+  }
+
+  function readBoxes(src, size, today) {
+    var out = {};
+    if (!src || typeof src !== "object" || Array.isArray(src)) return out;
+    for (var k in src) {
+      if (!has(src, k) || !/^[0-9]+$/.test(k)) continue;
+      var index = parseInt(k, 10), v = src[k];
+      if (index >= size) continue;
+      if (!Array.isArray(v) || !v.length || typeof v[0] !== "number" || !isFinite(v[0])) continue;
+      var box = Math.floor(v[0]);
+      out[String(index)] = [box < 0 ? 0 : box > 5 ? 5 : box, isDay(v[1]) ? v[1] : today];
+    }
+    return out;
+  }
+
+  function readDays(src) {
+    if (!src || typeof src !== "object" || Array.isArray(src)) return { last: "", streak: 0 };
+    var last = isDay(src.last) ? src.last : "";
+    /* a streak without a day it stands on cannot be continued, so it resets */
+    return { last: last, streak: last && isCount(src.streak) ? src.streak : 0 };
+  }
+
+  function readNewDay(src, today) {
+    if (!src || typeof src !== "object" || Array.isArray(src)) return { day: today, hira: 0, kata: 0 };
+    return { day: isDay(src.day) ? src.day : today,
+      hira: isCount(src.hira) ? src.hira : 0,
+      kata: isCount(src.kata) ? src.kata : 0 };
+  }
+
+  /* every save this app ever wrote, and every damaged one, becomes the current shape.
+     v3 and newer are read as v3 (the fields this build knows); v2 and the shared-stats save
+     keep their stats exactly and seed the boxes from them. */
+  function migrate(saved, today, sizes) {
+    var t = isDay(today) ? today : "";
+    var size = { hira: sizeOf(sizes && sizes.hira), kata: sizeOf(sizes && sizes.kata) };
+    var out = {
+      v: 3, script: "hira", index: 0,
+      stats: { hira: {}, kata: {} },
+      srs: { hira: {}, kata: {} },
+      days: { last: "", streak: 0 },
+      newDay: { day: t, hira: 0, kata: 0 }
+    };
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) return out;
+
+    out.script = saved.script === "kata" ? "kata" : "hira";
+    if (isInt(saved.index) && saved.index >= 0 && saved.index < size[out.script]) out.index = saved.index;
+
+    var v = saved.v, current = typeof v === "number" && v >= 3;
+    /* a damaged version number must not decide this: the stats' own shape says whether they are
+       per script (hira / kata) or the oldest save's one shared object */
+    var stats = saved.stats, perScript = isObj(stats) &&
+      (isObj(stats.hira) || isObj(stats.kata));
+    if (perScript) {
+      readStats(stats.hira, out.stats.hira);
+      readStats(stats.kata, out.stats.kata);
+    } else {
+      /* the oldest save kept one shared stats object; it belongs to hiragana now */
+      readStats(stats, out.stats.hira);
+    }
+
+    if (current) {
+      out.srs.hira = readBoxes(saved.srs && saved.srs.hira, size.hira, t);
+      out.srs.kata = readBoxes(saved.srs && saved.srs.kata, size.kata, t);
+      out.days = readDays(saved.days);
+      out.newDay = readNewDay(saved.newDay, t);
+    } else {
+      out.srs.hira = seed(out.stats.hira, t);
+      out.srs.kata = seed(out.stats.kata, t);
+    }
+    return out;
+  }
+
+  /* what the day's review asks: every started kana whose day has come, oldest first, then the
+     never-answered ones in table order, at most cap new ones a day counting the ones already met today */
+  function dueList(srsScript, today, tableSize, newUsedToday, cap) {
+    var src = srsScript && typeof srsScript === "object" ? srsScript : {};
+    var size = sizeOf(tableSize), t = isDay(today) ? today : "";
+    var limit = isCount(cap) ? cap : CAP;
+    var due = [], fresh = [], started = [], i, e;
+    for (i = 0; i < size; i++) {
+      e = src[String(i)];
+      if (Array.isArray(e) && isCount(e[0]) && e[0] > 0) {
+        if (t && isDay(e[1]) && e[1] <= t) started.push([i, e[1]]);
+      } else fresh.push(i);
+    }
+    started.sort(function (a, b) { return a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : a[0] - b[0]; });
+    for (i = 0; i < started.length; i++) due.push(started[i][0]);
+    var room = limit - (isCount(newUsedToday) ? newUsedToday : 0);
+    return { due: due, fresh: room > 0 ? fresh.slice(0, room) : [] };
+  }
+
+  /* a right answer moves one box on and waits its box's days; a miss goes back to the first box */
+  function applyAnswer(entry, right, today) {
+    var t = isDay(today) ? today : "";
+    if (!right) return [1, addDays(t, 1)];
+    var box = Array.isArray(entry) && isCount(entry[0]) ? entry[0] : 0;
+    box = box < 1 ? 1 : box + 1;
+    if (box > 5) box = 5;
+    return [box, addDays(t, WAIT[box - 1])];
+  }
+
+  /* how many new kana this script has already been shown today; a new day starts at zero */
+  function countToday(newDay, today, script) {
+    if (!newDay || typeof newDay !== "object" || newDay.day !== today) return 0;
+    var n = newDay[script === "kata" ? "kata" : "hira"];
+    return isCount(n) ? n : 0;
+  }
+
+  /* finishing a review today continues yesterday's streak, leaves today's alone, or starts at 1 */
+  function streakAfter(days, today) {
+    var t = isDay(today) ? today : "";
+    var last = days && isDay(days.last) ? days.last : "";
+    var streak = days && isCount(days.streak) ? days.streak : 0;
+    if (!t) return { last: last, streak: streak };
+    if (last === t) return { last: t, streak: streak };
+    if (last && last === addDays(t, -1)) return { last: t, streak: streak + 1 };
+    return { last: t, streak: 1 };
+  }
+
+  /* the streak still alive today: a run that was not kept up yesterday is over, even before the
+     next review is finished (the stored number is not rewritten, only what the home claims) */
+  function liveStreak(days, today) {
+    var t = isDay(today) ? today : "";
+    if (!t || !days || !isDay(days.last) || !isCount(days.streak)) return 0;
+    if (days.last === t || days.last === addDays(t, -1)) return days.streak;
+    return 0;
+  }
+
+  return { dayKey: dayKey, addDays: addDays, migrate: migrate, dueList: dueList,
+    applyAnswer: applyAnswer, countToday: countToday, streakAfter: streakAfter, liveStreak: liveStreak };
+})();
+</script>
 <script>
 (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
@@ -118,34 +346,54 @@
   var KATA = ["ア","イ","ウ","エ","オ","カ","キ","ク","ケ","コ","サ","シ","ス","セ","ソ","タ","チ","ツ","テ","ト","ナ","ニ","ヌ","ネ","ノ","ハ","ヒ","フ","ヘ","ホ","マ","ミ","ム","メ","モ","ヤ","ユ","ヨ","ラ","リ","ル","レ","ロ","ワ","ヲ","ン","ガ","ギ","グ","ゲ","ゴ","ザ","ジ","ズ","ゼ","ゾ","ダ","ヂ","ヅ","デ","ド","バ","ビ","ブ","ベ","ボ","パ","ピ","プ","ペ","ポ"];
   var ROMA = ["a","i","u","e","o","ka","ki","ku","ke","ko","sa","shi","su","se","so","ta","chi","tsu","te","to","na","ni","nu","ne","no","ha","hi","fu","he","ho","ma","mi","mu","me","mo","ya","yu","yo","ra","ri","ru","re","ro","wa","wo","n","ga","gi","gu","ge","go","za","ji","zu","ze","zo","da","ji","zu","de","do","ba","bi","bu","be","bo","pa","pi","pu","pe","po"];
   var TXT = {
-    zh: { title: "五十音图", hira: "平假名", kata: "片假名", list: "字表", card: "卡片", quiz: "小测", startQuiz: "START 小测", backList: "B 字表", quizGuide: "↑↓←→ 选项 · A 确认 · B 字表", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", question: "选出这个假名的罗马字", qnum: "第{n}题", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", cont: "（A 继续）", done: "本轮每个假名都练过两次了（B 回字表）", rate: "正确率 {pct}%（{hits}/{tries}）", noStats: "正确率 —", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", unreadable: "存档读不出来", prev: "前", next: "后" },
-    en: { title: "Kana", hira: "Hiragana", kata: "Katakana", list: "List", card: "Card", quiz: "Quiz", startQuiz: "START Quiz", backList: "B List", quizGuide: "Arrows choose · A answer · B list", cardGuide: "← → browse · A hear · B list", listGuide: "Arrows move · A card · START quiz", question: "Choose this kana's romaji", qnum: "Q {n}", hear: "A Hear", confirm: "A OK", mastered: "Correct", missed: "Review: ", cont: " (A next)", done: "Every kana has been asked twice this round (B list)", rate: "Accuracy {pct}% ({hits}/{tries})", noStats: "Accuracy —", noVoice: "Japanese speech is unavailable; you can keep studying.", legacy: "Japanese speech needs a newer handheld; keep studying.", unreadable: "Save can't be read", prev: "Prev", next: "Next" }
+    zh: { title: "五十音图", hira: "平假名", kata: "片假名", home: "首页", list: "字表", card: "卡片", quiz: "小测", tally: "复习", startQuiz: "START 小测", backList: "B 字表", backHome: "B 首页", quizGuide: "↑↓←→ 选项 · A 确认 · B 首页", cardGuide: "← → 翻页 · A 朗读 · B 字表", listGuide: "↑↓←→ 选择 · A 卡片 · START 小测", homeGuide: "↑↓ 选择 · A 打开 · SELECT 切假名", tallyGuide: "A 或 B 回首页", homeTable: "五十音表", homeQuiz: "小测", reviewCount: "今天复习 {n} 个", allDone: "今天学完了", stamp: "完了", streak: "连续 {n} 天", tallyTitle: "复习完成", tallyScore: "对 {right} · 错 {wrong}", tallyUp: "升级 {n} 个", tallyTomorrow: "明天 {n} 个", question: "选出这个假名的罗马字", qnum: "第{n}题", qnumOf: "第 {n}/{total} 题", hear: "A 听", confirm: "A 确认", mastered: "正确", missed: "再看看：", cont: "（A 继续）", done: "本轮每个假名都练过两次了（B 回首页）", rate: "正确率 {pct}%（{hits}/{tries}）", noStats: "正确率 —", noVoice: "日语朗读暂不可用；仍可继续学习。", legacy: "此版本不支持日语朗读；仍可继续学习。", unreadable: "存档读不出来", prev: "前", next: "后" },
+    en: { title: "Kana", hira: "Hiragana", kata: "Katakana", home: "Home", list: "List", card: "Card", quiz: "Quiz", tally: "Review", startQuiz: "START Quiz", backList: "B List", backHome: "B Home", quizGuide: "Arrows choose · A answer · B home", cardGuide: "← → browse · A hear · B list", listGuide: "Arrows move · A card · START quiz", homeGuide: "Arrows · A open · SELECT script", tallyGuide: "A or B: home", homeTable: "Table", homeQuiz: "Quiz", reviewCount: "Review {n} today", allDone: "All done today", stamp: "DONE", streak: "{n}-day streak", tallyTitle: "Review done", tallyScore: "Right {right} · Wrong {wrong}", tallyUp: "Moved up {n}", tallyTomorrow: "Tomorrow {n}", question: "Choose this kana's romaji", qnum: "Q {n}", qnumOf: "Q {n}/{total}", hear: "A Hear", confirm: "A OK", mastered: "Correct", missed: "Review: ", cont: " (A next)", done: "Every kana has been asked twice this round (B home)", rate: "Accuracy {pct}% ({hits}/{tries})", noStats: "Accuracy —", noVoice: "Japanese speech is unavailable; you can keep studying.", legacy: "Japanese speech needs a newer handheld; keep studying.", unreadable: "Save can't be read", prev: "Prev", next: "Next" }
   }[LANG];
-  /* stats are per script: あ and ア are different kana and must not share a score */
-  var data = { script: "hira", index: 0, screen: "list", target: 0, choices: [], choice: 0, locked: false, awaitConfirm: false, reveal: -1, question: 0, stats: { hira: {}, kata: {} }, recent: [], seen: {} };
-  var loaded = false, saveBlocked = false;
+  function todayKey() { return KanaSRS.dayKey(new Date()); }
+  function blank() {
+    return {
+      script: "hira", index: 0, screen: "home", homeRow: 0,
+      target: 0, choices: [], choice: 0, locked: false, awaitConfirm: false, reveal: -1, question: 0,
+      stats: { hira: {}, kata: {} },
+      srs: { hira: {}, kata: {} },
+      days: { last: "", streak: 0 },
+      newDay: { day: todayKey(), hira: 0, kata: 0 },
+      review: false, queue: [], qpos: 0, res: { right: 0, wrong: 0, up: 0 }, tomorrow: 0,
+      recent: [], seen: {}
+    };
+  }
+  var data = blank();
+  var loaded = false, saveBlocked = false, settled = false;
+  var dayTimer = null, lastDay = todayKey();
+  var titleEl = document.getElementById("title"), countEl = document.getElementById("count");
+  var qnumEl = document.getElementById("qnum"), modeEl = document.getElementById("mode"), guideEl = document.getElementById("guide");
   var kanaEl = document.getElementById("kana"), romaEl = document.getElementById("romaji");
   var rateEl = document.getElementById("rate");
   var scriptBtn = document.getElementById("script"), statusEl = document.getElementById("status");
   var promptEl = document.getElementById("prompt"), optionsEl = document.getElementById("options");
   var referenceEl = document.getElementById("reference"), viewBtn = document.getElementById("view");
   var cueTop = document.getElementById("cue-top"), cueBottom = document.getElementById("cue-bottom");
+  var tallyEl = document.getElementById("tally"), bigkanaEl = document.getElementById("bigkana");
+  var appnameEl = document.getElementById("appname"), reviewLabel = document.getElementById("review-label");
+  var stampEl = document.getElementById("stamp"), tableLabel = document.getElementById("table-label");
+  var quizLabel = document.getElementById("quiz-label"), streakEl = document.getElementById("streak");
+  var homeRows = [document.getElementById("row-review"), document.getElementById("row-table"), document.getElementById("row-quiz")];
   /* one entry per printed row: the 11 plain-kana rows, then the five voiced rows (が ざ だ ば ぱ).
      ［や ゆ よ］and ［わ を］sit in the a / u / o columns, ん in the u column. */
   var GRID_ROWS = [[0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],[25,26,27,28,29],[30,31,32,33,34],[35,36,37],[38,39,40,41,42],[43,44],[45],[46,47,48,49,50],[51,52,53,54,55],[56,57,58,59,60],[61,62,63,64,65],[66,67,68,69,70]];
   var GRID_COLS = [[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,2,4],[0,1,2,3,4],[0,4],[2],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4],[0,1,2,3,4]];
   function table() { return data.script === "hira" ? HIRA : KATA; }
   function stats() { return data.stats[data.script]; }
-  function readStats(src, into) {
-    if (!src || typeof src !== "object") return;
-    for (var k in src) {
-      var v = src[k];
-      if (/^[0-9]+$/.test(k) && Array.isArray(v) && v.length === 2 && typeof v[0] === "number" && typeof v[1] === "number" && v[0] >= 0 && v[1] >= 0 && v[1] <= v[0]) into[k] = [v[0], v[1]];
-    }
-  }
+  function boxes() { return data.srs[data.script]; }
   function save() {
     if (!loaded || saveBlocked) return;
-    if (typeof PAD !== "undefined" && PAD.save) PAD.save(KEY, { v: 2, script: data.script, index: data.index, stats: { hira: data.stats.hira, kata: data.stats.kata } });
+    if (typeof PAD !== "undefined" && PAD.save) PAD.save(KEY, {
+      v: 3, script: data.script, index: data.index,
+      stats: { hira: data.stats.hira, kata: data.stats.kata },
+      srs: { hira: data.srs.hira, kata: data.srs.kata },
+      days: { last: data.days.last, streak: data.days.streak },
+      newDay: { day: data.newDay.day, hira: data.newDay.hira, kata: data.newDay.kata }
+    });
   }
   /* each kana has its own score; a card never shows another kana's accuracy */
   function rateText(index) {
@@ -154,6 +402,38 @@
     return TXT.rate.replace("{pct}", String(Math.round(s[1] * 100 / s[0]))).replace("{hits}", String(s[1])).replace("{tries}", String(s[0]));
   }
   function current() { return table()[data.index]; }
+  /* the box drawn on a table cell: paper, a corner tick, mid, ink */
+  function boxClass(index) {
+    var e = boxes()[index];
+    if (!Array.isArray(e)) return "";
+    if (e[0] >= 5) return "m5";
+    if (e[0] >= 3) return "m34";
+    if (e[0] >= 1) return "m12";
+    return "";
+  }
+  function reviewList() {
+    return KanaSRS.dueList(boxes(), todayKey(), table().length, KanaSRS.countToday(data.newDay, todayKey(), data.script));
+  }
+  function reviewCount() {
+    var l = reviewList();
+    return l.due.length + l.fresh.length;
+  }
+  /* the day can pass while the app sits open: the home's count, stamp and streak must follow it */
+  function dayTick() {
+    var now = todayKey();
+    if (now === lastDay) return;
+    lastDay = now;
+    if (data.screen === "home") render();
+  }
+  /* the minute check only runs while the home can show a day (and after the save has settled) */
+  function keepDayTimer() {
+    lastDay = todayKey();
+    if (settled && data.screen === "home") {
+      if (!dayTimer) dayTimer = setInterval(dayTick, 60000);
+    } else if (dayTimer) {
+      clearInterval(dayTimer); dayTimer = null;
+    }
+  }
   /* keep the selected kana inside the scrolling grid, and say whether the grid goes on beyond each edge */
   function revealSelected(block) {
     var selected = referenceEl.querySelector(".selected");
@@ -166,39 +446,78 @@
     cueTop.classList.toggle("show", data.screen === "list" && top > 1);
     cueBottom.classList.toggle("show", data.screen === "list" && top < more - 1);
   }
+  function renderHome() {
+    var n = reviewCount();
+    bigkanaEl.textContent = table()[0];
+    appnameEl.textContent = TXT.title;
+    reviewLabel.textContent = n > 0 ? TXT.reviewCount.replace("{n}", String(n)) : TXT.allDone;
+    stampEl.style.display = n > 0 ? "none" : "inline-block";
+    tableLabel.textContent = TXT.homeTable;
+    quizLabel.textContent = TXT.homeQuiz;
+    /* a run not kept up yesterday is over: the home says 0 until a review finishes today */
+    streakEl.textContent = TXT.streak.replace("{n}", String(KanaSRS.liveStreak(data.days, todayKey())));
+    homeRows.forEach(function (row, i) {
+      row.classList.toggle("selected", i === data.homeRow);
+      row.setAttribute("aria-selected", i === data.homeRow ? "true" : "false");
+    });
+  }
+  function renderTally() {
+    var lines = [
+      [TXT.tallyTitle, "tally-title"],
+      [TXT.tallyScore.replace("{right}", String(data.res.right)).replace("{wrong}", String(data.res.wrong)), "tally-line"],
+      [TXT.tallyUp.replace("{n}", String(data.res.up)), "tally-line"],
+      [TXT.tallyTomorrow.replace("{n}", String(data.tomorrow)), "tally-line"]
+    ];
+    tallyEl.textContent = "";
+    lines.forEach(function (line) {
+      var div = document.createElement("div");
+      div.className = line[1];
+      div.textContent = line[0];
+      tallyEl.appendChild(div);
+    });
+  }
   function render() {
     var list = table(), currentIndex = data.screen === "quiz" ? data.target : data.index;
     document.body.classList.toggle("quiz", data.screen === "quiz");
     document.body.classList.toggle("card", data.screen === "card");
     document.body.classList.toggle("list", data.screen === "list");
+    document.body.classList.toggle("home", data.screen === "home");
+    document.body.classList.toggle("tally", data.screen === "tally");
     scriptBtn.textContent = data.script === "hira" ? TXT.hira : TXT.kata;
-    document.getElementById("title").textContent = TXT.title;
-    document.getElementById("count").textContent = (data.screen === "quiz" ? data.target + 1 : data.index + 1) + "/" + list.length;
-    document.getElementById("qnum").textContent = TXT.qnum.replace("{n}", String(data.question || 1));
-    document.getElementById("mode").textContent = TXT[data.screen];
-    document.getElementById("guide").textContent = data.screen === "list" ? TXT.listGuide : data.screen === "card" ? TXT.cardGuide : TXT.quizGuide;
+    titleEl.textContent = TXT.title;
+    countEl.textContent = (data.screen === "quiz" ? data.target + 1 : data.index + 1) + "/" + list.length;
+    qnumEl.textContent = data.screen === "quiz" && data.review
+      ? TXT.qnumOf.replace("{n}", String(data.qpos + 1)).replace("{total}", String(data.queue.length))
+      : TXT.qnum.replace("{n}", String(data.question || 1));
+    modeEl.textContent = TXT[data.screen];
+    guideEl.textContent = data.screen === "home" ? TXT.homeGuide
+      : data.screen === "tally" ? TXT.tallyGuide
+      : data.screen === "list" ? TXT.listGuide
+      : data.screen === "card" ? TXT.cardGuide : TXT.quizGuide;
     kanaEl.textContent = list[currentIndex];
     romaEl.textContent = ROMA[currentIndex];
     rateEl.textContent = rateText(currentIndex);
-    viewBtn.textContent = data.screen === "list" ? TXT.startQuiz : TXT.backList;
-    viewBtn.style.display = "inline-block";
+    viewBtn.textContent = data.screen === "list" ? TXT.startQuiz : data.screen === "card" ? TXT.backList : TXT.backHome;
+    viewBtn.style.display = data.screen === "home" || data.screen === "tally" ? "none" : "inline-block";
     document.getElementById("prev").textContent = TXT.prev;
     document.getElementById("next").textContent = TXT.next;
     document.getElementById("hear").textContent = TXT.hear;
     promptEl.textContent = TXT.question;
     optionsEl.textContent = "";
     referenceEl.textContent = "";
+    if (data.screen === "home") renderHome();
+    if (data.screen === "tally") renderTally();
     if (data.screen === "list") {
       GRID_ROWS.forEach(function (row, r) {
         row.forEach(function (index, c) {
           var b = document.createElement("button"), kana = document.createElement("span"), roma = document.createElement("span");
           b.type = "button"; b.setAttribute("role", "listitem"); b.setAttribute("aria-label", list[index] + " " + ROMA[index]);
           b.style.gridRow = String(r + 1); b.style.gridColumn = String(GRID_COLS[r][c] + 1);
-          b.className = index === data.index ? "selected" : "";
+          b.className = (boxClass(index) + (index === data.index ? " selected" : "")).trim();
           b.setAttribute("aria-selected", index === data.index ? "true" : "false");
           kana.textContent = list[index]; roma.textContent = ROMA[index];
           b.appendChild(kana); b.appendChild(roma);
-                b.addEventListener("click", function () { data.index = index; openCard(); });
+          b.addEventListener("click", function () { if (!settled) return; data.index = index; openCard(); });
           referenceEl.appendChild(b);
         });
       });
@@ -210,21 +529,34 @@
         b.type = "button"; b.textContent = ROMA[index];
         b.setAttribute("data-index", String(index));
         b.className = data.reveal === index || (data.reveal < 0 && i === data.choice) ? "selected" : "";
-        b.addEventListener("click", function () { data.choice = i; answer(); });
+        b.addEventListener("click", function () { if (!settled) return; data.choice = i; answer(); });
         optionsEl.appendChild(b);
       });
     }
     updateCues();
+    keepDayTimer();
   }
   function switchScript() {
     data.script = data.script === "hira" ? "kata" : "hira";
-    if (data.screen === "quiz") { data.index = data.target; data.screen = "list"; }
-    data.locked = false; statusEl.textContent = "";
+    /* the free quiz kept its table cursor where the question was, as it always did; a review's
+       queue holds the other script's indices, and a tally's numbers belong to the script it was
+       done in, so both leave for home */
+    if (data.screen === "quiz") {
+      if (data.review) {
+        data.review = false; data.queue = []; data.qpos = 0; data.screen = "home";
+      } else {
+        data.index = data.target; data.screen = "list";
+      }
+    } else if (data.screen === "tally") {
+      data.review = false; data.queue = []; data.qpos = 0; data.screen = "home";
+    }
+    data.locked = false; data.awaitConfirm = false; data.reveal = -1;
+    statusEl.textContent = "";
     data.seen = {}; data.recent = [];
     save(); render();
+    revealSelected();
   }
   function backToList() {
-    if (data.screen === "quiz") data.index = data.target;
     data.screen = "list";
     data.locked = false;
     statusEl.textContent = "";
@@ -232,8 +564,33 @@
     render();
     revealSelected();
   }
+  function goHome() {
+    /* a free quiz leaves the table cursor on the kana it was asking about, as it always did */
+    if (data.screen === "quiz" && !data.review) data.index = data.target;
+    data.screen = "home";
+    data.review = false; data.queue = []; data.qpos = 0;
+    data.locked = false; data.awaitConfirm = false; data.reveal = -1;
+    statusEl.textContent = "";
+    save();
+    render();
+  }
+  function openTable() {
+    data.screen = "list";
+    statusEl.textContent = "";
+    save();
+    render();
+  }
   function openCard() {
     data.screen = "card"; statusEl.textContent = ""; save(); render();
+  }
+  function openHomeRow() {
+    if (data.homeRow === 0) startReview();
+    else if (data.homeRow === 1) openTable();
+    else startQuiz();
+  }
+  function moveHome(dir) {
+    data.homeRow = (data.homeRow + (dir === "up" ? -1 : 1) + 3) % 3;
+    render();
   }
   function chooseReference(dir) {
     var row = 0, col = 0, r, c;
@@ -317,17 +674,64 @@
     for (i = 0; i < pool.length; i++) { r -= pool[i][1]; if (r < 0) return pool[i][0]; }
     return pool[pool.length - 1][0];
   }
+  /* the day's review: every due kana once, oldest first, then the new ones the day still allows */
+  function startReview() {
+    var list = reviewList(), queue = list.due.concat(list.fresh);
+    if (!queue.length) return;
+    if (list.fresh.length) {
+      /* a new kana counts as introduced when it is first offered, so closing the app mid-review
+         cannot hand out another eight later the same day */
+      var day = todayKey();
+      if (data.newDay.day !== day) data.newDay = { day: day, hira: 0, kata: 0 };
+      data.newDay[data.script] += list.fresh.length;
+    }
+    data.review = true; data.queue = queue; data.qpos = 0;
+    data.res = { right: 0, wrong: 0, up: 0 };
+    data.screen = "quiz"; data.target = queue[0];
+    data.recent = []; data.seen = {}; data.question = 0;
+    newQuestion(); statusEl.textContent = "";
+    save(); render();
+  }
+  function reviewAnswer(ok) {
+    var key = String(data.target), entry = boxes()[key] || null;
+    var was = Array.isArray(entry) ? entry[0] : 0;
+    var next = KanaSRS.applyAnswer(entry, ok, todayKey());
+    boxes()[key] = next;
+    if (ok) { data.res.right++; if (next[0] > was) data.res.up++; }
+    else data.res.wrong++;
+  }
+  function nextReview() {
+    data.qpos++;
+    if (data.qpos >= data.queue.length) { finishReview(); return; }
+    data.target = data.queue[data.qpos];
+    newQuestion(); statusEl.textContent = "";
+    render();
+  }
+  function finishReview() {
+    data.days = KanaSRS.streakAfter(data.days, todayKey());
+    var list = KanaSRS.dueList(boxes(), KanaSRS.addDays(todayKey(), 1), table().length, 0);
+    data.tomorrow = list.due.length + list.fresh.length;
+    data.locked = false; data.awaitConfirm = false; data.reveal = -1;
+    data.screen = "tally";
+    statusEl.textContent = "";
+    save();
+    if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx("win");
+    render();
+  }
+  function startQuiz() {
+    if (data.screen !== "list" && data.screen !== "home") return;
+    data.review = false; data.queue = []; data.qpos = 0;
+    data.screen = "quiz"; data.target = data.index;
+    data.recent = []; data.seen = {}; data.question = 0; rememberTarget(data.target);
+    newQuestion(); statusEl.textContent = "";
+    render();
+  }
   function advance() {
+    if (data.review) { nextReview(); return; }
     var next = pickTarget();
     if (next < 0) { data.locked = true; data.awaitConfirm = false; statusEl.textContent = TXT.done; return; }
     data.target = next;
     rememberTarget(data.target);
-    newQuestion(); statusEl.textContent = ""; render();
-  }
-  function startQuiz() {
-    if (data.screen !== "list") return;
-    data.screen = "quiz"; data.target = data.index;
-    data.recent = []; data.seen = {}; data.question = 0; rememberTarget(data.target);
     newQuestion(); statusEl.textContent = ""; render();
   }
   function answer() {
@@ -341,6 +745,8 @@
     var ok = data.choices[data.choice] === data.target;
     var stat = stats()[data.target] || (stats()[data.target] = [0, 0]);
     stat[0]++; if (ok) stat[1]++;
+    /* the free quiz leaves the review alone: only a session's answers move a box and the streak */
+    if (data.review) reviewAnswer(ok);
     if (ok) {
       statusEl.textContent = TXT.mastered;
       if (typeof PAD !== "undefined" && PAD.sfx) PAD.sfx("ok");
@@ -368,61 +774,93 @@
     });
   }
   function handle(button) {
+    /* before PAD.load has settled the state is blank: a press must not start a review or a quiz */
+    if (!settled) return;
+    if (data.screen === "home") {
+      if (button === "up" || button === "down") moveHome(button);
+      else if (button === "a") openHomeRow();
+      else if (button === "select") switchScript();
+      return;
+    }
+    if (data.screen === "tally") {
+      if (button === "a" || button === "b") goHome();
+      return;
+    }
     if (data.screen === "list") {
       if (button === "left" || button === "right" || button === "up" || button === "down") chooseReference(button);
       else if (button === "a") openCard();
       else if (button === "start") startQuiz();
       else if (button === "select") switchScript();
+      else if (button === "b") goHome();
       return;
     }
-    if (button === "b") backToList();
-    else if (button === "left") move("left");
+    if (button === "b") {
+      /* the card keeps its place in the table; the quiz has no table to go back to any more */
+      if (data.screen === "card") backToList(); else goHome();
+      return;
+    }
+    if (button === "left") move("left");
     else if (button === "right") move("right");
     else if (button === "up" && data.screen === "quiz") move("up");
     else if (button === "down" && data.screen === "quiz") move("down");
     else if (button === "a") { if (data.screen === "quiz") answer(); else hear(); }
     else if (button === "select") switchScript();
   }
-  document.getElementById("prev").addEventListener("click", function () { move("left"); });
-  document.getElementById("next").addEventListener("click", function () { move("right"); });
-  document.getElementById("hear").addEventListener("click", function () { if (data.screen === "quiz") answer(); else hear(); });
+  /* taps and the keys do the same things, and both wait for the save to have settled */
+  function tap(el, fn) {
+    el.addEventListener("click", function (e) { if (settled) fn(e); });
+  }
+  tap(document.getElementById("prev"), function () { move("left"); });
+  tap(document.getElementById("next"), function () { move("right"); });
+  tap(document.getElementById("hear"), function () { if (data.screen === "quiz") answer(); else hear(); });
   referenceEl.addEventListener("scroll", updateCues);
-  scriptBtn.addEventListener("click", switchScript);
-  viewBtn.addEventListener("click", function () { if (data.screen === "list") startQuiz(); else backToList(); });
+  tap(scriptBtn, switchScript);
+  tap(viewBtn, function () {
+    if (data.screen === "list") startQuiz();
+    else if (data.screen === "quiz") goHome();
+    else backToList();
+  });
+  homeRows.forEach(function (row, i) {
+    tap(row, function () { data.homeRow = i; openHomeRow(); });
+  });
   var keyHandler = function (e) {
     if (e.key.indexOf("Arrow") === 0) { e.preventDefault(); handle(e.key.slice(5).toLowerCase()); }
     else if (e.key === "x" || e.key === "X") { e.preventDefault(); handle("a"); }
     else if (e.key === "z" || e.key === "Z") { e.preventDefault(); handle("b"); }
-    else if (e.key === "Enter") { e.preventDefault(); handle(data.screen === "quiz" ? "a" : "start"); }
+    else if (e.key === "Enter") {
+      e.preventDefault();
+      handle(data.screen === "list" || data.screen === "card" ? "start" : "a");
+    }
     else if (e.key === "Shift") { e.preventDefault(); handle("select"); }
   };
   if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", handle);
   else document.addEventListener("keydown", keyHandler, false);
   document.documentElement.lang = LANG === "en" ? "en" : "zh-CN";
+  stampEl.textContent = TXT.stamp;
+  /* coming back to the app after a while at midnight has to show the new day at once */
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState !== "visible" || !settled || data.screen !== "home") return;
+    lastDay = todayKey();
+    render();
+  });
+  render();
   if (typeof PAD !== "undefined" && PAD.load) {
     PAD.load(KEY).then(function (saved) {
-      if (saved && (saved.script === "hira" || saved.script === "kata")) data.script = saved.script;
-      if (saved && typeof saved.index === "number" && saved.index >= 0 && saved.index < table().length) data.index = saved.index;
-      if (saved && typeof saved.v === "number" && saved.v > 2) {
-        /* a newer save format: show the defaults, but never write over it */
-        saveBlocked = true;
-      } else if (saved && saved.v === 2) {
-        readStats(saved.stats && saved.stats.hira, data.stats.hira);
-        readStats(saved.stats && saved.stats.kata, data.stats.kata);
-      } else {
-        /* an old save kept one shared stats object; it belongs to hiragana now */
-        readStats(saved && saved.stats, data.stats.hira);
-      }
-      loaded = true;
+      /* a save from a newer build is read as far as this one understands it, and never written over */
+      if (saved && typeof saved.v === "number" && saved.v > 3) saveBlocked = true;
+      var state = KanaSRS.migrate(saved, todayKey(), { hira: HIRA.length, kata: KATA.length });
+      data.script = state.script; data.index = state.index;
+      data.stats = state.stats; data.srs = state.srs;
+      data.days = state.days; data.newDay = state.newDay;
+      loaded = true; settled = true;
       render();
-      revealSelected("center");
     }, function () {
       /* never save over a save that could not be read; loaded stays false */
+      settled = true;
       render();
-      revealSelected("center");
       statusEl.textContent = TXT.unreadable;
     });
-  } else { loaded = true; render(); revealSelected("center"); }
+  } else { loaded = true; settled = true; render(); }
 })();
 </script>
 </body>
