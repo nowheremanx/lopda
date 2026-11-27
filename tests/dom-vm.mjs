@@ -44,13 +44,13 @@ function fakeElement(id) {
 
 /* bootDom(file, {pad, seed}): runs the page's inline scripts; returns {ctx, els, frame(), get(name)} */
 export function bootDom(file, opt = {}) {
-  const els = {}, raf = [], timers = [], winListeners = {};
+  const els = {}, raf = [], timers = [], winListeners = {}, docListeners = {};
   let now = 0;
   const byId = (id) => (els[id] = els[id] || fakeElement(id));
   const document = {
     getElementById: byId, createElement: () => fakeElement(), querySelector: () => fakeElement(), querySelectorAll: () => [],
     body: fakeElement("body"), head: fakeElement("head"), documentElement: fakeElement("html"),
-    addEventListener() {}, hidden: false, title: ""
+    addEventListener: (type, f) => { (docListeners[type] = docListeners[type] || []).push(f); }, hidden: false, title: ""
   };
   const g = {
     console, document, ImageData: class { constructor(d, w, h) { this.data = d; this.width = w; this.height = h; } },
@@ -80,5 +80,7 @@ export function bootDom(file, opt = {}) {
     now = end;
     raf.splice(0).forEach((f) => f(now));
   };
-  return { ctx, els, advance, get: ctx.get };
+  /* hide(true | false): the page goes to the background (another app, the lock button) or comes back */
+  const hide = (on) => { document.hidden = !!on; (docListeners.visibilitychange || []).forEach((f) => f({ type: "visibilitychange" })); };
+  return { ctx, els, advance, hide, get: ctx.get };
 }

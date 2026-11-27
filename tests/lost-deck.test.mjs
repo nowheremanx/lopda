@@ -171,3 +171,75 @@ test("lost-deck app: once the lift or the core is reached, nothing can kill you 
   frames(app, 120); await settle();
   assert.equal(p.data.save.unlocked, 2);
 });
+
+/* the text calls of one frame of the current scene: [{s, x, y, h, o}] */
+function textsOf(app, L) {
+  const g = L.game.g, orig = g.text, out = [];
+  g.text = function (s, x, y, o) { const h = orig.call(g, s, x, y, o); out.push({ s: String(s), x, y, h, o: o || {} }); return h; };
+  app.frame();
+  g.text = orig;
+  return out;
+}
+/* the left and right edge of a line as lo-game places it */
+function edges(g, e) {
+  const w = e.o.width ? Math.max(...g.wrap(e.s, e.o.width).map((l) => g.measure(l))) : g.measure(e.s);
+  const box = e.o.width || 0, x0 = e.o.align === "center" ? (box ? e.x + (box - w) / 2 : e.x - w / 2) : e.x;
+  return [x0, x0 + w];
+}
+
+test("lost-deck app: a long press of B, let go without sidestepping, still uses what is in front (#352)", async () => {
+  const p = fakePad({}), on = {};
+  p.pad.on = (type, fn) => { (on[type] = on[type] || []).push(fn); };
+  const app = boot(APP, { pad: p.pad, seed: 3 });
+  await settle(); frames(app, 5);
+  const L = app.ctx.get("LD");
+  L.dbgStart(0); frames(app, 5);
+  const w = L.dbg(), orig = w.update; let used = 0;
+  w.update = function (dt, input) { if (input && input.use) used++; return orig.call(this, dt, input); };
+  (on.press || []).forEach((f) => f("b"));
+  frames(app, 40);                                   /* two thirds of a second */
+  (on.release || []).forEach((f) => f("b"));
+  frames(app, 3);
+  assert.equal(used, 1);
+});
+
+test("lost-deck app: the title's save warning fits the screen in both languages (#351)", async () => {
+  for (const lang of ["zh", "en"]) for (const [initial, fail] of [[{ save: { v: 2, unlocked: 5, best: {}, tips: {} } }, false], [{ save: { v: "x" } }, false], [{}, true]]) {
+    const p = fakePad(initial, fail);
+    p.pad.lang = lang;
+    const app = boot(APP, { pad: p.pad, seed: 3 });
+    await settle(); frames(app, 5);
+    const L = app.ctx.get("LD"), texts = textsOf(app, L);
+    const warn = texts.find((e) => e.y === 146);
+    assert.ok(warn && /saving|保存/.test(warn.s), `${lang}: ${warn && warn.s}`);
+    const [x0, x1] = edges(L.game.g, warn);
+    assert.ok(x0 >= 2 && x1 <= 158, `${lang} "${warn.s}" spans ${x0}..${x1}`);
+  }
+});
+
+test("lost-deck app: the ending fits above its hint, and the first press shows it all instead of leaving (#353)", async () => {
+  for (const lang of ["zh", "en"]) {
+    const p = fakePad({}), on = {};
+    p.pad.lang = lang;
+    p.pad.on = (type, fn) => { (on[type] = on[type] || []).push(fn); };
+    const tap = (b) => { (on.press || []).forEach((f) => f(b)); frames(app, 2); (on.release || []).forEach((f) => f(b)); frames(app, 2); };
+    const app = boot(APP, { pad: p.pad, seed: 3 });
+    await settle(); frames(app, 5);
+    const L = app.ctx.get("LD"), lines = L.ENDING[lang];
+    L.game.go("ending", null, { fade: false }); frames(app, 3 * 60);
+    let texts = textsOf(app, L);
+    assert.ok(!texts.some((e) => e.y === 146), `${lang}: no hint before the text is all there`);
+    assert.ok(texts.length < lines.length, `${lang}: still coming in`);
+    tap("a");                                        /* shows the rest, stays on the ending */
+    frames(app, 40);
+    texts = textsOf(app, L);
+    const hint = texts.find((e) => e.y === 146), body = texts.filter((e) => e !== hint);
+    assert.ok(hint, `${lang}: the hint shows once everything is there`);
+    assert.equal(body.length, lines.length, `${lang}: every line drawn`);
+    const last = body[body.length - 1];
+    assert.ok(body[0].y >= 0 && last.y + last.h <= 146, `${lang}: text from ${body[0].y} to ${last.y + last.h}`);
+    tap("a");                                        /* now it leaves (the fade waits on promises) */
+    for (let i = 0; i < 6; i++) { frames(app, 10); await settle(); }
+    const after = textsOf(app, L); assert.ok(!after.some((e) => lines.includes(e.s)), `${lang}: back on the title: ${JSON.stringify(after.map((e) => e.s))}`);
+  }
+});

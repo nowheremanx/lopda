@@ -44,3 +44,30 @@ test("a newer version's save is left alone: nothing is written while reading", a
   assert.deepEqual(t.writes, []);
   assert.deepEqual(t.data.story, newer);
 });
+
+test("choice and title rows are 44 css px tall at the smallest scale, 8 apart, and inside their boxes (#394)", async () => {
+  const t = bootWith({});
+  await t.run(10);
+  const choiceRow = t.app.ctx.get("choiceRow"), titleRow = t.app.ctx.get("titleRow");
+  const PIC_H = t.app.ctx.get("PIC_H"), BOX_Y = t.app.ctx.get("BOX_Y");
+  for (const [rows, top, bottom] of [[[choiceRow(0, 2), choiceRow(1, 2)], 0, PIC_H], [[titleRow(0), titleRow(1)], BOX_Y + 1, 143]]) {
+    rows.forEach((r) => {
+      assert.ok(r.h * 2 >= 44, `row ${JSON.stringify(r)}`);
+      assert.ok(r.y >= top && r.y + r.h <= bottom, `row ${JSON.stringify(r)} inside ${top}..${bottom}`);
+    });
+    assert.ok(rows[1].y - (rows[0].y + rows[0].h) >= 4, "a gap between the rows");
+  }
+});
+
+test("the title teaches no B: it has none (#395)", async () => {
+  for (const initial of [{}, { story: { v: 1, at: 3, flags: {}, scene: null, stage: {} } }]) {
+    const t = bootWith(initial);
+    await t.run(10);
+    const g = t.app.ctx.get("game").g, text = g.text, said = [];
+    g.text = function (s) { said.push(String(s)); return text.apply(g, arguments); };
+    await t.run(2);
+    g.text = text;
+    assert.ok(said.length > 0);
+    assert.ok(!said.some((s) => /B/.test(s) && !/^[A-Z][a-z]/.test(s)), `title texts: ${said.join(" | ")}`);
+  }
+});
