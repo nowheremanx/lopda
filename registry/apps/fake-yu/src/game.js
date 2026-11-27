@@ -155,6 +155,7 @@ function loadProfile() {
       profile.truth = !!v.truth;
       profile.finaled = !!v.finaled;
       profile.story = Math.max(0, Math.min(SONGS.length, v.story | 0));
+      if (v.finale && typeof v.finale === "object" && typeof v.finale.rank === "string") profile.finale = { rank: v.finale.rank, failed: false };
     }
     loaded = true;
   }).catch(function () { canSave = false; loaded = true; });
@@ -190,7 +191,7 @@ game.scene("boot", {
 /* ---------- title ---------- */
 var titleSel = 0, titleLock = 0;
 function titleItems() {
-  var items = [profile.story > 0 ? T(TX.storyContinue) : T(TX.storyStart), T(TX.songs), T(TX.howto)];
+  var items = [profile.story >= SONGS.length ? T(TX.curtain) : profile.story > 0 ? T(TX.storyContinue) : T(TX.storyStart), T(TX.songs), T(TX.howto)];
   if (profile.finaled) items.push(T(TX.encore));
   return items;
 }
@@ -261,9 +262,17 @@ game.scene("title", {
   }
 });
 function startStory() {
-  if (profile.story >= SONGS.length) profile.story = 0;
+  /* all ten tunes played but the curtain never called (B or HOME on the last result): the story goes on to its
+     ending with the last tune's result, as CURTAIN would have, instead of starting over from the first act */
+  if (profile.story >= SONGS.length) { game.go("ending", { stats: finaleStats() }, { fade: true, to: PAPER }); return; }
   if (profile.story === 0) profile.truth = false;
   goStory(profile.story, "pre");
+}
+/* the last tune's story result; a save from before 2.2.0 has none, so the tune's best result stands in */
+function finaleStats() {
+  if (profile.finale) return profile.finale;
+  var b = profile.best[SONGS[SONGS.length - 1].id];
+  return b && typeof b.rank === "string" ? { rank: b.rank, failed: false } : null;
 }
 function goStory(i, kind, stats) {
   game.go("story", { i: i, kind: kind, stats: stats }, { fade: true, to: PAPER });
@@ -777,15 +786,19 @@ function finishCountdown(P) {
     game.go("play", { i: P.i, story: P.story, encore: P.encore }, { fade: false });
     return;
   }
-  var beatSec = 60 / P.song.bpm, resumeT = q.resumeBeat * beatSec;
+  /* The music picks up at the next bar, so the notes between the pause and that bar are never played. They
+     stay in the total and count as misses (no suspicion: the king saw a breath, not a wrong note), so a pause
+     costs what it skips and can never lift the accuracy or the rank. A hold that was cut off counts the same. */
+  var beatSec = 60 / P.song.bpm, resumeT = q.resumeBeat * beatSec, skipped = 0;
   for (var i = 0; i < P.chart.length; i++) {
     var n = P.chart[i];
-    if (n.t < resumeT - 0.001 && !P.judged[n.t]) { P.judged[n.t] = "skip"; P.total--; }
+    if (n.t < resumeT - 0.001 && !P.judged[n.t]) { P.judged[n.t] = "skip"; skipped++; }
   }
   if (P.hold) {
-    if (!P.judged[P.hold.note.t]) { P.judged[P.hold.note.t] = "skip"; P.total--; }
+    if (!P.judged[P.hold.note.t] || P.judged[P.hold.note.t] === "hold") { P.judged[P.hold.note.t] = "skip"; skipped++; }
     P.hold = null;
   }
+  if (skipped) { P.miss += skipped; P.combo = 0; }
   /* the chip starts the resumed score just after the call, as it did at the song's start */
   P.start = game.time + 0.06 - resumeT;
   P.t = resumeT - 0.06;
@@ -933,12 +946,12 @@ game.scene("play", {
       var tB = false;
       var touchUp = p.released && P.touchA;
       if (p.pressed) {
-        if (P.hasB && inBox(p, TOUCH_B)) tB = true;
+        if (P.hasB && inBox(p, touchBHit())) tB = true;
         else P.touchA = true;
       }
       if (p.released) P.touchA = false;
 
-      var down = game.pressed("a") || (p.pressed && !inBox(p, TOUCH_B));
+      var down = game.pressed("a") || (p.pressed && !inBox(p, touchBHit()));
       var bdown = game.pressed("b") || tB;
       var up = game.released("a") || touchUp;
 
@@ -1002,6 +1015,8 @@ game.scene("play", {
         if (!P.encore) {
           profile.cleared[P.song.id] = true;
           if (P.story) profile.story = Math.max(profile.story, P.i + 1);
+          /* the last tune's result decides the ending; kept so the ending can still be reached after leaving */
+          if (P.story && P.i === SONGS.length - 1) profile.finale = { rank: stats.rank, failed: false };
           if (clearedCount() === SONGS.length) profile.finaled = true;
         }
       }
@@ -1177,6 +1192,9 @@ function sizeTouchB(g) {
   var w = Math.max(36, g.measure(T(TX.touchB)) + 10);
   TOUCH_B.w = w; TOUCH_B.x = 156 - w;
 }
+/* the drawn button is 20 px of a 144 px stage, about 40 css px on the smallest phone: the finger target reaches
+   4 px above it and down to the stage's edge, so it is at least 48 css px tall (UI.md, 44 px) */
+function touchBHit() { return { x: TOUCH_B.x - 2, y: TOUCH_B.y - 4, w: TOUCH_B.w + 4, h: 144 - (TOUCH_B.y - 4) }; }
 function touchButton(g, b, label, off) {
   g.rect(b.x, b.y, b.w, b.h, PAPER);
   g.frame(b.x, b.y, b.w, b.h, off ? MID : INK);
@@ -1323,6 +1341,7 @@ game.scene("ending", {
     profile.endings[endingKey] = true;
     profile.finaled = true;
     profile.story = 0;
+    delete profile.finale;
     saveProfile();
     game.ambience(endingKey === "trueSong" || endingKey === "home" ? "stream" : null, 0.15);
     if (endingKey === "trueSong") game.music({ bpm: 72, p1: "@1 v9 o4 l4 a c e d", p2: "@0 v5 o3 l4 a c e d", tri: "v8 o2 l4 a a e e", noise: "l8 v2 x r x r" }, { loop: true });

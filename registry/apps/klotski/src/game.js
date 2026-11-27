@@ -295,17 +295,21 @@ function drawBoard(g, level, pieces, anim, bump, selected, hint, hideCao, caoExt
     }
   }
 
-  /* the exit: a gap in the bottom frame and a faint mark in the two bottom-middle cells */
+  /* the exit: a gap in the bottom frame and a faint mark in the two bottom-middle cells. A lesson whose goal is
+     a piece on a dotted cell has no exit: a second, likelier-looking target would teach the wrong move. */
+  var lessonGoal = !!(level.goal && level.goal.piece);
   var ex = geom.x + level.exit.x * cell, ey = geom.y + boardH - 1;
-  g.rect(ex, ey, cell * 2, 3, g.PAPER);
-  g.rect(ex, ey, 2, 1, g.DARK); g.rect(ex + cell * 2 - 2, ey, 2, 1, g.DARK);
-  g.line(ex, ey + 2, ex + 5, ey + 2, g.DARK); g.line(ex + cell * 2 - 6, ey + 2, ex + cell * 2, ey + 2, g.DARK);
-  var exitFree = KRules.pieceAt(level, pieces, level.exit.x, level.exit.y) < 0 &&
-    KRules.pieceAt(level, pieces, level.exit.x + 1, level.exit.y) < 0 &&
-    KRules.pieceAt(level, pieces, level.exit.x, level.exit.y + 1) < 0 &&
-    KRules.pieceAt(level, pieces, level.exit.x + 1, level.exit.y + 1) < 0;
-  if (exitFree) {
-    g.text(T({ zh: "出", en: "OUT" }), ex + cell, geom.y + boardH - 16, { align: "center", color: g.INK });
+  if (!lessonGoal) {
+    g.rect(ex, ey, cell * 2, 3, g.PAPER);
+    g.rect(ex, ey, 2, 1, g.DARK); g.rect(ex + cell * 2 - 2, ey, 2, 1, g.DARK);
+    g.line(ex, ey + 2, ex + 5, ey + 2, g.DARK); g.line(ex + cell * 2 - 6, ey + 2, ex + cell * 2, ey + 2, g.DARK);
+    var exitFree = KRules.pieceAt(level, pieces, level.exit.x, level.exit.y) < 0 &&
+      KRules.pieceAt(level, pieces, level.exit.x + 1, level.exit.y) < 0 &&
+      KRules.pieceAt(level, pieces, level.exit.x, level.exit.y + 1) < 0 &&
+      KRules.pieceAt(level, pieces, level.exit.x + 1, level.exit.y + 1) < 0;
+    if (exitFree) {
+      g.text(T({ zh: "出", en: "OUT" }), ex + cell, geom.y + boardH - 16, { align: "center", color: g.INK });
+    }
   }
 
   for (i = 0; i < pieces.length; i++) {
@@ -1137,10 +1141,11 @@ function drawHUD(g) {
   if (l2) g.text(l2, 5, FOOT + 13, { color: g.INK });
 }
 
+/* the toast sits over the key hints, below the board: the board's last row and its exit stay in sight */
 function drawToast(g) {
   var tw = g.measure(T(table.toast.text)) + 10;
-  g.window(80 - tw / 2, 150, tw, 16, { thin: true });
-  g.text(T(table.toast.text), 80, 154, { align: "center", color: g.INK });
+  g.window(80 - tw / 2, FOOT + 5, tw, 16, { thin: true });
+  g.text(T(table.toast.text), 80, FOOT + 9, { align: "center", color: g.INK });
 }
 
 function drawMenu(g) {
@@ -1278,7 +1283,7 @@ var titleScene = {
 };
 
 /* ---------------- the level list ---------------- */
-var levelList = { list: [], sel: 0, top: 0, filter: 0 };
+var levelList = { list: [], sel: 0, top: 0, filter: 0, placed: false };
 function filterName(f) {
   if (!f) return T({ zh: "全部", en: "ALL" });
   return T({ zh: "{n} 星", en: "Lv{n}" }, { n: f });
@@ -1296,10 +1301,22 @@ function keepLevelInView() {
   levelList.top = Math.max(0, Math.min(levelList.top, Math.max(0, levelList.list.length - LIST_ROWS)));
 }
 
+/* the first time the list opens after a start, the cursor goes to the first level not cleared yet, so a returning
+   player does not page down past twenty cleared rows; later visits keep where the cursor was */
+function placeLevelCursor() {
+  if (levelList.placed || !loaded) return;
+  levelList.placed = true;
+  for (var i = 0; i < levelList.list.length; i++) {
+    if (!clearedRec(levelList.list[i].id)) { levelList.sel = i; break; }
+  }
+  keepLevelInView();
+}
+
 var levelsScene = {
-  enter: function () { PT.clear(); ensureLoaded(); buildLevelList(); },
+  enter: function () { PT.clear(); ensureLoaded(); buildLevelList(); placeLevelCursor(); },
   update: function () {
     if (!loaded) return;
+    placeLevelCursor();
     if (game.repeat("up")) { if (levelList.list.length) { levelList.sel = (levelList.sel + levelList.list.length - 1) % levelList.list.length; keepLevelInView(); game.sfx("tick"); } }
     if (game.repeat("down")) { if (levelList.list.length) { levelList.sel = (levelList.sel + 1) % levelList.list.length; keepLevelInView(); game.sfx("tick"); } }
     if (game.pressed("a")) { openLevelAt(levelList.sel); return; }
