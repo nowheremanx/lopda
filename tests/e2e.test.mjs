@@ -1900,6 +1900,90 @@ test("dictionary: no selection while reviewing the word book", { skip, timeout: 
   assert.deepEqual(errors, []);
 });
 
+/* the word book filled through LP.dict.setWord once it is read; the newest first */
+const fillBook = (p, words) => p.waitForFunction((words) => {
+  if (LP.dict.setWord("zzz-probe", false) !== "saved") return false;
+  words.forEach((w) => LP.dict.setWord(w, true));
+  return true;
+}, words, { timeout: 10000 });
+const bookWords = (p) => p.evaluate(() => LP.dict.inBookMany(["water", "book", "cat", "running", "Time", "time", "London"]));
+
+test("dictionary: START while reviewing takes the card out and shows the next one; the count follows; the last one ends the review", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await fillBook(p, ["running", "cat", "book", "water"]);       /* the book: water, book, cat, running */
+  await p.click("#dict-keys .sk-select");
+  await p.click("#dict-sheet .sk-a");                           /* review from the first, water */
+  const card = async () => ({ w: (await p.textContent("#dict-sheet .dict-page .big")).trim(), n: (await p.textContent("#dict-sheet .sheet-title small")).trim() });
+  assert.deepEqual(await card(), { w: "water", n: "1/4" });
+  await p.keyboard.press("x");                                  /* A: the entry */
+  await p.keyboard.press("Enter");                              /* START: out of the book (issue #307) */
+  await p.waitForFunction(() => /book/.test(document.querySelector("#dict-sheet .dict-page .big")?.textContent || ""));
+  assert.deepEqual(await card(), { w: "book", n: "1/3" });
+  await p.keyboard.press("x"); await p.keyboard.press("x");     /* A A: the entry, then the next card */
+  assert.deepEqual(await card(), { w: "cat", n: "2/3" });
+  /* running's entry is run (a word form): START removes running, the word the book holds, not run */
+  await p.keyboard.press("ArrowRight");
+  assert.deepEqual(await card(), { w: "running", n: "3/3" });
+  await p.keyboard.press("x");
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /book/.test(document.querySelector("#dict-sheet .dict-page .big")?.textContent || ""));
+  assert.deepEqual(await card(), { w: "book", n: "1/2" });      /* the last card out: round to the first */
+  assert.deepEqual((await bookWords(p)).slice(0, 4), [false, true, true, false]);
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => /cat/.test(document.querySelector("#dict-sheet .dict-page .big")?.textContent || ""));
+  assert.deepEqual(await card(), { w: "cat", n: "1/1" });
+  await p.keyboard.press("Enter");                              /* the last word: back to the empty word book */
+  await p.waitForFunction(() => !document.querySelector("#dict-sheet .dict-page") && /0 个词/.test(document.getElementById("dict-sheet").textContent));
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: the word book ignores case, as the reader and apps see it; candidate and sheet rows are 44 px", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t, { viewport: { width: 375, height: 667 } });
+  await fillBook(p, ["london"]);
+  /* London's own entry says it is in the book already; START takes it out instead of adding a second row (issue #308) */
+  assert.equal(await p.evaluate(() => LP.dict.inBook("London")), true);
+  await typeWord(p, "london", "London");
+  await p.press("#dict-q", "Enter");
+  await p.waitForFunction(() => /伦敦/.test(document.querySelector("#dict-sheet .dict-page")?.textContent || ""));
+  assert.match(await p.textContent("#dict-sheet .sk-start"), /已收/);
+  await p.keyboard.press("Enter");
+  assert.deepEqual(await p.evaluate(() => LP.dict.inBookMany(["London", "london"])), [false, false]);
+  /* Time from a sentence's start and time from its middle are one word */
+  await p.evaluate(() => { LP.dict.toggleWord("Time"); LP.dict.toggleWord("time"); });
+  assert.deepEqual(await p.evaluate(() => LP.dict.inBookMany(["Time", "time"])), [false, false]);
+  await p.evaluate(() => { LP.dict.toggleWord("Time"); });
+  assert.equal(await p.evaluate(() => LP.dict.inBook("time")), true);
+  await p.keyboard.press("z");
+  /* rows a finger picks: the candidates and the word book (issue #309) */
+  await typeWord(p, "a");
+  const listRows = await p.$$eval("#dict-list li:not(.label)", (l) => l.map((x) => x.getBoundingClientRect().height));
+  assert.ok(listRows.length && listRows.every((h) => h >= 43.5), "candidate rows " + listRows);
+  await p.fill("#dict-q", "");
+  await p.click("#dict-keys .sk-select");
+  const sheetRows = await p.$$eval("#dict-sheet .lcd-menu li", (l) => l.map((x) => x.getBoundingClientRect().height));
+  assert.ok(sheetRows.length && sheetRows.every((h) => h >= 43.5), "word book rows " + sheetRows);
+  assert.deepEqual(errors, []);
+});
+
+test("dictionary: files of an import that never got its document are taken away on the next start; a book's own files stay", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await dictPage(t);
+  await fillBook(p, []);
+  /* a kept book (document and files) and a half one (files only), as a page killed mid-import leaves it (issue #310) */
+  await p.evaluate(async () => {
+    const P = LopdaPlatform;
+    await P.files.put("dict/keep/index", { info: { bookname: "k" }, index: { words: [], off: [], len: [], head: {} } });
+    await P.files.put("dict/keep/data", new Blob(["x"]));
+    await P.db.doc("data/users/local/dict").collection("books").doc("keep").set({ name: "Kept", words: 0, syns: 0, added: 1 });
+    await P.files.put("dict/half/index", { info: { bookname: "h" } });
+    await P.files.put("dict/half/data", new Blob(["y"]));
+  });
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => LopdaPlatform.files.keys("dict/").then((k) => k.length === 2), null, { timeout: 10000 }).catch(() => {});
+  const keys = await p.evaluate(() => LopdaPlatform.files.keys("dict/").then((k) => k.sort()));
+  assert.deepEqual(keys, ["dict/keep/data", "dict/keep/index"]);
+  assert.deepEqual(errors, []);
+});
+
 /* stands in for the phone's speech: getVoices is empty until voiceschanged, as on iOS; speak and cancel are recorded */
 function fakeSpeech(voices) {
   const heard = [], said = (window.__said = []);
@@ -2483,6 +2567,50 @@ test("reader: in a short screen the menu scrolls to keep the highlighted row in 
   assert.match((await inView()).text, /回书架/);
   for (let i = 0; i < 9; i++) await p.keyboard.press("ArrowUp");
   assert.ok((await inView()).fits);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: on an iPhone SE in Safari the menu shows whole rows, with ▲ ▼ when there are more; a swipe stops on a row", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t, { viewport: { width: 375, height: 553 } });
+  await openRow(p, 2);
+  await p.keyboard.press("Enter");                              /* START: the menu */
+  await p.waitForSelector("#rd-sheet:not([hidden])");
+  const look = () => p.evaluate(() => {
+    const ul = document.querySelector("#rd-sheet .lcd-menu"), a = ul.getBoundingClientRect(), cue = document.querySelector("#rd-sheet .rd-more");
+    const cut = [...ul.children].filter((li) => { const b = li.getBoundingClientRect(); return b.bottom > a.top + 1 && b.top < a.bottom - 1 && (b.top < a.top - 1 || b.bottom > a.bottom + 1); });
+    return { cut: cut.map((li) => li.textContent), scrolls: ul.scrollHeight > ul.clientHeight,
+      up: getComputedStyle(cue.children[0]).visibility, down: getComputedStyle(cue.children[1]).visibility };
+  });
+  let v = await look();
+  assert.ok(v.scrolls, "the menu has more rows than its window here");
+  assert.deepEqual(v.cut, [], "no half row (issue #400)");
+  assert.deepEqual([v.up, v.down], ["hidden", "visible"]);
+  for (let i = 0; i < 12; i++) await p.keyboard.press("ArrowDown");
+  await p.waitForTimeout(200);
+  v = await look();
+  assert.deepEqual(v.cut, []);
+  assert.deepEqual([v.up, v.down], ["visible", "hidden"]);
+  /* a swipe that ends between rows settles on one */
+  await p.evaluate(() => { document.querySelector("#rd-sheet .lcd-menu").scrollTop = 20; });
+  await p.waitForTimeout(600);
+  v = await look();
+  assert.deepEqual(v.cut, []);
+  assert.deepEqual(errors, []);
+});
+
+test("reader: emoji in a book print as boxes on the four-tone screen and keep every place in the text", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await readerPage(t);
+  const text = "Smile\n\nA line with \u{1F600} and \u2764\uFE0F, a family \u{1F468}\u200D\u{1F469}\u200D\u{1F467}, \u00A9 2020 and \u2605.\n";
+  await importBook(p, { name: "emoji.txt", mimeType: "text/plain", buffer: Buffer.from(text) });
+  await openRow(p, 1);
+  await p.waitForFunction(() => /A line with/.test(document.getElementById("rd-flow").textContent));
+  const shown = await p.evaluate(() => [...document.querySelectorAll("#rd-flow > p")].map((e) => e.textContent).find((x) => /A line/.test(x)));
+  assert.doesNotMatch(shown, /\p{Extended_Pictographic}(?<![\u00A9\u2605])/u, "no emoji on the page (issue #399): " + shown);
+  assert.equal((shown.match(/\u25A1/g) || []).length, 3);
+  assert.match(shown, /\u00A9 2020 and \u2605/, "plain symbols stay");
+  /* the same length as the book's text: the reader's positions are offsets into it */
+  const src = "A line with \u{1F600} and \u2764\uFE0F, a family \u{1F468}\u200D\u{1F469}\u200D\u{1F467}, \u00A9 2020 and \u2605.";
+  assert.equal(shown.length, src.length);
   assert.deepEqual(errors, []);
 });
 
@@ -7297,18 +7425,25 @@ test("notes: a year later the diary page shows 那年今日, and A opens that ye
   await n.open();
   assert.deepEqual(await n.rows(), ["*今天 · 写点什么", "新建", "10月15日 周三 · 八月廿四"]);
   await n.key("a");
-  assert.deepEqual(await n.p.$$eval("#note-years li", (l) => l.map((x) => x.textContent)), ["那年今日", "2025 · 去 Brooklyn 看了展。"]);
-  /* the keyboard goes away: the page is read, and ▲ from the top of the text goes onto the row */
+  /* writing: folded to one row, so the keyboard leaves room for the text (issue #357) */
+  const years = () => n.p.$$eval("#note-years li", (l) => l.map((x) => x.textContent));
+  assert.deepEqual(await years(), ["那年今日 · 1 篇"]);
+  /* the keyboard goes away: the page is read, the rows unfold, and ▲ from the top of the text goes onto the row */
   await n.p.evaluate(() => document.activeElement.blur());
   assert.ok(await n.p.isVisible("#note-read"));
+  assert.deepEqual(await years(), ["那年今日", "2025 · 去 Brooklyn 看了展。"]);
   await n.key("up");
   assert.deepEqual(await n.p.$$eval("#note-years li.on", (l) => l.map((x) => x.textContent)), ["2025 · 去 Brooklyn 看了展。"]);
   await n.key("a");
   assert.equal(await n.p.inputValue("#note-body"), "10月15日 周三 · 八月廿四\n去 Brooklyn 看了展。");
   /* still nothing written for 2026 */
   assert.equal((await n.docs()).length, 1);
-  /* a tap on the row does the same */
+  /* a tap on the folded row while writing reads the page and unfolds; a tap on the year's row then opens it */
   await n.key("b", "a");
+  assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
+  await n.p.click("#note-years li.fold");
+  assert.ok(await n.p.isVisible("#note-read"));
+  assert.deepEqual(await years(), ["那年今日", "2025 · 去 Brooklyn 看了展。"]);
   await n.p.click("#note-years li:nth-child(2)");
   assert.equal(await n.p.inputValue("#note-body"), "10月15日 周三 · 八月廿四\n去 Brooklyn 看了展。");
   assert.deepEqual(notBlocked(n.errors), []);
@@ -7392,6 +7527,35 @@ test("notes: a note from the list opens to read, with no keyboard; a tap on a wo
   assert.equal(await n.p.evaluate(() => document.activeElement.id), "note-body");
   assert.equal(await n.p.inputValue("#note-body"), "");
   await n.key("b");
+  assert.deepEqual(notBlocked(n.errors), []);
+});
+
+test("notes: the keyboard going away keeps the place the writing scrolled to; A from the top of a long note shows the end, where the caret is", { skip, timeout: 60000 }, async (t) => {
+  const n = await notesPage(t);
+  await n.p.evaluate(async () => {
+    await LP.S.refs.notes.doc().set({ body: "很长\n" + Array.from({ length: 120 }, (_, i) => "第 " + i + " 行").join("\n"), updated: new Date(2024, 0, 1).getTime() });
+  });
+  await n.open();
+  await n.p.click("#notes-list li:has-text('很长') button");
+  await n.p.locator("#note-read:not([hidden])").waitFor();
+  const at = () => n.p.evaluate(() => { const ta = document.getElementById("note-body"), rd = document.getElementById("note-read");
+    return { ta: ta.scrollTop, rd: rd.scrollTop, taMax: ta.scrollHeight - ta.clientHeight, caret: ta.selectionStart, len: ta.value.length, reading: !rd.hidden }; });
+  /* a tap near the top writes there; the text then scrolls down in the textarea; the keyboard goes away (issue #356) */
+  const box = await n.p.locator("#note-read").boundingBox();
+  await n.p.mouse.click(box.x + 30, box.y + 10);
+  let s = await at();
+  assert.equal(s.reading, false);
+  await n.p.evaluate(() => { document.getElementById("note-body").scrollTop = 900; });
+  await n.p.evaluate(() => document.activeElement.blur());
+  s = await at();
+  assert.equal(s.reading, true);
+  assert.ok(Math.abs(s.rd - 900) <= 2, "reading stays at " + s.rd + ", not back at the top");
+  /* back to the top, then A: the caret goes to the end and the text with it */
+  await n.p.evaluate(() => { document.getElementById("note-read").scrollTop = 0; });
+  await n.key("a");
+  s = await at();
+  assert.equal(s.caret, s.len);
+  assert.ok(s.taMax > 0 && Math.abs(s.ta - s.taMax) <= 2, "scrolled to the end: " + s.ta + " of " + s.taMax);
   assert.deepEqual(notBlocked(n.errors), []);
 });
 
