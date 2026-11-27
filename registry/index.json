@@ -68,9 +68,9 @@
         "2222220333022222",
         "2222220333022222"
       ],
-      "version": "1.0.1",
+      "version": "1.0.2",
       "released": "2026-11-26",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "第一人称迷宫射击：空间站失联了，带着铆钉枪一层层往下，找门卡、躲光弹、关掉核心。",
       "i18n": {
         "en": {
@@ -81,8 +81,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lost-deck/index.html",
-      "sha256": "662b22c703fe6f527fb561847cb127ce0d2fc73a2d934f04bb0c7e680c8d4576",
-      "bytes": 169454
+      "sha256": "701e2628e7232546f949f403e6558d94bf18fb55e4062aeb4b5c1466e9b5927c",
+      "bytes": 170341
     },
     {
       "spec": "lopda/1",
@@ -133,7 +133,7 @@
       "buttons": true,
       "version": "0.4.3",
       "released": "2026-10-10",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -174,7 +174,7 @@
       ],
       "version": "0.1.4",
       "released": "2026-10-28",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -254,7 +254,7 @@
         "...000000000....",
         "................"
       ],
-      "version": "2.0.4",
+      "version": "2.0.5",
       "released": "2026-10-21",
       "updated": "2026-11-26",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
@@ -267,8 +267,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "7ef3e4cf5d855b3529577d438e86a3735dccdef46530ba75fa7c9bb7640b7b99",
-      "bytes": 162765
+      "sha256": "4d01d0dc0742286edd42f7b9f11f40f7c0dcdf1e78a1a1b44af33a34961c3ce4",
+      "bytes": 163380
     },
     {
       "spec": "lopda/1",
@@ -297,7 +297,7 @@
       ],
       "version": "0.2.1",
       "released": "2026-10-27",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -429,7 +429,7 @@
         "................",
         "................"
       ],
-      "version": "1.6.2",
+      "version": "1.6.3",
       "released": "2026-10-17",
       "updated": "2026-11-26",
       "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
@@ -449,8 +449,8 @@
         "camera"
       ],
       "path": "apps/photo-puzzle/index.html",
-      "sha256": "62c75d803b2b6d93bf4765008e0b2119fb398fe6ac88353b99c195b2cec8bb86",
-      "bytes": 78364
+      "sha256": "654c49755e35f4cfac84ee8fdbc737add47cdcaeece66297af25b13992af34ce",
+      "bytes": 80555
     },
     {
       "spec": "lopda/1",
@@ -833,7 +833,7 @@
         "..2..........2..",
         "................"
       ],
-      "version": "3.0.2",
+      "version": "3.0.3",
       "released": "2026-10-08",
       "updated": "2026-11-26",
       "description": "短篇视觉小说。雨夜的小站，车晚点五十分钟，爸送你去上大学。十分钟读完。",
@@ -850,8 +850,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "0486faef804bee8d934f69cd62be64d5846b3f166c3d7b01bb2aa440371a3711",
-      "bytes": 106993
+      "sha256": "51d8ef7d1be573eec2a1b7b32792b2ba50d26c338d0802904db6a73541749070",
+      "bytes": 107335
     },
     {
       "spec": "lopda/1",
