@@ -2219,11 +2219,28 @@ function updateCounter() {
   }
   if (game.pressed("a")) { sfx("tap"); openSection(SECTIONS[counterCursor].id); }
 }
+/* The name is drawn twice the font's size on the signboard (about x 47-178, y 14-36 of the banner).
+   lo-game text has one size, so the name is drawn once, read back pixel by pixel, and kept as a mask. */
+var TITLE_MASK = null;
+function titleMask(g) {
+  var text = T({ zh: "玄机阁", en: "Oracle" }), w = g.measure(text), h = 14, mask = { w: w, h: h, on: [] };
+  g.clear(g.PAPER);
+  g.text(text, 0, 0, { color: g.INK });
+  for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) if (g.get(x, y) === g.INK) mask.on.push(x, y);
+  return mask;
+}
+function drawTitle(g) {
+  var m = TITLE_MASK, x0 = Math.round(CX + 4 - m.w), y0 = 13;
+  g.rect(48, 13, 130, 25, g.PAPER);
+  g.frame(47, 12, 132, 27, g.DARK);
+  for (var i = 0; i < m.on.length; i += 2) g.rect(x0 + m.on[i] * 2, y0 + m.on[i + 1] * 2, 2, 2, g.INK);
+}
 function drawCounter(g) {
   g.clear(g.PAPER);
+  if (!TITLE_MASK) TITLE_MASK = titleMask(g);
+  g.clear(g.PAPER);
   g.sprite(BANNER_ART, 0, 0);
-  /* the signboard spans about x 47-178, y 14-36 of the banner */
-  g.text(T({ zh: "玄机阁", en: "Oracle" }), CX + 4, 19, { align: "center", color: g.INK });
+  drawTitle(g);
   for (var i = 0; i < SECTIONS.length; i++) {
     var y = COUNTER_TOP + i * COUNTER_ROW, on = i === counterCursor, ink = on ? g.PAPER : g.INK;
     var summary = fitSummary(sectionSummary(SECTIONS[i].id), 128);
