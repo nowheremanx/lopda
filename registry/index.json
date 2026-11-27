@@ -644,7 +644,7 @@
       "glyph": "弦",
       "category": "productivity",
       "icon": [
-        "...1............",
+        "................",
         "................",
         "...00000000000..",
         "...00000000000..",
@@ -661,25 +661,25 @@
         "...1.1.1.1.1.1..",
         "................"
       ],
-      "version": "1.1.0",
+      "version": "1.2.0",
       "released": "2026-11-27",
       "updated": "2026-11-27",
-      "description": "标准调弦的吉他和弦字典：19 种和弦、斜线和弦，每个和弦多种按法，按常用或把位排。看框图或全指板，点一下听扫弦，也能在指板上点出和弦名。",
+      "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板和度数图，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。",
       "i18n": {
         "zh": {
           "name": "和弦大全",
-          "description": "标准调弦的吉他和弦字典：19 种和弦、斜线和弦，每个和弦多种按法，按常用或把位排。看框图或全指板，点一下听扫弦，也能在指板上点出和弦名。"
+          "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板和度数图，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。"
         },
         "en": {
           "name": "Chords",
-          "description": "Guitar chords: many shapes each, box or neck view, strum, and name your frets."
+          "description": "Guitar chords: shapes, degree maps, progressions and why they work."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/chord-book/index.html",
-      "sha256": "ff7a5782b94262453cda49b30d179e82bac4aa5922ea784613d132d68b11b4c2",
-      "bytes": 56674
+      "sha256": "9243dd0346f19d69a8d604641320c26eabdd3e1f98eb6a3bf7890a32db05f949",
+      "bytes": 86228
     },
     {
       "spec": "lopda/1",
