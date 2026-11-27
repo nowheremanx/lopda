@@ -399,28 +399,40 @@ test("almanac counter summary keeps 忌/Avoid visible with one term of each kind
   for (const lang of ["zh", "en"]) {
     const { app } = bootApp(lang, false), summary = app.ctx.get("sectionSummary")("almanac");
     assert.ok(summary.includes(lang === "zh" ? "忌" : "Avoid"));
-    assert.ok(summary.includes("祭祀"));
-    assert.ok(summary.includes("嫁娶"));
-    assert.ok(app.ctx.get("game").g.measure(summary) <= 134, `${lang}: ${summary} is too wide`);
+    /* today's terms change every day; the summary always opens with 宜 / Do and keeps 忌 / Avoid */
+    assert.ok(summary.startsWith(lang === "zh" ? "宜 " : "Do "));
+    assert.ok(app.ctx.get("game").g.measure(summary) <= 128, `${lang}: ${summary} is too wide`);
   }
 });
 
-test("the counter's 32px rows leave room for all five sections", () => {
+test("the counter's five 32px rows sit under the banner and above the key line", () => {
   const { app } = bootApp("zh", false), sections = app.ctx.get("SECTIONS");
   const g = app.ctx.get("game").g, real = g.text, placed = [];
-  sections.push({ id: "dummy-4", name: "测试四" }, { id: "dummy-5", name: "测试五" });
+  assert.equal(sections.length, 5);
   g.text = function (text, x, y, options) { placed.push({ text: String(text), y }); return real.call(g, text, x, y, options); };
   try {
     app.ctx.get("drawCounter")(g);
-    const last = placed.find((item) => item.text === "测试五");
+    const last = placed.find((item) => item.text === sections[4].name);
     assert.ok(last);
-    assert.equal(last.y, 43 + 4 * 34 + 7);
-    assert.ok(last.y + 12 < 210, "fifth row and divider fit above the footer");
+    assert.equal(last.y, 50 + 4 * 32 + 9);
+    assert.ok(last.y + 12 < 214, "fifth row fits above the key line");
   } finally {
     g.text = real;
-    sections.pop();
-    sections.pop();
   }
+});
+
+test("the art: a 216 x 48 banner and 16 x 16 icons in the four tones; the app icon is the manifest's", () => {
+  const ctx2 = vm.createContext({});
+  vm.runInContext(read("registry/apps/luck-compass/src/art.js"), ctx2);
+  const ART = vm.runInContext("ART", ctx2);
+  assert.equal(ART.BANNER.length, 48);
+  for (const row of ART.BANNER) assert.match(row, /^[0-3]{216}$/);
+  for (const id of ["almanac", "fortune", "compass", "hexagram", "bazi", "app"]) {
+    assert.equal(ART.ICONS[id].length, 16, id);
+    for (const row of ART.ICONS[id]) assert.match(row, /^[0-3.]{16}$/, id);
+  }
+  const manifest = JSON.parse(read("registry/apps/luck-compass/manifest.json"));
+  assert.deepEqual(manifest.icon, [...ART.ICONS.app]);
 });
 
 test("YI defines the 64 King Wen hexagrams as distinct lower-first line patterns", () => {
