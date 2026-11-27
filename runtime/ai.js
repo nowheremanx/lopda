@@ -12,7 +12,8 @@
 "use strict";
 var URL_CHAT="https://openrouter.ai/api/v1/chat/completions",
   MODEL="openrouter/auto",  // OpenRouter picks a model when the user has not named one
-  IDLE=60000;               // give up when nothing arrived for this long (a slow model thinks before it writes)
+  IDLE=60000,               // give up when nothing arrived for this long (a slow model thinks before it writes)
+  LIST_MS=20000;            // a provider's model list that has not arrived by then is given up
 
 /* The providers: five OpenAI-compatible chat completions endpoints, in the order the screens list them
    (decisions.md section 61). The address is the only place the key is sent; providers are never tried in turn.
@@ -165,26 +166,33 @@ function host(env){
   }
   /* models({provider, key}) -> Promise of the provider's model list, parsed from its own address. The key rides along
      only to the provider it belongs to; OpenRouter's list is public, so no key is sent there at all. */
+  /* A list that has not arrived after LIST_MS is given up as "listtimeout" (issue #416): the picker then falls back to the
+     list it keeps, and says why, instead of waiting on a request that may never answer. o.wait overrides it (tests). */
   function models(o){
-    var prov=provider(o && o.provider), key=(o && o.key) || "";
-    return Promise.resolve().then(function(){
+    var prov=provider(o && o.provider), key=(o && o.key) || "", wait=(o && o.wait) || LIST_MS;
+    var ctl=typeof AbortController==="function" ? new AbortController() : null, timer=0, gaveUp=false;
+    var work=Promise.resolve().then(function(){
       if(!prov) throw fail("http","unknown provider");
       if(prov.id!=="openrouter" && !key) throw fail("nokey");
       var headers={};
       if(prov.id!=="openrouter") headers.Authorization="Bearer "+key;
-      return env.fetch(prov.models,{method:"GET", credentials:"omit", referrerPolicy:"no-referrer", cache:"no-store",
+      return env.fetch(prov.models,{method:"GET", signal:ctl ? ctl.signal : undefined, credentials:"omit", referrerPolicy:"no-referrer", cache:"no-store",
         headers:headers});
     }).then(function(res){
       if(!res.ok) throw fail(httpCode(res.status), "HTTP "+res.status);
       return res.json();
     },function(e){
       if(e && typeof e.code==="string") throw e;
-      throw fail("offline", e && e.message);
+      throw fail(gaveUp ? "listtimeout" : "offline", e && e.message);
     });
+    var limit=new Promise(function(resolve,reject){
+      timer=later(function(){ gaveUp=true; if(ctl) try{ ctl.abort(); }catch(e){} reject(fail("listtimeout")); },wait);
+    });
+    return Promise.race([work,limit]).then(function(v){ unlater(timer); return v; },function(e){ unlater(timer); throw e; });
   }
   return {ask:ask, models:models};
 }
 
-window.LopdaAI={host:host, lines:lines, httpCode:httpCode, bodyCode:bodyCode, URL:URL_CHAT, MODEL:MODEL, IDLE:IDLE,
+window.LopdaAI={host:host, lines:lines, httpCode:httpCode, bodyCode:bodyCode, URL:URL_CHAT, MODEL:MODEL, IDLE:IDLE, LIST_MS:LIST_MS,
   PROVIDERS:PROVIDERS, provider:provider};
 })();

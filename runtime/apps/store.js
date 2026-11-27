@@ -160,9 +160,10 @@ function renderUpdates(){
   text.textContent = updating
     ? tr("store.updating",{i:Math.min(updating.done+1,updating.total), n:updating.total})
     : tr("store.updates",{n:todo.length});
-  var btn=document.createElement("button"); btn.type="button"; btn.className="btn";
-  btn.textContent=tr("store.updateall"); btn.disabled=!!updating;
-  if(!updating) btn.onclick=updateAll;
+  var btn=document.createElement("button"); btn.type="button";
+  /* while the updates run the button stops them: the one downloading is given up, the rest are left (issue #442) */
+  if(updating){ btn.className="btn ghost"; btn.textContent=tr("store.updatestop"); btn.disabled=!!updating.stop; btn.onclick=stopUpdates; }
+  else { btn.className="btn"; btn.textContent=tr("store.updateall"); btn.onclick=updateAll; }
   box.appendChild(text); box.appendChild(btn);
 }
 function storeItem(r){
@@ -237,31 +238,39 @@ function setQuery(q,keepScroll){
   renderStore(!!keepScroll);
   if(!keepScroll) $("v-store").scrollTop=0;
 }
-/* one button for every update: one at a time, the catalogue order, a failed one does not stop the rest */
+/* one button for every update: one at a time, the catalogue order, a failed one does not stop the rest. Every download
+   has a time limit (fetchApp), and 停止 gives up the one under way and leaves the rest, so the store can never be left
+   with every button grey (issue #442). An app removed while its update downloads is skipped, not counted as failed. */
 function updateAll(){
   if(updating || !S.registry) return;
   var todo=outdatedApps();
   if(!todo.length) return;
-  updating={done:0, total:todo.length};
+  var run=updating={done:0, total:todo.length, stop:false, ctl:null};
   renderStore(true);
-  var i=0, failed=0;
+  var i=0, ok=0, failed=0;
   var next=function(){
-    if(i>=todo.length){
-      var n=todo.length-failed;
+    if(i>=todo.length || run.stop){
       updating=null;
-      toast(failed ? tr("store.updatedsome",{n:n,m:failed}) : tr("store.updatedall",{n:n}));
-      sfx(failed ? "err" : "ok");
+      toast(run.stop ? tr("store.updatestopped",{n:ok}) : failed ? tr("store.updatedsome",{n:ok,m:failed}) : tr("store.updatedall",{n:ok}));
+      sfx(failed || run.stop ? "err" : "ok");
       renderStore(true); if(!$("v-home").hidden) renderHome();
       return;
     }
     var r=todo[i++];
-    updating.done=i-1; renderStore(true);
-    fetchApp(r).then(function(){},function(){ failed++; }).then(function(){
-      updating.done=i; renderStore(true);
+    run.done=i-1; renderStore(true);
+    run.ctl={abort:null};
+    fetchApp(r,{ctl:run.ctl}).then(function(){ ok++; },function(e){ if(!(e && (e.code==="removed" || e.code==="stopped"))) failed++; }).then(function(){
+      run.done=i; run.ctl=null; renderStore(true);
       next();
     });
   };
   next();
+}
+function stopUpdates(){
+  if(!updating || updating.stop) return;
+  updating.stop=true; sfx("tap");
+  if(updating.ctl && updating.ctl.abort) updating.ctl.abort();
+  renderStore(true);
 }
 /* install exactly the file the registry describes: the hash must match. Like Android, an app that asks for
    capabilities is confirmed before it is downloaded, and the capabilities it can be granted are remembered then;
@@ -291,21 +300,47 @@ function doInstall(r,btn,added,then){
     if(!$("v-home").hidden) renderHome();
     if(then) then(installedOf(r.id));
   }).catch(function(e){
+    if(e && e.code==="removed"){ toast(tr("store.removedmid",{name:appName(r)})); sfx("err"); renderStore(true); return; }
     toast(tr("store.failed",{msg:e.message})); sfx("err");
     if(btn){ btn.disabled=false; btn.textContent=tr("store.retry"); }
   });
 }
-/* download, verify and store one registry entry; resolves with the version it replaced (or null) */
+/* Each removal of an app counts here, so a download that started before a removal knows not to put the app back
+   (issue #441): the player's 卸载 wins over an update still on its way. */
+var removals={};
+/* A download that takes longer than this is given up (issue #442): an app is at most 512 KB (SPEC.md), and a request
+   that never answers must not hold the store. */
+var FETCH_MS=60000;
+function errCode(code,msg){ var e=new Error(msg); e.code=code; return e; }
+/* the app's file, given up after FETCH_MS or when extra.ctl.abort() is called (the store's 停止) */
+function fetchFile(url,ctl){
+  var ac=typeof AbortController==="function" ? new AbortController() : null, why="", timer=0;
+  return new Promise(function(resolve,reject){
+    function quit(code){
+      if(why) return; why=code;
+      if(ac) try{ ac.abort(); }catch(e){}
+      reject(errCode(code,tr(code==="stopped" ? "store.stopped" : "store.timeout")));
+    }
+    timer=setTimeout(function(){ quit("timeout"); },FETCH_MS);
+    if(ctl) ctl.abort=function(){ quit("stopped"); };
+    fetch(url,{cache:"no-cache", signal:ac ? ac.signal : undefined}).then(function(res){
+      if(!res.ok) throw new Error("HTTP "+res.status);
+      return res.arrayBuffer();
+    }).then(function(buf){ if(!why){ why="done"; resolve(buf); } },function(e){ if(!why){ why="failed"; reject(e); } })
+      .then(function(){ clearTimeout(timer); });
+  });
+}
+/* download, verify and store one registry entry; resolves with the version it replaced (or null).
+   extra: {preinstalled} for the quiet first-start installs, {ctl} for a download the store can stop. */
 function fetchApp(r,extra){
-  return fetch(new URL(r.path,REGISTRY).href,{cache:"no-cache"}).then(function(res){
-    if(!res.ok) throw new Error("HTTP "+res.status);
-    return res.arrayBuffer();
-  }).then(function(buf){
+  var gone=removals[r.id]||0;
+  return fetchFile(new URL(r.path,REGISTRY).href,extra && extra.ctl).then(function(buf){
     return sha256hex(buf).then(function(h){
       if(h!==r.sha256) throw new Error(tr("store.badhash"));
       return new TextDecoder().decode(buf);
     });
   }).then(function(html){
+    if((removals[r.id]||0)!==gone) throw errCode("removed",tr("store.removedmid",{name:appName(r)}));
     var prev=installedOf(r.id);
     var app={id:r.id, name:r.name, glyph:r.glyph, icon: validIcon(r.icon) ? r.icon : undefined, i18n: validI18n(r.i18n), version:r.version, author:r.author, license:r.license,
       spec:r.spec||"lopda/0", buttons: r.spec==="lopda/1" && r.buttons===true, permissions: r.spec==="lopda/1" ? validPerms(r.permissions) : [],
@@ -375,6 +410,7 @@ function deleteApp(id){
   /* snapshot the name/version before the app leaves S.apps: leave() flushes the last saves after this */
   if(S.kv[id]!==undefined) kvMeta[id]=AS.record(id, S.kv[id], kvMeta[id], installedOf(id), Date.now());
   dropLocal("apps",id);
+  removals[id]=(removals[id]||0)+1;
   revokeSense(id);
   delete kvWarned[id];   /* a reinstall should warn about a damaged save again */
   if(S.db){
@@ -609,7 +645,8 @@ function saveInfo(appId){
 /* Settings -> App saves: every save on the device, installed or not. A removed app's save is the
    point of this list; an installed app's save is here so it can be cleared without removing the app. */
 function appSaveRows(){
-  if(!S.db) return Promise.resolve([]);
+  /* no storage is not "no saves": Settings says the storage cannot be opened (issue #280) */
+  if(!S.db) return Promise.reject({code:"nodb"});
   return S.refs.kv.get().then(function(q){
     var out=q.docs.map(function(d){
       var raw=own(d.data())||{};

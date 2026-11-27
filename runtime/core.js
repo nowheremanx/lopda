@@ -424,13 +424,27 @@ function latestVersion(){
   return fetch("sw.js?fresh="+Date.now(),{cache:"no-store"}).then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.text(); })
     .then(function(t){ var m=/VERSION\s*=\s*"lopda-v([^"]+)"/.exec(t); if(!m) throw new Error(tr("upd.noversion")); return m[1]; });
 }
+/* Resolves "ready" once the new worker is active, "slow" when it is still installing after 15 s (it carries on, and
+   boot.js says so when it takes over); rejects when it failed (redundant) or never came. Only "ready" may say the new
+   version is in: a failed or unfinished install must not offer 重启升级 (issue #324). */
 function waitForNewWorker(reg){
-  return new Promise(function(resolve){
-    var done=function(){ resolve(); };
-    var watch=function(w){ if(!w) return false; if(w.state==="activated") { done(); return true; } w.addEventListener("statechange",function(){ if(w.state==="activated"||w.state==="redundant") done(); }); return true; };
-    if(watch(reg.installing)||watch(reg.waiting)) return;
+  return new Promise(function(resolve,reject){
+    var over=false, seen=false;
+    var end=function(ok,why){ if(over) return; over=true; if(ok) resolve(why); else reject(new Error(tr(why))); };
+    var watch=function(w){
+      if(!w) return false;
+      seen=true;
+      if(w.state==="activated"){ end(true,"ready"); return true; }
+      if(w.state==="redundant"){ end(false,"upd.notinstalled"); return true; }
+      w.addEventListener("statechange",function(){
+        if(w.state==="activated") end(true,"ready");
+        else if(w.state==="redundant") end(false,"upd.notinstalled");
+      });
+      return true;
+    };
+    if(watch(reg.installing)||watch(reg.waiting)) { setTimeout(function(){ end(true,"slow"); },15000); return; }
     reg.addEventListener("updatefound",function(){ watch(reg.installing); });
-    setTimeout(done,15000);
+    setTimeout(function(){ if(seen) end(true,"slow"); else end(false,"upd.nonew"); },15000);
   });
 }
 $("set-update").onclick=function(){
@@ -443,7 +457,11 @@ $("set-update").onclick=function(){
     return navigator.serviceWorker.getRegistration().then(function(reg){
       if(!reg) throw new Error(tr("upd.nocopy"));
       return reg.update().then(function(){ return waitForNewWorker(reg); });
-    }).then(function(){ UPD.ready=true; toast(tr("upd.ready",{v:v})); sfx("ok"); });
+    }).then(function(how){
+      /* boot.js's controllerchange may have marked it ready meanwhile; a slow install leaves that to it */
+      if(how==="slow" && !UPD.ready){ toast(tr("upd.slow",{v:v})); return; }
+      UPD.ready=true; toast(tr("upd.ready",{v:v})); sfx("ok");
+    });
   }).catch(function(e){ toast(tr("upd.failed",{msg:(e&&e.message)||tr("upd.offline")})); sfx("err"); })
     .then(function(){ UPD.busy=false; renderUpdate(); });
 };
@@ -574,19 +592,22 @@ function renderHome(){
 
 /* two-tap confirm: the page builds its own confirmation instead of confirm().
    `confirm` is the second button's words when the first label alone would not say what will happen
-   (removing an app keeps its saves, so the question says so). */
-function resetConfirm(wrapId,btnId,label,onYes,confirm){
+   (removing an app keeps its saves, so the question says so).
+   `onArm(on)`, when given, is told when the question opens (true) and when 取消 closes it (false), so a page can put the
+   longer question next to it where a button has no room (settings: which save, how much, issue #281). */
+function resetConfirm(wrapId,btnId,label,onYes,confirm,onArm){
   var w=$(wrapId); w.textContent="";
   var b=document.createElement("button"); b.className="btn ghost"; b.type="button"; b.id=btnId; b.textContent=label||tr("common.delete");
-  w.appendChild(b); b.onclick=function(){ armConfirm(wrapId,btnId,label,onYes,confirm); };
+  w.appendChild(b); b.onclick=function(){ armConfirm(wrapId,btnId,label,onYes,confirm,onArm); };
 }
-function armConfirm(wrapId,btnId,label,onYes,confirm){
+function armConfirm(wrapId,btnId,label,onYes,confirm,onArm){
   var w=$(wrapId); w.textContent="";
   var yes=document.createElement("button"); yes.className="btn"; yes.type="button"; yes.textContent=confirm||tr("common.confirm",{what:label||tr("common.delete")});
   var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.textContent=tr("common.cancel");
   w.appendChild(yes); w.appendChild(no);
-  no.onclick=function(){ resetConfirm(wrapId,btnId,label,onYes,confirm); };
+  no.onclick=function(){ if(onArm) onArm(false); resetConfirm(wrapId,btnId,label,onYes,confirm,onArm); };
   yes.onclick=onYes;
+  if(onArm) onArm(true);
 }
 
 /* ---------- chin game pad: D-pad, A, B, START, SELECT ----------
