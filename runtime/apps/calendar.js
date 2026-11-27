@@ -271,12 +271,21 @@ function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.classNam
 function btn(cls,text,fn){ var b=el("button",cls,text); b.type="button"; b.onclick=fn; return b; }
 function openSheet(name){ C.sheet=name; if(name==="list") C.pick=0; renderSheet(); }
 function closeSheet(){ C.sheet=""; C.form=null; render(); }
+/* Every press rebuilds the sheet, so the part that scrolls keeps its place across the rebuild, and the list
+   follows the highlighted row (a fresh <ul> starts at the top, and A must never open a row you cannot see). */
 function renderSheet(){
-  var sh=$("cal-sheet"); sh.hidden=!C.sheet; sh.textContent="";
+  var sh=$("cal-sheet"), was=sh.getAttribute("data-sheet"), old=sh.querySelector(".cal-list, .cal-scroll");
+  var top=(old && was===C.sheet) ? old.scrollTop : 0;
+  sh.hidden=!C.sheet; sh.textContent="";
+  sh.setAttribute("data-sheet",C.sheet||"");
   if(C.sheet==="day") daySheet(sh);
   else if(C.sheet==="list") listSheet(sh);
   else if(C.sheet==="add") addSheet(sh);
   else if(C.sheet==="jump") jumpSheet(sh);
+  var box=sh.querySelector(".cal-list, .cal-scroll");
+  if(box && top) box.scrollTop=top;
+  var on=C.sheet==="list" && box && box.querySelector("li.on");
+  if(on && on.scrollIntoView) on.scrollIntoView({block:"nearest"});
 }
 /* English day sheet: the day's US holidays (actual or observed), the federal day off, then the lunar date */
 function usDayLines(body,lu){
@@ -373,16 +382,18 @@ function openAdd(){
 function addSheet(sh){
   var F=C.form;
   sh.appendChild(el("p","sheet-title",tr("cal.add")));
+  /* the fields scroll when the panel is short (a small window, the phone's keyboard up); the soft keys stay */
+  var body=el("div","cal-scroll"); sh.appendChild(body);
   var inp=el("input","cal-name"); inp.id="cal-name"; inp.type="text"; inp.maxLength=24; inp.value=F.name; inp.placeholder=tr("cal.name");
   inp.oninput=function(){ F.name=inp.value; };
   inp.onkeydown=function(e){ if(e.key==="Enter"){ e.preventDefault(); saveDate(); } };
-  sh.appendChild(inp);
+  body.appendChild(inp);
   var kind=el("div","row cal-kind"); kind.setAttribute("role","radiogroup");
   [[false,"cal.solar"],[true,"cal.lunarrep"]].forEach(function(o){
     var b=btn(F.lunar===o[0]?"btn":"btn ghost",tr(o[1]),function(){ F.lunar=o[0]; renderSheet(); });
     b.setAttribute("role","radio"); b.setAttribute("aria-checked",F.lunar===o[0]?"true":"false"); kind.appendChild(b);
   });
-  sh.appendChild(kind);
+  body.appendChild(kind);
   function stepper(label,get,set,lo,hi,show){
     var r=el("div","cal-step");
     r.appendChild(el("span","",label));
@@ -392,14 +403,14 @@ function addSheet(sh){
     return r;
   }
   if(!F.lunar){
-    sh.appendChild(stepper(tr("cal.month"),function(){ return F.sm; },function(v){ F.sm=v; F.sd=Math.min(F.sd,L.daysInMonth(2024,v)); },1,12,function(v){ return tr("cal.mname",{m:v, mon:list("cal.months")[v-1]}); }));
-    sh.appendChild(stepper(tr("cal.day"),function(){ return F.sd; },function(v){ F.sd=v; },1,L.daysInMonth(2024,F.sm),String));
+    body.appendChild(stepper(tr("cal.month"),function(){ return F.sm; },function(v){ F.sm=v; F.sd=Math.min(F.sd,L.daysInMonth(2024,v)); },1,12,function(v){ return tr("cal.mname",{m:v, mon:list("cal.months")[v-1]}); }));
+    body.appendChild(stepper(tr("cal.day"),function(){ return F.sd; },function(v){ F.sd=v; },1,L.daysInMonth(2024,F.sm),String));
   } else {
-    sh.appendChild(stepper(tr("cal.month"),function(){ return F.lm; },function(v){ F.lm=v; },1,12,function(v){ return tr(F.leap?"cal.lmnameleap":"cal.lmname",{month:list("cal.lmonth")[v-1]}); }));
-    sh.appendChild(stepper(tr("cal.day"),function(){ return F.ld; },function(v){ F.ld=v; },1,30,function(v){ return list("cal.lday")[v-1]; }));
+    body.appendChild(stepper(tr("cal.month"),function(){ return F.lm; },function(v){ F.lm=v; },1,12,function(v){ return tr(F.leap?"cal.lmnameleap":"cal.lmname",{month:list("cal.lmonth")[v-1]}); }));
+    body.appendChild(stepper(tr("cal.day"),function(){ return F.ld; },function(v){ F.ld=v; },1,30,function(v){ return list("cal.lday")[v-1]; }));
     var lp=btn(F.leap?"btn":"btn ghost",tr("cal.leap"),function(){ F.leap=!F.leap; renderSheet(); });
     lp.setAttribute("aria-pressed",F.leap?"true":"false");
-    var lr=el("div","cal-step"); lr.appendChild(lp); lr.appendChild(el("small","hint",tr("cal.leapnote"))); sh.appendChild(lr);
+    var lr=el("div","cal-step"); lr.appendChild(lp); lr.appendChild(el("small","hint",tr("cal.leapnote"))); body.appendChild(lr);
   }
   var keys=el("div");
   LP.softkeys(keys,{
@@ -464,6 +475,8 @@ function jumpGo(){
 function jumpSheet(sh){
   var J=C.jump, sep=list("cal.jump.sep");
   sh.appendChild(el("p","sheet-title",tr("cal.jump.title")));
+  /* the same: on a short window the digits and the pad scroll, and the four soft keys never leave the panel */
+  var body=el("div","cal-scroll"); sh.appendChild(body);
   var kind=el("div","row cal-kind"); kind.setAttribute("role","radiogroup");
   [[false,"cal.solar"],[true,"cal.lunarrep"]].forEach(function(o){
     var b=btn(J.lunar===o[0]?"btn":"btn ghost",tr(o[1]),function(){ if(J.lunar!==o[0]) jumpMode(); });
@@ -474,7 +487,7 @@ function jumpSheet(sh){
     var lp=btn(J.leap?"btn cal-leap":"btn ghost cal-leap",tr("cal.leap"),function(){ J.leap=!J.leap; renderSheet(); });
     lp.setAttribute("aria-pressed",J.leap?"true":"false"); kind.appendChild(lp);
   }
-  sh.appendChild(kind);
+  body.appendChild(kind);
   var row=el("div","cal-digits");
   J.d.forEach(function(n,i){
     var c=btn(i===J.cur?"on":"",String(n),function(){ J.cur=i; renderSheet(); });
@@ -482,18 +495,18 @@ function jumpSheet(sh){
     row.appendChild(c);
     if(i===3||i===5||i===7) row.appendChild(el("span","",sep[i===3?0:i===5?1:2]));
   });
-  sh.appendChild(row);
+  body.appendChild(row);
   /* what A will jump to, or why it can't */
   var t=jumpTarget(), out;
   if(t.err) out=tr(t.err);
   else { var g=L.fromDayNumber(t.n), lu=L.fromSolar(g.y,g.m,g.d); out=dateText(g.y,g.m,g.d)+(lu?" · "+lunarText(lu):""); }
-  var pv=el("p","cal-preview"+(t.err?" err":""),out); pv.setAttribute("aria-live","polite"); sh.appendChild(pv);
+  var pv=el("p","cal-preview"+(t.err?" err":""),out); pv.setAttribute("aria-live","polite"); body.appendChild(pv);
   var pad=el("div","cal-numpad");
   [1,2,3,4,5,6,7,8,9].forEach(function(n){ pad.appendChild(btn("btn ghost",String(n),function(){ jumpType(n); })); });
   pad.appendChild(btn("btn ghost","◀",function(){ J.cur=Math.max(0,J.cur-1); renderSheet(); }));
   pad.appendChild(btn("btn ghost","0",function(){ jumpType(0); }));
   pad.appendChild(btn("btn ghost","▶",function(){ J.cur=Math.min(7,J.cur+1); renderSheet(); }));
-  sh.appendChild(pad);
+  body.appendChild(pad);
   var keys=el("div");
   LP.softkeys(keys,{
     select:softkey("select","sk.mode"),start:softkey("start","sk.jump"),
