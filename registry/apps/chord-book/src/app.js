@@ -5,23 +5,25 @@
   "use strict";
   var EN = PAD.lang === "en";
   var T = EN ? {
-    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees",
+    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
     listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
-    role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}"
+    role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
+    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k}. "
   } : {
-    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数",
+    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
     listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
-    role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}"
+    role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
+    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}选的。"
   };
   function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
@@ -31,7 +33,7 @@
   /* ---------------- state and save (section 5) ---------------- */
   var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
-  var saveTimer = 0;
+  var saveTimer = 0, VIEWS = ["box", "neck", "map", "scale"];
   function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
   function adopt(s) {
     if (!s || s.v !== 1 || !s.cur) return;
@@ -40,7 +42,7 @@
       (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
-    if (s.view === "neck" || s.view === "box" || s.view === "map") set.view = s.view;
+    if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
     if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
@@ -62,6 +64,25 @@
     remember(); store(); show();
   }
 
+  /* ---------------- the improv view's scale (version 1.4) ---------------- */
+  /* the scale shown for the chord in view: back to the chord's default whenever the chord changes (owner, 1.4.0), and
+     picked by the key when the chord was opened from a progression (ctx: {key, minor, name}) */
+  var md = { name: "", i: 0, ctx: null, sc: null };
+  function modes() {
+    var n = Chords.name(chord());
+    if (md.name !== n) md = { name: n, i: -1, ctx: null, sc: null };
+    if (!md.sc) md.sc = Scales.forChord(chord(), md.ctx);
+    if (md.i < 0) md.i = md.sc.def;
+    return md;
+  }
+  function stepMode(d) {
+    var m = modes(), n = m.sc.list.length;
+    if (n < 2) { sfx("err"); return false; }
+    m.i = (m.i + d + n) % n;
+    sfx("move"); show();
+    return true;
+  }
+
   /* ---------------- the main screen ---------------- */
   var cv = $("pic"), wrap = $("pwrap");
   function current() {
@@ -74,9 +95,11 @@
     var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    $("view").textContent = t(set.view === "map" ? "degrees" : set.view);
+    $("view").textContent = t(set.view === "map" ? "degrees" : set.view === "scale" ? "improv" : set.view);
+    if (set.view === "scale") { showScale(); paint(); return; }
     /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
        fret position, which the picture shows anyway; a second row would shrink the picture */
+    $("line").classList.remove("deg");
     var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
     line.classList.remove("tight");
     line.textContent = v ? head + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
@@ -95,18 +118,68 @@
     });
     paint();
   }
+  /* the improv view's words: the scale and how far through the list, its notes by kind, why it works and the legend */
+  function showScale() {
+    var m = modes(), o = m.sc.list[m.i], c = chord(), line = $("line"), row = $("tones");
+    $("qname").textContent = Chords.NAMES[c.root] + " " + (EN ? o.en : o.zh) + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
+    line.classList.remove("tight");
+    line.classList.add("deg");
+    line.innerHTML = "";
+    o.notes.forEach(function (n, i) {
+      if (i) line.appendChild(document.createTextNode(" "));
+      line.appendChild(el(n.kind === "a" ? "s" : n.kind === "t" ? "span" : "b", "", n.lab));
+    });
+    if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
+    row.innerHTML = "";
+    var why = el("div", "why2");
+    why.appendChild(el("p", "", (m.sc.inKey && m.i === m.sc.def ? t("inKey", { k: m.ctx.label }) : "") + (EN ? o.why.en : o.why.zh)));
+    why.appendChild(el("p", "legend", t("legend")));
+    row.appendChild(why);
+  }
   function paint() {
     var cur = current(), c = chord();
     if (!cur.v) return;
     var w = wrap.clientWidth, h = wrap.clientHeight;
-    var b = set.view === "map" ? Draw.map(cur.v, c) : set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
+    var b = set.view === "scale" ? Draw.scale(modes().sc.list[md.i].notes) : set.view === "map" ? Draw.map(cur.v, c) :
+      set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
     Draw.paint(cv, b, Math.max(1, w), Math.max(1, h));
+    prevBuf = lastBuf; lastBuf = b;
   }
+  /* the swipe's animation (1.4.0): the picture that was there slides out the way the finger went and the new one slides
+     in behind it, in whole css pixels so every pixel stays one of the four tones. The new picture is already painted, so
+     the words and a tap see the new voicing at once. A ghost canvas carries the old picture (put with putImageData,
+     never drawImage, sdk/UI.md). No animation when the system asks for reduced motion. */
+  var lastBuf = null, prevBuf = null, ghost = null, anim = 0;
+  function slide(d) {
+    cancelAnimationFrame(anim);
+    if (ghost) { ghost.remove(); ghost = null; }
+    cv.style.transform = "";
+    var W = wrap.clientWidth;
+    if (!prevBuf || !W || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
+    ghost = el("canvas", "ghost");
+    Draw.paint(ghost, prevBuf, Math.max(1, wrap.clientWidth), Math.max(1, wrap.clientHeight));
+    ghost.style.left = cv.offsetLeft + "px"; ghost.style.top = cv.offsetTop + "px";
+    ghost.style.imageRendering = "pixelated";
+    wrap.appendChild(ghost);
+    var t0 = 0, dir = d > 0 ? -1 : 1, dur = 180;
+    function frame(now) {
+      if (!t0) t0 = now;
+      var p = Math.min(1, (now - t0) / dur), e = 1 - (1 - p) * (1 - p);
+      ghost.style.transform = "translateX(" + Math.round(dir * e * W) + "px)";
+      cv.style.transform = "translateX(" + Math.round(-dir * (1 - e) * W) + "px)";
+      if (p < 1) anim = requestAnimationFrame(frame);
+      else { ghost.remove(); ghost = null; cv.style.transform = ""; }
+    }
+    cv.style.transform = "translateX(" + Math.round(-dir * W) + "px)";
+    anim = requestAnimationFrame(frame);
+  }
+  /* left and right: the next voicing, or in the improv view the next scale; the picture slides the way the finger went */
   function step(d) {
+    if (set.view === "scale") { if (stepMode(d)) slide(d); return; }
     var n = list().length;
     if (!n) return;
     set.cur.i = (set.cur.i + d + n) % n;
-    sfx("move"); store(); show();
+    sfx("move"); store(); show(); slide(d);
   }
   function stepQual(d) {
     var qi = Chords.QUALS.indexOf(Chords.qual(set.cur.q)), n = Chords.QUALS.length;
@@ -132,7 +205,7 @@
     var v = current().v, r = cv.getBoundingClientRect();
     if (!v || !r.width) return;
     var bx = (e.clientX - r.left) * cv.width / r.width, by = (e.clientY - r.top) * cv.height / r.height;
-    var hit = set.view === "neck" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
+    var hit = set.view === "neck" || set.view === "scale" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
     if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true)) sfx(Guitar.level() ? "tap" : "err");
   }
   (function () {
@@ -177,9 +250,8 @@
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("tick"); store(); show();
   }
-  /* the header's view button cycles the three pictures: box, neck, degree map */
-  var VIEWS = ["box", "neck", "map"];
-  function nextView() { set.view = VIEWS[(VIEWS.indexOf(set.view) + 1) % 3]; sfx("tick"); store(); show(); }
+  /* the header's view button cycles the four pictures: box, neck, degree map, improv */
+  function nextView() { set.view = VIEWS[(VIEWS.indexOf(set.view) + 1) % VIEWS.length]; sfx("tick"); store(); show(); }
   $("view").addEventListener("click", nextView);
   $("cname").parentNode.addEventListener("click", function () { openPicker(); });
 
@@ -326,6 +398,7 @@
     stopSeq();
     progs.classList.remove("open"); gl = null;
     go(c, 0);
+    md = { name: Chords.name(c), i: -1, ctx: { key: r.key, minor: r.p.key === "min", label: t(r.p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName }) }, sc: null };
     var l = list(), id = v ? v.frets.join(",") : "";
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("ok"); store(); show();

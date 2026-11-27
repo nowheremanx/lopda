@@ -116,7 +116,7 @@ test("chord-book: the picture keeps one size through every voicing, the map incl
       const seen = new Set();
       for (let i = 0; i < n; i++) {
         for (const map of [false, true]) {
-          /* SELECT cycles box -> neck -> map -> box */
+          /* SELECT cycles box -> neck -> map -> improv -> box */
           if (map) await p.evaluate(() => { window.__press("select"); window.__press("select"); });
           const r = await p.evaluate(() => ({
             pic: document.getElementById("pic").style.width,
@@ -125,7 +125,7 @@ test("chord-book: the picture keeps one size through every voicing, the map incl
             cells: [...document.querySelectorAll("#tones .tone")].map((c) => Math.round(c.getBoundingClientRect().height)).join(",")
           }));
           seen.add(`${r.pic} ${r.line} ${r.tones} ${r.cells.split(",").every((h) => h === "44")}`);
-          if (map) await p.evaluate(() => window.__press("select"));
+          if (map) await p.evaluate(() => { window.__press("select"); window.__press("select"); });
         }
         await p.evaluate(() => window.__press("right"));
       }
@@ -252,6 +252,11 @@ test("chord-book: English words, the strum plays without an error, the degree ma
   assert.equal(await text(p, "#view"), "Neck");
   await tap(p, "#view");
   assert.equal(await text(p, "#view"), "Degrees");
+  await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "Improv");
+  assert.equal(await text(p, "#qname"), "C Ionian (major) · 1 / 4");
+  assert.match(await text(p, "#tones"), /11 is a half step over 3: pass through/);
+  assert.match(await text(p, "#tones"), /■ root ● chord ○ tension × avoid/);
   await tap(p, "#chord");
   assert.equal(await text(p, "#tofind"), "Find by frets");
   assert.equal(await text(p, "#sortH"), "Shape order");
@@ -285,7 +290,7 @@ test("chord-book: each sounding string is a button with its note and degree that
   assert.deepEqual(errors, []);
 });
 
-test("chord-book: the view button cycles box, neck and degree map; in each a tap plays the note under the finger", { skip, timeout: 60000 }, async (t) => {
+test("chord-book: the view button cycles box, neck, degree map and improv; in each a tap plays the note under the finger", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t);
   await p.evaluate(() => {
     window.__notes = [];
@@ -321,6 +326,11 @@ test("chord-book: the view button cycles box, neck and degree map; in each a tap
   assert.match(await text(p, "#line"), /· 2 \/ /);
   assert.equal(await text(p, "#view"), "度数");
   assert.equal(await p.evaluate(() => window.__saves.set.view), "map");
+  await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "即兴");
+  /* the improv view is the neck: same places */
+  await at(12 + 4 * 9 + 4, 56); await at(5, 36);
+  assert.deepEqual(await played(), [45, 50]);
   await tap(p, "#view");
   assert.equal(await text(p, "#view"), "框图");
   await p.evaluate(() => window.__press("select"));
@@ -403,5 +413,73 @@ test("chord-book: the progressions in English, and a slash chord's place in the 
   const first = p.locator("#glist .card").first();
   assert.equal(await first.locator(".chips").textContent(), "CG/BAmEm/GFC/EFG");
   assert.equal(await first.locator(".grole").textContent(), "C/E is I/3 here");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book: the improv view shows the chord's scale by kind; left and right change the scale, a new chord goes back to its default", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await tap(p, "#view");
+    const neck = await p.locator("#pic").evaluate((c) => c.style.width);
+    const rows = async () => p.evaluate(() => ["qname", "line", "tones"].map((id) => document.getElementById(id).getBoundingClientRect().height).join(","));
+    const before = await rows();
+    await tap(p, "#view"); await tap(p, "#view");
+    assert.equal(await text(p, "#view"), "即兴");
+    assert.equal(await p.locator("#pic").evaluate((c) => c.width), 150);
+    assert.equal(await p.locator("#pic").evaluate((c) => c.style.width), neck, "the same size as the neck view");
+    assert.equal(await rows(), before, "the rows around the picture keep their heights");
+    await fits(p, "body", size, "the improv view");
+    assert.equal(await text(p, "#qname"), "C Ionian（大调） · 1 / 4");
+    assert.equal(await text(p, "#line"), "R 9 3 11 5 13 7");
+    assert.deepEqual(await p.locator("#line b").allTextContents(), ["R", "3", "5"]);
+    assert.deepEqual(await p.locator("#line s").allTextContents(), ["11"]);
+    assert.equal(await p.locator("#tones .why2 p").first().textContent(), "大调本身，最稳的选择。11 比 3 高半音，经过就好，别停在上面。");
+    assert.equal(await p.locator("#tones .legend").textContent(), "■ 根音 ● 和弦音 ○ 延伸音 × 避免音");
+    /* right: the next scale, and the picture slides */
+    await p.evaluate(() => window.__press("right"));
+    assert.equal(await p.locator("#pwrap .ghost").count(), 1, "the old picture slides out");
+    await p.waitForTimeout(400);
+    assert.equal(await p.locator("#pwrap .ghost").count(), 0);
+    assert.equal(await p.locator("#pic").evaluate((c) => c.style.transform), "");
+    assert.equal(await text(p, "#qname"), "C Lydian · 2 / 4");
+    assert.equal(await text(p, "#line"), "R 9 3 #11 5 13 7");
+    assert.equal(await p.locator("#line s").count(), 0);
+    assert.equal(await p.evaluate(() => window.__saves.set.cur.i), 0, "the voicing stays");
+    /* the next button and a swipe do the same; left wraps */
+    await tap(p, "#next");
+    assert.match(await text(p, "#qname"), /大调五声 · 3 \/ 4$/);
+    await p.evaluate(() => { window.__press("left"); window.__press("left"); window.__press("left"); });
+    await p.waitForTimeout(400);
+    assert.match(await text(p, "#qname"), /Mixolydian · 4 \/ 4$/);
+    /* another chord starts on its own default */
+    await p.evaluate(() => window.__press("down"));
+    await p.waitForTimeout(80);
+    assert.equal(await text(p, "#cname"), "Cm");
+    assert.equal(await text(p, "#qname"), "C Aeolian（自然小调） · 1 / 4");
+    assert.deepEqual(await p.locator("#line s").allTextContents(), ["b13"]);
+    assert.equal(await p.evaluate(() => window.__saves.set.view), "scale");
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("chord-book: a chord opened from a progression takes its mode from the key; the view is kept on a new start", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { saved: { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "scale", vol: 2, recent: [] } });
+  assert.equal(await text(p, "#view"), "即兴");
+  await tap(p, "#prog");
+  /* the pop four in C: C G Am F; F is IV, so Lydian, the second of a major chord's scales */
+  await tap(p, p.locator("#glist .card").first().locator(".chips button").nth(3));
+  assert.equal(await text(p, "#cname"), "F");
+  assert.equal(await text(p, "#qname"), "F Lydian · 2 / 4");
+  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调选的。/);
+  await p.evaluate(() => window.__press("right"));
+  assert.doesNotMatch(await p.locator("#tones .why2 p").first().textContent(), /^按/);
+  await p.evaluate(() => window.__press("left"));
+  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调选的。/);
+  /* G is V: Mixolydian, the fourth */
+  await tap(p, "#prog");
+  const g = p.locator("#glist .card").filter({ hasText: "C 大调" }).first();
+  await tap(p, g.locator(".chips button", { hasText: /^G$/ }).first());
+  assert.equal(await text(p, "#cname"), "G");
+  assert.match(await text(p, "#qname"), /^G Mixolydian · 4 \/ 4$/);
   assert.deepEqual(errors, []);
 });
