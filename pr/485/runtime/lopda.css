@@ -160,7 +160,8 @@ textarea::placeholder{color:var(--ink-2)}
 .link-boot .skip{margin-top:14px;font-size:16px;color:var(--ink-2)}
 .finder .dev{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-family:var(--f-pix);font-size:20px;background:var(--lcd);letter-spacing:.1em}
 .file-in{position:absolute;left:-9999px;top:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
-.toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:var(--ink);color:var(--lcd);padding:6px 12px;font-size:14px;z-index:5;max-width:90%;text-align:center}
+.toast{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);background:var(--ink);color:var(--lcd);padding:6px 12px;font-size:14px;z-index:5;max-width:90%;text-align:center;pointer-events:none}
+/* a toast only tells: taps go through it to the keys under it (the cartridge's speed knob sits at the bottom, issue #297) */
 @media (prefers-reduced-motion: reduce){.sig i,.cursor{animation:none}}
 
 
@@ -387,6 +388,8 @@ textarea::placeholder{color:var(--ink-2)}
 #cart-speed{gap:6px;flex:none}
 #cart-speed .btn{padding:4px 10px;font-size:13px;min-width:40px}
 #cart-rate{min-width:64px;font-variant-numeric:tabular-nums}
+/* a cartridge's name comes from its file name (up to 40 characters, often with no spaces): one line, cut with an ellipsis (issue #296) */
+.cart-item .store-body b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .store-item .acts{display:flex;flex-direction:column;gap:6px;flex:none}
 /* a cartridge: play on the right, its other actions (the battery save out and in, toss) in a row under it */
 .cart-item{flex-wrap:wrap}
@@ -415,6 +418,7 @@ textarea::placeholder{color:var(--ink-2)}
 .ck:disabled i{color:var(--lcd-3)}
 /* PAD.camera.snap: the runtime's viewfinder over a running app (apps/snap.js), the camera program's parts, one screen */
 .snap{position:absolute;inset:0;z-index:7;background:var(--lcd)}
+.snap:focus{outline:none}
 .snap .cam-lcd #snap-who{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
 #snap-finder{max-width:none;width:auto;flex:none;cursor:default}
 #snap-cv{display:block;width:100%;height:100%;image-rendering:pixelated;image-rendering:crisp-edges}
@@ -459,7 +463,7 @@ textarea::placeholder{color:var(--ink-2)}
 .rolls::-webkit-scrollbar{display:none}
 .roll{flex:none;width:128px;scroll-snap-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;transition:transform .18s;transform:scale(.72)}
 .roll.on{transform:none}
-.roll canvas{width:96px;height:128px;image-rendering:pixelated;image-rendering:crisp-edges}
+.roll canvas{width:calc(var(--can-h,128px)*.75);height:var(--can-h,128px);image-rendering:pixelated;image-rendering:crisp-edges}
 .roll .lab{font-family:var(--f-pix);font-size:16px;letter-spacing:.06em;text-align:center;line-height:1.15;color:var(--ink)}
 .roll .lab small{display:block;font-family:var(--f-lcd);font-size:13px;letter-spacing:0}
 .roll-opts{display:flex;gap:8px;justify-content:center;flex:none}
@@ -724,7 +728,7 @@ textarea::placeholder{color:var(--ink-2)}
 .scripts-count{margin:6px 10px -4px;font-size:15px;font-weight:normal;color:var(--ink-2)}
 #v-script-edit .editor{position:relative}
 #script-name{flex:1;min-width:0;min-height:44px;font-family:var(--f-lcd);font-size:16px;color:var(--ink);background:var(--lcd);border:3px solid var(--ink);border-radius:0;padding:4px 8px}
-#script-code{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:14px;line-height:1.45;color:var(--ink);background:transparent;border:0;border-radius:0;padding:10px;resize:none}
+#script-code{flex:1;min-height:0;width:100%;font-family:var(--f-lcd);font-size:16px;line-height:1.45;color:var(--ink);background:transparent;border:0;border-radius:0;padding:10px;resize:none}
 #script-code:focus-visible{outline:none}
 .script-actions{flex:none;display:flex;gap:8px;padding:6px 8px;border-top:2px solid var(--ink)}
 .script-actions .btn{flex:1;min-height:44px}
