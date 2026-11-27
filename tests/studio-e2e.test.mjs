@@ -1740,7 +1740,7 @@ test("studio tour: a new tape from a note tour leaves the drums screen untoured 
 /* the bubble on every new step: inside the view with its 4 px margin, off its target, and the play button still
    reaches #studio-play (the bar itself may be given up on the 331x359 screen, where there is no room) */
 test("studio tour: every new step's bubble sits inside the view, off its target, and leaves play reachable, two sizes and both languages", { skip, timeout: 240000 }, async (t) => {
-  for (const viewport of [{ width: 375, height: 667 }, { width: 375, height: 587 }]) {
+  for (const viewport of [{ width: 375, height: 667 }, { width: 375, height: 455 }]) {
     for (const locale of ["zh-CN", "en-US"]) {
       const { p, errors } = await rtPage(t, viewport, locale);
       await studioOpen(p, locale);
@@ -1749,7 +1749,7 @@ test("studio tour: every new step's bubble sits inside the view, off its target,
         const r = document.querySelector("#v-studio").getBoundingClientRect();
         return [Math.round(r.width), Math.round(r.height)];
       });
-      if (viewport.height === 587) assert.deepEqual(dims, [331, 359], "the short view is 331x359");
+      if (viewport.height === 455) assert.deepEqual(dims, [331, 359], "the short view is 331x359");
       const where = (screen, step) => `${screen} step ${step + 1} at ${viewport.width}x${viewport.height} ${locale}`;
       const check = async (screen, step) => {
         const m = await p.evaluate(() => {
@@ -2106,7 +2106,7 @@ test("studio: the guitar voice strums a chord 12 ms apart, low to high", { skip,
 });
 
 test("studio: the mixer rows fit 331x359 with the name, level and mute buttons", { skip, timeout: 60000 }, async (t) => {
-  const { p, errors } = await rtPage(t, { width: 375, height: 587 });
+  const { p, errors } = await rtPage(t, { width: 375, height: 455 });
   await studioOpen(p);
   await skipTour(p);
   await p.click('#studio-screens .st-scr[data-screen="mixer"]');
@@ -2212,7 +2212,7 @@ test("studio: the sound sheet sets the tape colour and the swing, and the mixer 
 });
 
 test("studio: the key and sound sheets fit the 331x359 screen with 44 px controls", { skip, timeout: 60000 }, async (t) => {
-  const { p, errors } = await rtPage(t, { width: 375, height: 587 });
+  const { p, errors } = await rtPage(t, { width: 375, height: 455 });
   await studioOpen(p);
   await skipTour(p);
   await p.click('#studio-screens .st-scr[data-screen="mixer"]');
@@ -2601,7 +2601,7 @@ test("studio: the deep mode setting survives a reload", { skip, timeout: 60000 }
 });
 
 test("studio: deep mode's note keys, chord keys and both sheets fit 331x359 with 44 px targets", { skip, timeout: 60000 }, async (t) => {
-  const { p, errors } = await rtPage(t, { width: 375, height: 587 });
+  const { p, errors } = await rtPage(t, { width: 375, height: 455 });
   await studioOpen(p);
   await skipTour(p);
   await enableDeep(p);
@@ -2916,7 +2916,7 @@ test("studio: picking pattern P in the sheet and editing it survives a reload", 
 });
 
 test("studio: the song chain renders four equal slots a row at 375x667 and 331x359", { skip, timeout: 120000 }, async (t) => {
-  for (const viewport of [{ width: 375, height: 667 }, { width: 375, height: 587 }]) {
+  for (const viewport of [{ width: 375, height: 667 }, { width: 375, height: 455 }]) {
     const { p, errors } = await rtPage(t, viewport);
     await studioOpen(p);
     await skipTour(p);
@@ -3504,8 +3504,8 @@ test("studio: every screen fits at 375x667 with 44 px buttons and 56 px grid cel
     }
   }
 
-  /* the same view made 331x359 tall (375 x 587, the smallest home-screen window, lopda.css) must not spill */
-  const { p: q, errors: errors2 } = await rtPage(t, { width: 375, height: 587 });
+  /* the same view made 331x359 tall (375 x 455: under 570 px the case drops its nameplate, lopda.css, and keeps 96 px) must not spill */
+  const { p: q, errors: errors2 } = await rtPage(t, { width: 375, height: 455 });
   await studioOpen(q);
   await skipTour(q);
   const view = await q.evaluate(() => {
@@ -4141,7 +4141,7 @@ test("studio: an AI draft becomes a new tape and leaves the current one alone", 
 });
 
 test("studio: the guide, library, versions and AI sheets fit 331x359 with 44 px controls", { skip, timeout: 90000 }, async (t) => {
-  const { p, errors } = await rtPage(t, { width: 375, height: 587 });
+  const { p, errors } = await rtPage(t, { width: 375, height: 455 });
   await studioOpen(p);
   await skipTour(p);
   const check = async (where) => {
