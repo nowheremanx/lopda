@@ -144,9 +144,14 @@ async function titleMenu() {
     S = R.newGame(); saveAuto(); busy = false; goPlay(); return;
   }
   if (act === "load") {
-    var v = await game.push(slotsScene("load"));
-    if (v) { S = v; saveAuto(); busy = false; goPlay(); return; }
-    busy = false; return;
+    var pick = await game.push(slotsScene("load"));
+    if (!pick) { busy = false; return; }
+    /* loading a slot writes it over the auto save, which is the run in progress: ask first, as 新的一页 does (#363) */
+    if (titleAuto && pick.key !== "auto") {
+      var ok = await game.choose([t("读这个存档", "Load it"), t("再想想", "Not yet")], { title: t("当前进度会被替换", "This replaces your run") });
+      if (ok !== 0) { busy = false; return; }
+    }
+    S = pick.v; saveAuto(); busy = false; goPlay(); return;
   }
   await helpPages();
   busy = false;
@@ -912,7 +917,7 @@ function slotsScene(mode) {
           game.save(it.key, pack()); infos[sel] = { key: it.key, v: S, raw: pack() }; sfx("save"); msg = t("存好了。", "Saved."); msgT = 1.2;
         } else {
           if (!it.v) { sfx("denied"); msg = t("空的。", "Empty."); msgT = 1.2; return; }
-          sfx("save"); game.pop(it.v); return;
+          sfx("save"); game.pop({ key: it.key, v: it.v }); return;
         }
       }
     },

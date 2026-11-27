@@ -590,3 +590,64 @@ test("an unreadable save: the title says so, the save sheet still answers B, and
   assert.ok(popped, "B leaves the save sheet");
   assert.equal(saves, 0, "nothing is written over the unreadable save");
 });
+
+/* ---------------- loading a slot over a run in progress (#363) ---------------- */
+
+for (const lang of ["zh", "en"]) {
+  test(`loading a slot asks before it replaces the run in progress, and 再想想 writes nothing (${lang})`, async () => {
+    const run0 = R.newGame(), slot = R.newGame();
+    run0.floor = 5; slot.floor = 2;
+    const stored = { auto: plain(run0), slot1: plain(slot) };
+    const on = { press: [], release: [] }, writes = [];
+    const pad = {
+      lang, spec: "lopda/1",
+      on: (type, f) => { if (on[type]) on[type].push(f); },
+      off() {}, isDown: () => false,
+      load: (k) => Promise.resolve(stored[k] ? plain(stored[k]) : null),
+      save(k, v) { writes.push([k, v.floor]); }, remove() {}, exit() {}, sfx() {}
+    };
+    const app = boot(join(ROOT, "registry/apps/paper-tower/index.html"), { pad });
+    const game = app.ctx.get("game");
+    const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+    await run(10);
+    assert.ok(app.ctx.get("titleAuto"), "the title found the auto save");
+    const titles = [], answers = [];
+    game.choose = (items, o) => { titles.push(o && o.title); return Promise.resolve(answers.shift()); };
+    game.push = () => Promise.resolve({ key: "slot1", v: R.hydrate(plain(slot)) });
+    const menu = app.ctx.get("titleMenu");
+    const LOAD = 2, ASK = lang === "zh" ? "当前进度会被替换" : "This replaces your run";
+
+    answers.push(LOAD, 1);              /* 读取存档, slot 1, then 再想想 */
+    await menu();
+    assert.equal(titles[1], ASK);
+    assert.deepEqual(writes, [], "再想想 leaves the auto save alone");
+
+    titles.length = 0;
+    answers.push(LOAD, 0);              /* the same, then 读这个存档 */
+    await menu();
+    assert.equal(titles[1], ASK);
+    assert.deepEqual(writes, [["auto", 2]], "the slot now is the run in progress");
+  });
+}
+
+test("loading a slot with no run in progress asks nothing", async () => {
+  const slot = R.newGame(); slot.floor = 3;
+  const on = { press: [], release: [] }, writes = [];
+  const pad = {
+    lang: "zh", spec: "lopda/1",
+    on: (type, f) => { if (on[type]) on[type].push(f); },
+    off() {}, isDown: () => false,
+    load: (k) => Promise.resolve(k === "slot1" ? plain(slot) : null),
+    save(k, v) { writes.push([k, v.floor]); }, remove() {}, exit() {}, sfx() {}
+  };
+  const app = boot(join(ROOT, "registry/apps/paper-tower/index.html"), { pad });
+  const game = app.ctx.get("game");
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await app.ctx.get("__yield")(); } };
+  await run(10);
+  const titles = [];
+  game.choose = (items, o) => { titles.push(o && o.title); return Promise.resolve(1); };   /* no auto: 读取存档 is item 1 */
+  game.push = () => Promise.resolve({ key: "slot1", v: R.hydrate(plain(slot)) });
+  await app.ctx.get("titleMenu")();
+  assert.equal(titles.length, 1, "only the title menu was shown");
+  assert.deepEqual(writes, [["auto", 3]]);
+});
