@@ -643,7 +643,7 @@ test("a hexagram cast saves each line, resumes today, and never overwrites a rej
   env.app.ctx.get("openSection")("hexagram");
   for (let i = 0; i < 6; i++) {
     env.press("a");
-    for (let frame = 0; frame < 32; frame++) env.app.frame();
+    for (let frame = 0; frame < 100; frame++) env.app.frame();
     await settle();
     assert.equal(env.saves.get("gua").lines.length, i + 1);
   }
@@ -664,7 +664,7 @@ test("a hexagram cast saves each line, resumes today, and never overwrites a rej
   await settle();
   rejected.app.ctx.get("openSection")("hexagram");
   rejected.press("a");
-  for (let frame = 0; frame < 32; frame++) rejected.app.frame();
+  for (let frame = 0; frame < 100; frame++) rejected.app.frame();
   await settle();
   assert.equal(rejected.app.ctx.get("guaState").failed, true);
   assert.equal(rejected.saves.has("gua"), false);
@@ -763,4 +763,20 @@ test("SELECT does nothing while a hexagram is casting", async () => {
   assert.equal(env.app.ctx.get("guaExplain"), false);
   assert.equal(env.app.ctx.get("guaState").lines.length, 3);
   assert.equal(env.app.ctx.get("section"), "hexagram");
+});
+
+test("the coins on screen are the ones that made the line: backs 0-3 give 6, 7, 8, 9 (火珠林)", async () => {
+  for (let run = 0; run < 12; run++) {
+    const env = bootStored("zh");
+    await settle();
+    env.app.ctx.get("openSection")("hexagram");
+    env.press("a");
+    const toss = env.app.ctx.get("guaToss");
+    assert.ok(toss && toss.backs.length === 3, "three coins in the air");
+    const backs = toss.backs.filter(Boolean).length;
+    assert.equal(toss.line, [6, 7, 8, 9][backs]);
+    for (let frame = 0; frame < 100; frame++) env.app.frame();
+    assert.equal(env.app.ctx.get("guaState").lines[0], toss.line);
+    assert.equal(env.app.ctx.get("guaToss"), null);
+  }
 });

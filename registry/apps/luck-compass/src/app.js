@@ -684,27 +684,41 @@ function readGua() {
     guaState.loaded = true;
   });
 }
+/* Three coins, the 火珠林 way: a coin's plain back (背) counts as yang. One back is 单 (少阳, 7), two backs 拆
+   (少阴, 8), three backs 重 (老阳, 9), none 交 (老阴, 6). YI.castLine decides; recording the random draws it makes
+   tells which coins came up back, so the coins on screen are the very ones that made the line. */
+var TOSS_TIME = 1.05, TOSS_TIME_REDUCED = 0.25, TOSS_SHOW = 0.5;
+var guaToss = null;      /* {at, backs: [bool x3], line} while the coins are in the air or lying on the table */
 function tossGuaLine() {
   syncGuaDate();
   if (!guaState.loaded || guaState.lines.length >= 6 || guaState.animating) return;
+  var backs = [];
+  var line = YI.castLine(function () { var r = Math.random(); backs.push(r < 0.5); return r; });
   guaState.animating = true;
+  guaToss = { at: game.time, backs: backs, line: line };
   syncMotion();
   sfx("tick");
-  var span = REDUCED_MOTION ? 0.1 : 0.42;
-  if (!REDUCED_MOTION) {
-    game.after(0.14, function () { sfx("tick"); });
-    game.after(0.28, function () { sfx("tick"); });
-  }
-  game.after(span, function () {
-    guaState.lines.push(YI.castLine(Math.random));
+  var fly = REDUCED_MOTION ? TOSS_TIME_REDUCED : TOSS_TIME;
+  if (!REDUCED_MOTION) for (var i = 0; i < 3; i++) game.after(coinLanding(i), coinClink);
+  game.after(fly + (REDUCED_MOTION ? 0.15 : TOSS_SHOW), function () {
+    guaState.lines.push(line);
     guaState.written = false;
     guaState.animating = false;
+    guaToss = null;
     guaScroll = 0;
     guaScroller.offset = 0;
     saveGua();
-    sfx("ok");
+    sfx(line === 6 || line === 9 ? "coin" : "ok");
     syncMotion();
   });
+}
+/* each coin leaves a little after the one before and lands a little later */
+function coinLanding(i) { return 0.62 + i * 0.12; }
+function coinClink() {
+  if (typeof PAD !== "undefined" && PAD.sfx) {
+    try { PAD.sfx({ wave: "triangle", from: 2300, to: 1900, ms: 70, attack: 1, decay: 65, vol: 0.25 }); }
+    catch (e) { sfx("tick"); }
+  }
 }
 function slipItem() { return SLIPS.DATA[slipState.slip]; }
 function slipTitleText() {
@@ -1505,15 +1519,56 @@ function drawArrow(g, x, y) {
   g.line(x + 3, y - 5, x + 8, y, g.INK);
   g.line(x + 3, y + 5, x + 8, y, g.INK);
 }
-function drawTossCoins(g, centerY) {
-  for (var i = 0; i < 3; i++) {
-    var x = CX - 18 + i * 18, phase = game.time * 28 + i * 2.1;
-    var radius = guaState.animating ? Math.max(1, Math.round(Math.abs(Math.sin(phase)) * 6)) : 6;
-    var y = centerY == null ? 111 : centerY;
-    g.circle(x, y, 7, g.INK, false);
-    g.rect(x - radius, y - 1, radius * 2 + 1, 3, g.INK);
-    if (!guaState.animating || Math.sin(phase) > 0) g.pixel(x, y, g.PAPER);
+var COIN_R = 11, TABLE_Y = 172;
+/* one coin seen at `turn` (1 face on, 0 edge on), its face known only once it has landed */
+function drawCoin(g, x, y, turn, back) {
+  var rx = Math.max(1, Math.round(Math.abs(turn) * COIN_R)), pts = [], k;
+  for (k = 0; k < 16; k++) {
+    var a = k * Math.PI / 8;
+    pts.push({ x: x + Math.cos(a) * rx, y: y + Math.sin(a) * COIN_R });
   }
+  fillPoly(g, pts, g.MID);
+  for (k = 0; k < 16; k++) g.line(pts[k].x, pts[k].y, pts[(k + 1) % 16].x, pts[(k + 1) % 16].y, g.INK);
+  if (rx < 4) return;                                  /* nearly edge on: no face to see */
+  g.rect(x - 1, y - 1, 3, 3, g.PAPER);                 /* the square hole */
+  g.frame(x - 2, y - 2, 5, 5, g.INK);
+  if (back === false || turn > 0) {                    /* the face with characters: four marks round the hole */
+    var d = Math.round(rx * 0.55);
+    g.rect(x - 1, y - 6, 2, 2, g.INK); g.rect(x - 1, y + 5, 2, 2, g.INK);
+    if (d >= 3) { g.rect(x - d - 1, y - 1, 2, 2, g.INK); g.rect(x + d, y - 1, 2, 2, g.INK); }
+  } else {                                             /* the plain back: an inner ring only */
+    for (k = 0; k < 16; k += 2) g.pixel(Math.round(x + Math.cos(k * Math.PI / 8) * (rx - 3)),
+      Math.round(y + Math.sin(k * Math.PI / 8) * (COIN_R - 3)), g.DARK);
+  }
+}
+function drawTossCoins(g) {
+  var toss = guaToss;
+  if (!toss) return;
+  var t = game.time - toss.at, reduced = REDUCED_MOTION, landedAll = true, backs = 0;
+  g.line(24, TABLE_Y + COIN_R + 1, 192, TABLE_Y + COIN_R + 1, g.DARK);       /* the table's edge */
+  for (var i = 0; i < 3; i++) {
+    var x = CX - 38 + i * 38, start = i * 0.06, land = reduced ? TOSS_TIME_REDUCED : coinLanding(i);
+    var y = TABLE_Y, turn = 1, landed = t >= land;
+    if (!landed && !reduced) {
+      var p = Math.max(0, (t - start) / (land - start));
+      y = TABLE_Y - Math.round(Math.sin(Math.PI * p) * (40 + i * 5));       /* up and down */
+      turn = Math.cos(t * (19 + i * 3));                                      /* spinning */
+    } else if (landed && !reduced && t < land + 0.12) {
+      y = TABLE_Y - Math.round(Math.sin(Math.PI * (t - land) / 0.12) * 3);  /* a small bounce */
+    }
+    if (!landed) landedAll = false;
+    drawCoin(g, x, y, landed ? (toss.backs[i] ? -1 : 1) : turn, landed ? toss.backs[i] : null);
+    if (toss.backs[i]) backs++;
+  }
+  if (!landedAll) return;
+  /* name the throw the way the old books do: how many backs, its name, the line it gives */
+  var names = [
+    { zh: "无背 · 交 · 老阴 六 ×", en: "No backs · old yin 6 ×" },
+    { zh: "一背 · 单 · 少阳 七", en: "One back · young yang 7" },
+    { zh: "二背 · 拆 · 少阴 八", en: "Two backs · young yin 8" },
+    { zh: "三背 · 重 · 老阳 九 ○", en: "Three backs · old yang 9 ○" }
+  ];
+  g.text(T(names[backs]), CX, TABLE_Y + COIN_R + 5, { align: "center", color: g.INK });
 }
 function updateHexagram(dt) {
   syncGuaDate();
@@ -1568,13 +1623,13 @@ function drawHexagram(g) {
     g.clip();
     drawScrollbar(g, guaScroller, { x: 9, y: 22, w: 198, h: 183 }, total);
   } else {
-    if (!guaState.lines.length) g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), CX, 42,
-      { align: "center", color: g.INK, width: 204 });
+    if (!guaState.lines.length) g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), 6, 42,
+      { align: "center", color: g.INK, width: 204 });   /* with a width, align centres inside it from x */
     else g.text(T({ zh: "占卦 " + guaState.lines.length + "/6", en: "Casting " + guaState.lines.length + "/6" }),
       CX, 34, { align: "center", color: g.INK });
     if (guaState.lines.length) drawGuaFigure(g, 77, 114 + (guaState.lines.length - 1) * 4, guaState.lines, 48);
     if (guaState.animating) drawTossCoins(g);
-    if (guaState.failed) g.text(T({ zh: "存档读不出，今天不会保存",
+    if (guaState.failed && !guaState.animating) g.text(T({ zh: "存档读不出，今天不会保存",
       en: "Could not read the save; today won't be saved" }), CX, 190, { align: "center", color: g.DARK, width: 210 });
   }
   var key = guaState.lines.length === 6 ?
