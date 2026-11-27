@@ -105,3 +105,15 @@ test("crop is the largest centred 8:7 piece", () => {
   assert.deepEqual([...F.crop(1280, 960, 128, 112)], [(1280 - 960 * 8 / 7) / 2, 0, 960 * 8 / 7, 960]);
   assert.deepEqual([...F.crop(960, 1280, 128, 112)], [0, (1280 - 840) / 2, 960, 840]);
 });
+
+test("adjustLuma: zero steps change nothing; exposure brightens, contrast spreads from the middle (#438)", () => {
+  for (const v of [0, 0.1, 0.5, 0.73, 1]) assert.equal(F.adjustLuma(v, 0, 0), v);
+  assert.ok(F.adjustLuma(0.4, 3, 0) > 0.4, "+3 exposure is brighter");
+  assert.ok(F.adjustLuma(0.4, -3, 0) < 0.4, "−3 exposure is darker");
+  assert.ok(F.adjustLuma(0.3, 0, 2) < 0.3 && F.adjustLuma(0.7, 0, 2) > 0.7, "+ contrast spreads");
+  assert.ok(Math.abs(F.adjustLuma(0.5, 0, 3) - 0.5) < 1e-9, "the middle stays");
+  for (const v of [0, 0.2, 0.9, 1]) {
+    const o = F.adjustLuma(v, 3, 3);
+    assert.ok(o >= 0 && o <= 1, "stays in 0-1");
+  }
+});

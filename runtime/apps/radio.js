@@ -153,6 +153,7 @@ function setPage(p){
   var view=byId("v-radio");
   if(view) view.classList.toggle("radio-draw-on", p==="draw");
   render();
+  if(p==="draw") fitDraw();
 }
 function render(){
   if(!R.live) return;
@@ -288,8 +289,13 @@ function onLinkEvent(ev){
   }
   if(R.wasOpen){ R.wasOpen=false; pushLog({dir:"sys", at:Date.now(), kind:"close"}); }
   else if(unsent) persistLog();
-  R.closeMsg=tr(reason==="home" && R.pending ? "radio.open.cancelled" : unsent && reason==="lost" ? "radio.close.unsent" : "radio.close."+reason);
-  if(!R.quiet) toast(R.closeMsg);
+  /* "nomic" (link.js, no samples for 8 s) already toasts its own advice: keep that toast and show the same words
+     in the menu's note; a reason with no words of its own reads as a lost link, never as a raw key (#391) */
+  var key=reason==="home" && R.pending ? "radio.open.cancelled" : unsent && reason==="lost" ? "radio.close.unsent"
+    : reason==="nomic" ? "link.nomic" : "radio.close."+reason;
+  if(tr(key)===key) key="radio.close.lost";
+  R.closeMsg=tr(key);
+  if(!R.quiet && reason!=="nomic") toast(R.closeMsg);
   if(R.page==="link" || R.page==="write" || R.page==="draw"){
     setPage("menu");
     if(!R.quiet) sfx("miss");
@@ -496,12 +502,46 @@ function paintCell(x,y){
   R.draw.px[y*16+x]=R.draw.tone;
   renderDraw();
 }
-function paintAt(e){
+/* from: the cell the stroke painted last, or null for a new stroke. A fast drag gives few pointermoves, so the
+   cells between the last one and this one are painted too, a line and not dots (#388). Returns the cell. */
+function paintAt(e,from){
   var cv=byId("radio-draw-cv"), r=cv.getBoundingClientRect();
   var w=cv.clientWidth||r.width, h=cv.clientHeight||r.height;
   var x=Math.floor((e.clientX-r.left-(cv.clientLeft||0))*16/w);
   var y=Math.floor((e.clientY-r.top-(cv.clientTop||0))*16/h);
-  paintCell(Math.max(0,Math.min(15,x)),Math.max(0,Math.min(15,y)));
+  x=Math.max(0,Math.min(15,x)); y=Math.max(0,Math.min(15,y));
+  if(from && (from.x!==x || from.y!==y)){
+    var cells=lineCells(from.x,from.y,x,y), i;
+    for(i=1;i<cells.length-1;i++) R.draw.px[cells[i][1]*16+cells[i][0]]=R.draw.tone;
+  }
+  paintCell(x,y);
+  return {x:x, y:y};
+}
+/* Bresenham's line from (x0,y0) to (x1,y1), both ends included */
+function lineCells(x0,y0,x1,y1){
+  var out=[], dx=Math.abs(x1-x0), dy=-Math.abs(y1-y0), sx=x0<x1?1:-1, sy=y0<y1?1:-1, err=dx+dy, e2;
+  for(;;){
+    out.push([x0,y0]);
+    if(x0===x1 && y0===y1) break;
+    e2=2*err;
+    if(e2>=dy){ err+=dy; x0+=sx; }
+    if(e2<=dx){ err+=dx; y0+=sy; }
+  }
+  return out;
+}
+function nextTone(){ R.draw.tone=(R.draw.tone+1)&3; sfx("tap"); renderDraw(); }
+/* the canvas fits what is left of the page after the key hint and the buttons, in whole 16 px cells (128 at
+   least, 256 at most), so a short window shrinks the picture and never the hint (#387) */
+function fitDraw(){
+  var page=byId("radio-page-draw"), cv=byId("radio-draw-cv");
+  if(!page || page.hidden || !page.clientHeight) return;
+  var cs=getComputedStyle(page), gap=parseFloat(cs.rowGap||cs.gap)||0, kids=page.children, used=0, n=0, i;
+  for(i=0;i<kids.length;i++){ if(kids[i]===cv || kids[i].hidden) continue; used+=kids[i].offsetHeight; n++; }
+  var availH=page.clientHeight-parseFloat(cs.paddingTop)-parseFloat(cs.paddingBottom)-used-gap*n;
+  var availW=page.clientWidth-parseFloat(cs.paddingLeft)-parseFloat(cs.paddingRight);
+  var inner=Math.floor((Math.min(availH,availW)-4)/16)*16;
+  inner=Math.max(128,Math.min(256,inner));
+  cv.style.width=cv.style.height=(inner+4)+"px";
 }
 function drawSend(){
   if(LP.link.state!=="open"){ toast(tr("radio.link.notopen")); sfx("err"); return; }
@@ -782,14 +822,16 @@ function startRecvTest(){
       restartMeterLater();
       return;
     }
-    var capMs=Math.max(3000,totalSymbols()*R.test.rate+3000);
+    /* a person has to reach the other phone and press its send key: listen 10 s more than the test takes
+       (12 s at least), keep that whole window, and the stop key decodes early (#389) */
+    var capMs=Math.max(12000,totalSymbols()*R.test.rate+10000);
     var rx={stream:stream,src:src,proc:proc,silent:silent,ctx:ctx,sr:ctx.sampleRate,samples:[],len:0,start:Date.now(),capMs:capMs,capTimer:0,token:token};
     R.test.rx=rx;
     proc.onaudioprocess=function(e){
       if(R.test.rx!==rx) return;
       var d=e.inputBuffer.getChannelData(0), copy=new Float32Array(d.length);
       copy.set(d); rx.samples.push(copy); rx.len+=copy.length;
-      while(rx.len>rx.sr*10){ var b=rx.samples.shift(); rx.len-=b.length; }
+      while(rx.len>rx.sr*(rx.capMs/1000+1)){ var b=rx.samples.shift(); rx.len-=b.length; }
     };
     micMark.hidden=false;
     LP.micRoute(true);
@@ -850,14 +892,14 @@ function stopRecvTest(decode){
   LP.keepAwake(false);
   bar("radio-test-bar",1);
   R.test.state=tr("radio.meter.stopped");
-  if(decode) decodeSamples(concat(rx.samples),rx.sr);
+  if(decode) decodeSamples(concat(rx.samples),rx.sr,rx.capMs/1000+1);
   renderMeter();
   restartMeterLater();
 }
-function decodeSamples(samples,sr){
+function decodeSamples(samples,sr,searchSeconds){
   if(!samples || !samples.length){ R.test.state=tr("radio.meter.nodata"); renderMeter(); return; }
   var data=testBytes();
-  var res=AC.decode(samples,{sampleRate:sr,symbolMs:R.test.rate,expectedBytes:data,searchSeconds:8});
+  var res=AC.decode(samples,{sampleRate:sr,symbolMs:R.test.rate,expectedBytes:data,searchSeconds:Math.max(8,searchSeconds||0)});
   R.test.last=res;
   if(res.sync && res.sync.ok){
     R.test.state=tr("radio.meter.sync",{score:res.sync.score,ms:Math.round(res.sync.offsetMs)});
@@ -943,7 +985,7 @@ function radioButton(b,down){
     else if(b==="left"){ R.draw.cx=(R.draw.cx+15)%16; sfx("move"); renderDraw(); }
     else if(b==="right"){ R.draw.cx=(R.draw.cx+1)%16; sfx("move"); renderDraw(); }
     else if(b==="a"){ paintCell(R.draw.cx,R.draw.cy); sfx("tick"); }
-    else if(b==="select"){ R.draw.tone=(R.draw.tone+1)&3; sfx("tap"); renderDraw(); }
+    else if(b==="select") nextTone();
     else if(b==="start") drawSend();
     else if(b==="b"){ setPage("link"); sfx("miss"); }
     return true;
@@ -975,16 +1017,18 @@ function bindEvents(){
   });
   byId("radio-draw-send").onclick=drawSend;
   byId("radio-draw-back").onclick=function(){ setPage("link"); sfx("miss"); };
-  var cv=byId("radio-draw-cv"), drag=false;
+  byId("radio-draw-color").onclick=nextTone;
+  var cv=byId("radio-draw-cv"), drag=null;
   cv.addEventListener("pointerdown",function(e){
-    e.preventDefault(); drag=true;
+    e.preventDefault();
     try{ cv.setPointerCapture(e.pointerId); }catch(x){}
-    paintAt(e); sfx("tick");
+    drag=paintAt(e,null); sfx("tick");
   });
-  cv.addEventListener("pointermove",function(e){ if(drag) paintAt(e); });
+  cv.addEventListener("pointermove",function(e){ if(drag) drag=paintAt(e,drag); });
   ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){
-    cv.addEventListener(t,function(){ drag=false; });
+    cv.addEventListener(t,function(){ drag=null; });
   });
+  window.addEventListener("resize",function(){ if(R.live && R.page==="draw") fitDraw(); });
   byId("radio-txmode").onchange=function(){ R.txMode=this.checked?"playback":"record"; saveTxMode(); };
   byId("radio-test-rate").onchange=function(){ R.test.rate=parseInt(this.value,10)||40; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
   byId("radio-test-pattern").onchange=function(){ R.test.pattern=this.value; R.test.last=null; R.test.stats=""; R.test.hex=""; R.test.state=""; renderMeter(); };
