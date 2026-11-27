@@ -52,7 +52,14 @@ function makeDB() {
     };
   }
   function coll(path) {
-    return { path, doc(id) { return ref(path + "/" + id); } };
+    return {
+      path, doc(id) { return ref(path + "/" + id); },
+      /* the collection's own documents (one segment below it) */
+      get() {
+        const ids = [...docs.keys()].filter((k) => k.startsWith(path + "/") && !k.slice(path.length + 1).includes("/"));
+        return Promise.all(ids.map((k) => ref(k).get())).then((list) => ({ docs: list }));
+      },
+    };
   }
   return { docs, fail, ops, doc(p) { return ref(p); }, collection(p) { return coll(p); } };
 }
@@ -64,7 +71,9 @@ function makeLP(ctx, db, $) {
     S: { db, kv: {} },
     tr: S.t,
     own: (d) => (d == null ? null : JSON.parse(JSON.stringify(d))),
-    toast() {}, sfx() {}, show() {}, keepAwake() {}, builtin() {},
+    toast() {}, sfx() {}, show() {}, keepAwake() {},
+    /* the built-ins it registers, so a test can call their hooks */
+    builtins: [], builtin(o) { this.builtins.push(o); },
     fmt() { return ""; }, pad2(n) { return String(n); },
     noEmoji: (s) => String(s || ""),
     uid: () => "test",
@@ -463,4 +472,71 @@ test("generate: a stopped answer is kept on any way out, HOME as well as ◂ (#4
   await settle();
   assert.equal(await T3.flushSource(), true);
   assert.equal(db3.docs.has(P_ITEMS(s3.id)), false);
+});
+
+/* ---------- deleting a script: nothing late brings it back (#407, #408, #409) ---------- */
+
+test("deleteScript while it is being written: the job stops and its answer is not stored (#407)", async (t) => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test, ai = fakeAI(ctx);
+  T.generate();
+  t.after(() => clearInterval(T.stream.tick));
+  const s = T.state.current;
+  ai.text("<!doctype html>\n<html><head><title>Half</title>");
+  assert.equal(await T.saveCurrent(true), true);
+  assert.equal(db.docs.has(P_ITEMS(s.id)), true, "the half is listed");
+  await T.deleteScript(s.id);
+  await settle(); await settle();
+  assert.equal(db.docs.has(P_ITEMS(s.id)), false, "the stopped job writes nothing back");
+  assert.equal(T.stream.job, null, "the job is over");
+  /* a finished answer landing late is dropped too */
+  const db2 = makeDB(), ctx2 = boot("en-US", db2), T2 = ctx2.LP.scripts._test, ai2 = fakeAI(ctx2);
+  T2.generate();
+  t.after(() => clearInterval(T2.stream.tick));
+  const s2 = T2.state.current;
+  ai2.text("<!doctype html>");
+  const job = T2.stream.job; job.stop = () => {};   /* a job that cannot be stopped in time */
+  await T2.deleteScript(s2.id);
+  ai2.finish(FULL);
+  await settle(); await settle();
+  assert.equal(db2.docs.has(P_ITEMS(s2.id)), false, "the finished answer does not bring it back");
+});
+
+test("the 改一改 page's leave saves its draft once, never for a script deleted since (#408)", async () => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test, $ = ctx.LP.$;
+  const revise = ctx.LP.builtins.find((b) => b.id === "script-revise");
+  db.docs.set(P_ITEMS("s7"), { v: 1, id: "s7", name: "P", body: "x", created: 1, updated: 1 });
+  T.state.askFor = "s7"; $("revise-ask").value = "加一个暂停键";
+  revise.leave();
+  await settle();
+  assert.equal(db.docs.get(P_ASKS("s7")).text, "加一个暂停键", "leaving the page keeps the draft");
+  await T.deleteScript("s7");
+  assert.equal(db.docs.has(P_ASKS("s7")), false);
+  revise.leave(); revise.leave();   /* every later screen change calls every leave hook */
+  await settle();
+  assert.equal(db.docs.has(P_ASKS("s7")), false, "the deleted script's draft stays gone");
+  /* even a stale page pointing at it cannot write it */
+  T.state.askFor = "s7"; revise.leave();
+  await settle();
+  assert.equal(db.docs.has(P_ASKS("s7")), false);
+});
+
+test("deleteScript: the script's grants go with it; Settings can name it while it exists (#409)", async () => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test, revoked = [];
+  ctx.LP.sensorGrants = { revoke: (id) => revoked.push(id) };
+  db.docs.set(P_ITEMS("s8"), { v: 1, id: "s8", name: "Tuner", body: "x", created: 1, updated: 1 });
+  assert.equal(ctx.LP.scripts.exists("s8"), null, "unknown before the library is read");
+  await T.listScripts();
+  assert.equal(ctx.LP.scripts.nameOf("s8"), "Tuner");
+  assert.equal(ctx.LP.scripts.exists("s8"), true);
+  await T.deleteScript("s8");
+  assert.deepEqual(revoked, ["local:s8"]);
+  assert.equal(ctx.LP.scripts.exists("s8"), false);
+  assert.equal(ctx.LP.scripts.exists("zz"), false, "a script not in the library is gone");
+});
+
+test("usesPad: aliases, brackets and destructuring still show the pad (#410)", () => {
+  const ctx = boot("en-US"), T = ctx.LP.scripts._test;
+  for (const code of ["PAD.isDown('a')", "PAD.on('press',f)", "var K=PAD; K.on('press',f)", 'PAD["on"]("release",f)',
+    "var {isDown}=PAD", "const b=PAD.BUTTONS", "K.on(`press`,f)"]) assert.equal(T.usesPad(code), true, code);
+  for (const code of ["", "PAD.save('k',1)", "addEventListener('keypress',f)", "PAD.sfx('tap')"]) assert.equal(T.usesPad(code), false, code);
 });

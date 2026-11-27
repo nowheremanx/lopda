@@ -945,9 +945,15 @@ function grant(id,kind){ var g=grants[id]||(grants[id]={}); if(!g[kind]){ g[kind
 function revokeSense(id){ if(grants[id]){ delete grants[id]; saveGrants(); } }
 LP.sensorGrants={
   list:function(){
+    /* a local script's grant ("local:<id>") is named after the script; one whose script is gone is dropped (issue #409) */
+    Object.keys(grants).forEach(function(id){
+      var sid=id.indexOf("local:")===0 ? id.slice(6) : null;
+      if(sid && LP.scripts && LP.scripts.exists && LP.scripts.exists(sid)===false) revokeSense(id);
+    });
     return Object.keys(grants).map(function(id){
-      var a=installedOf(id);
-      return {id:id, name:a ? appName(a) : id, kinds:["motion","mic","camera","wordbook","link"].filter(function(k){ return granted(id,k); })};
+      var a=installedOf(id), sid=id.indexOf("local:")===0 ? id.slice(6) : null;
+      var name=a ? appName(a) : sid ? tr("set.sense.script",{name:(LP.scripts && LP.scripts.nameOf && LP.scripts.nameOf(sid)) || tr("set.sense.noname")}) : id;
+      return {id:id, name:name, kinds:["motion","mic","camera","wordbook","link"].filter(function(k){ return granted(id,k); })};
     }).filter(function(g){ return g.kinds.length; });
   },
   revoke:revokeSense

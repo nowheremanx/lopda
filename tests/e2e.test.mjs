@@ -8211,7 +8211,7 @@ const runSnapApp = async (p, perms = ["camera"]) => {
 };
 const allEnded = (p) => p.evaluate(() => window.__streams.length > 0 && window.__streams.every((s) => s.getTracks().every((x) => x.readyState === "ended")));
 /* the viewfinder is up and showing the camera: the lens tag appears with the first stream */
-const finderLive = (p) => p.waitForFunction(() => !document.getElementById("snap").hidden && !document.getElementById("snap-lens").hidden, null, { timeout: 10000 });
+const finderLive = (p) => p.waitForFunction(() => !document.getElementById("snap").hidden && document.getElementById("snap-lens").dataset.live === "1", null, { timeout: 10000 });
 
 test("camera snap: the dialog first; A opens the viewfinder; the shutter hands the app a 128x112 four-tone picture and ends the stream", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await snapPage(t);
