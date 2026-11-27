@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>调音器</title>
+<!-- Lo-PDA app (lopda/1): a string tuner for guitar and ukulele. The microphone's pitch (PAD.mic, SPEC.md 6.4; the exact
+`hz` from runtime 1.7.0, the rounded `pitch` before) moves a needle over +-50 cents. Tap-driven, so no chin pad (sdk/UI.md 1).
+Copyright (c) 2026 Haowei Wu. MIT License. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;color:#1f2a14;font-family:monospace;user-select:none;-webkit-user-select:none}
+body{display:flex;flex-direction:column}
+button{font-family:monospace;font-size:15px;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;
+  min-height:44px;padding:0 8px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #1f2a14}
+header{flex:none;padding:8px 12px 0}
+#tuning{width:100%;text-align:left;font-weight:bold;display:flex;justify-content:space-between;align-items:center}
+main{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px 12px 8px}
+/* the meter takes the height that is left: its picture grows taller on a tall phone (fit()) instead of floating */
+#mwrap{flex:1;min-height:90px;display:flex;align-items:center}
+#meter{display:block;width:100%;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid #1f2a14;box-sizing:border-box;flex:none}
+/* the reading: note name, octave, cents and the lamp, one line */
+#read{display:flex;align-items:center;justify-content:space-between;min-height:64px;flex:none}
+#note{font-size:48px;font-weight:bold;line-height:1}
+#note sub{font-size:20px;vertical-align:baseline}
+#note.stale,#cents.stale{color:#4a5a32}
+#cents{font-size:20px;font-weight:bold;min-width:4.5em;text-align:center}
+#lamp{font-size:15px;font-weight:bold;padding:6px 8px;border:2px solid #4a5a32;color:#4a5a32;min-width:3em;text-align:center}
+#lamp.on{background:#1f2a14;color:#a3ad7e;border-color:#1f2a14}
+#msg{font-size:15px;min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;flex:none}
+#msg.tap{border:2px dashed #1f2a14;cursor:pointer}
+#strings{display:flex;gap:8px;flex:none}
+#strings button{flex:1;min-width:0;padding:0;font-size:17px;font-weight:bold;min-height:52px;position:relative}
+#strings button sub{font-size:12px}
+/* the string the tuner is reading is inverted; a locked one also carries a bar on top; a tuned one a bar below */
+#strings button.cur{background:#1f2a14;color:#a3ad7e}
+#strings button.lock::before{content:"";position:absolute;left:4px;right:4px;top:3px;height:3px;background:currentColor}
+#strings button.ok::after{content:"";position:absolute;left:8px;right:8px;bottom:4px;height:3px;background:currentColor}
+footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
+footer button{flex:1}
+#auto.on{background:#1f2a14;color:#a3ad7e;box-shadow:3px 3px 0 #4a5a32}
+/* the tuning list: a screen of its own over the tuner */
+#list{position:fixed;inset:0;background:#a3ad7e;display:none;flex-direction:column}
+#list.open{display:flex}
+#list header{display:flex;gap:8px;align-items:center;padding:8px 12px}
+#list header b{flex:1;font-size:17px}
+#rows{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 12px 12px}
+#rows h3{font-size:13px;color:#4a5a32;margin:12px 0 4px;font-weight:normal}
+#rows .row{display:flex;width:100%;justify-content:space-between;align-items:center;margin:0 0 8px;box-shadow:none;text-align:left;gap:8px}
+#rows .row span{font-size:13px;overflow-wrap:anywhere;text-align:right}
+#rows .row.sel{background:#1f2a14;color:#a3ad7e}
+#a4{display:flex;align-items:center;gap:8px;margin-top:4px}
+#a4 span{flex:1;font-size:15px}
+#a4 button{min-width:44px;font-size:20px;font-weight:bold}
+</style>
+</head>
+<body>
+<header><button id="tuning"><span id="tname"></span><span>▾</span></button></header>
+<main>
+  <div id="mwrap"><canvas id="meter" width="160" height="64"></canvas></div>
+  <div id="read"><div id="note">-</div><div id="cents"></div><div id="lamp"></div></div>
+  <div id="msg"></div>
+  <div id="strings"></div>
+</main>
+<footer><button id="auto"></button><button id="tone"></button></footer>
+<div id="list"><header><b id="ltitle"></b><button id="back"></button></header><div id="rows"></div></div>
+
+<!-- The tuner's music and maths, free of the DOM so tests/string-tuner.test.mjs can run them in Node. -->
+<script id="logic">
+var Tuner = (function () {
+  /* Strings low to high as MIDI numbers (E2 = 40, A4 = 69). flats: name the notes with flats (a tuning a half step down). */
+  var TUNINGS = [
+    { id: "gtr-std",   group: "guitar", zh: "标准",        en: "Standard",        notes: [40, 45, 50, 55, 59, 64] },
+    { id: "gtr-dropd", group: "guitar", zh: "Drop D",      en: "Drop D",          notes: [38, 45, 50, 55, 59, 64] },
+    { id: "gtr-half",  group: "guitar", zh: "降半音",      en: "Half step down",  notes: [39, 44, 49, 54, 58, 63], flats: true },
+    { id: "gtr-whole", group: "guitar", zh: "降全音",      en: "Whole step down", notes: [38, 43, 48, 53, 57, 62] },
+    { id: "gtr-dadgad",group: "guitar", zh: "DADGAD",      en: "DADGAD",          notes: [38, 45, 50, 55, 57, 62] },
+    { id: "gtr-openg", group: "guitar", zh: "Open G",      en: "Open G",          notes: [38, 43, 50, 55, 59, 62] },
+    { id: "gtr-opend", group: "guitar", zh: "Open D",      en: "Open D",          notes: [38, 45, 50, 54, 57, 62] },
+    { id: "gtr-opene", group: "guitar", zh: "Open E",      en: "Open E",          notes: [40, 47, 52, 56, 59, 64] },
+    /* ukulele strings in playing order, top to bottom: the high G of the standard tuning comes first (re-entrant) */
+    { id: "uke-std",   group: "uke",    zh: "标准（高 G）", en: "Standard (high G)", notes: [67, 60, 64, 69] },
+    { id: "uke-lowg",  group: "uke",    zh: "低 G",        en: "Low G",           notes: [55, 60, 64, 69] },
+    { id: "uke-bari",  group: "uke",    zh: "上低音",      en: "Baritone",        notes: [50, 55, 59, 64] },
+    { id: "chromatic", group: "chrom",  zh: "半音模式",    en: "Chromatic",       notes: [] }
+  ];
+  var SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  var FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+  var IN_TUNE = 3, IN_TUNE_MS = 500;   /* within 3 cents for half a second lights the lamp */
+
+  function byId(id) { for (var i = 0; i < TUNINGS.length; i++) if (TUNINGS[i].id === id) return TUNINGS[i]; return null; }
+  function hz(midi, a4) { return a4 * Math.pow(2, (midi - 69) / 12); }
+  function cents(f, target) { return 1200 * Math.log(f / target) / Math.LN2; }
+  function name(midi, flats) { return { n: (flats ? FLAT : SHARP)[((midi % 12) + 12) % 12], o: Math.floor(midi / 12) - 1 }; }
+  function nearest(f, a4) { return Math.round(69 + 12 * Math.log(f / a4) / Math.LN2); }
+  /* the guitar's low strings are rich in their second harmonic, and a reading can come an octave high or low: move it by
+     octaves to within half an octave of the string being tuned */
+  function fold(f, target) {
+    while (f > target * Math.SQRT2) f /= 2;
+    while (f < target / Math.SQRT2) f *= 2;
+    return f;
+  }
+  /* which string a reading belongs to: the closest in cents; when nothing is within 60 cents, try the reading an octave
+     down and up too. The string already shown stays while it is within 120 cents unless another is clearly closer (20
+     cents), so the needle does not flick between two strings a whole tone apart (the ukulele's G and A). */
+  function pick(f, targets, cur) {
+    function best(g) {
+      var b = -1, bc = Infinity;
+      for (var i = 0; i < targets.length; i++) { var c = Math.abs(cents(g, targets[i])); if (c < bc) { bc = c; b = i; } }
+      return { i: b, c: bc };
+    }
+    var r = best(f);
+    if (r.c > 60) {
+      var lo = best(f / 2), hi = best(f * 2);
+      /* an octave high is the usual mistake (a low string's second harmonic), so down wins a tie: E3 is the low E */
+      if (lo.c < r.c) r = lo;
+      if (hi.c < r.c - 1) r = hi;
+    }
+    if (cur >= 0 && cur < targets.length && cur !== r.i) {
+      var cc = Math.abs(cents(fold(f, targets[cur]), targets[cur]));
+      if (cc < 120 && cc < r.c + 20) return cur;
+    }
+    return r.i;
+  }
+  /* a median of the last five readings. A reading more than 70 cents from it is held back: one alone is a glitch and is
+     dropped, two in a row that agree are a new note, and the median starts afresh from them */
+  function smoother() {
+    var a = [], pend = null;
+    function median() { var t = a.slice().sort(function (x, y) { return x - y; }); return t[t.length >> 1]; }
+    return {
+      push: function (f) {
+        if (a.length && Math.abs(cents(f, median())) > 70) {
+          if (pend !== null && Math.abs(cents(f, pend)) <= 70) { a = [pend, f]; pend = null; return median(); }
+          pend = f;
+          return a.length < 2 ? null : median();
+        }
+        pend = null;
+        a.push(f); if (a.length > 5) a.shift();
+        return a.length < 2 ? null : median();
+      },
+      reset: function () { a = []; pend = null; }
+    };
+  }
+  /* the whole reading for one smoothed frequency: which string (or note), its target, the cents off */
+  function read(f, tuning, a4, cur, lock) {
+    if (!tuning.notes.length) {
+      var m = nearest(f, a4), t = hz(m, a4);
+      return { i: -1, midi: m, target: t, cents: cents(f, t) };
+    }
+    var targets = tuning.notes.map(function (n) { return hz(n, a4); });
+    var i = lock >= 0 ? lock : pick(f, targets, cur);
+    var g = fold(f, targets[i]);
+    return { i: i, midi: tuning.notes[i], target: targets[i], cents: cents(g, targets[i]) };
+  }
+  return { TUNINGS: TUNINGS, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, byId: byId, hz: hz, cents: cents, name: name,
+    nearest: nearest, fold: fold, pick: pick, smoother: smoother, read: read };
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  var EN = PAD.lang === "en";
+  var T = EN ? {
+    guitar: "Guitar", uke: "Ukulele", chrom: "Any note", list: "Tuning", back: "Back", auto: "Auto", locked: "Locked",
+    tone: "Play note", ok: "IN TUNE", pluck: "Pluck a string", sing: "Play or sing a note",
+    asking: "Asking for the mic...", denied: "No mic: tap here to ask again, or tune by ear with Play note",
+    none: "No mic on this device: tune by ear with Play note", a4: "Reference A4", hz: "Hz"
+  } : {
+    guitar: "吉他", uke: "尤克里里", chrom: "其他乐器", list: "定弦", back: "返回", auto: "自动认弦", locked: "已锁定",
+    tone: "听音", ok: "准", pluck: "拨一根弦", sing: "弹或唱一个音",
+    asking: "正在开话筒…", denied: "没开话筒：点这里再问一次，或点 听音 用耳朵调",
+    none: "这台设备没有话筒：点 听音 用耳朵调", a4: "标准音 A4", hz: "Hz"
+  };
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var RGB = TONES.map(function (h) { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)]; });
+  function $(id) { return document.getElementById(id); }
+
+  /* ---- settings: the tuning and A4, kept between visits ---- */
+  var set = { v: 1, tuning: "gtr-std", a4: 440 };
+  var tuning = Tuner.byId(set.tuning);
+  function store() { PAD.save("set", set); }
+
+  /* ---- the reading ---- */
+  var sm = Tuner.smoother();
+  var cur = -1;            /* the string shown (auto) */
+  var lock = -1;           /* the string the player locked, or -1 for auto */
+  var tuned = [];          /* strings that reached the lamp since the tuning was chosen */
+  var shown = null;        /* the last reading: {i, midi, cents} */
+  var lastHeard = 0, okSince = 0, lampOn = false, toneUntil = 0;
+  var mic = "off";         /* off | asking | on | denied | none */
+  var needle = 0, needleTo = 0, live = false, dirty = true;
+
+  function now() { return Date.now(); }
+
+  function onSound(s) {
+    if (mic !== "on" || listOpen) return;
+    var t = now();
+    if (t < toneUntil) return;                       /* our own reference tone is playing: not the string */
+    var f = typeof s.hz === "number" ? s.hz : (typeof s.pitch === "number" ? s.pitch : null);
+    if (f === null) return;                          /* silence, breath, noise: the staleness timer handles it */
+    var g = sm.push(f);
+    if (g === null) return;
+    var r = Tuner.read(g, tuning, set.a4, cur, lock);
+    if (r.i >= 0 && r.i !== cur) { cur = r.i; okSince = 0; }
+    shown = r; lastHeard = t; live = true;
+    needleTo = Math.max(-50, Math.min(50, r.cents));
+    if (Math.abs(r.cents) <= Tuner.IN_TUNE) { if (!okSince) okSince = t; }
+    else okSince = 0;
+    dirty = true;
+  }
+
+  /* ---- drawing the meter: a 160 x 64 tone buffer, written with putImageData ---- */
+  var cv = $("meter"), cx = cv.getContext("2d"), W = 160, H = 64, buf, img;
+  var PX = 80, PY = 74, R = 62;                         /* the needle's pivot sits below the window, like a VU meter */
+  /* the picture is 160 px wide and as tall as the space allows (56-104 px): a longer needle on a taller phone */
+  function fit() {
+    var box = $("mwrap"), w = box.clientWidth - 6, h = box.clientHeight - 6;
+    var nh = Math.max(56, Math.min(104, Math.round(160 * h / Math.max(1, w))));
+    if (nh === H && buf) return;
+    H = nh; PY = H + 10; R = H - 2;
+    cv.height = H; buf = new Uint8Array(W * H); img = cx.createImageData(W, H); dirty = true;
+  }
+  var SPAN = 50 * Math.PI / 180;                        /* +-50 cents is +-50 degrees */
+  function px(x, y, t) { x = Math.round(x); y = Math.round(y); if (x >= 0 && x < W && y >= 0 && y < H) buf[y * W + x] = t; }
+  function line(a, r0, r1, t, thick) {
+    var s = Math.sin(a), c = Math.cos(a);
+    for (var r = r0; r <= r1; r += 0.5) {
+      var x = PX + s * r, y = PY - c * r;
+      px(x, y, t); if (thick) { px(x + 1, y, t); }
+    }
+  }
+  function draw() {
+    buf.fill(3);
+    /* the scale: a tick every 10 cents, the middle ones long, and a filled band for the in-tune zone */
+    for (var k = -50; k <= 50; k += 10) line(k / 50 * SPAN, k % 50 === 0 ? R - 12 : R - 7, R, 0, k === 0);
+    for (k = -45; k <= 45; k += 10) line(k / 50 * SPAN, R - 2, R, 1, false);
+    for (var d = -SPAN; d <= SPAN; d += 0.004) px(PX + Math.sin(d) * (R + 2), PY - Math.cos(d) * (R + 2), 1);
+    for (d = -Tuner.IN_TUNE; d <= Tuner.IN_TUNE; d += 0.25) line(d / 50 * SPAN, R + 3, R + 7, lampOn ? 0 : 2, false);
+    /* "-" and "+" marks at the ends, drawn as pixels so they stay four-tone */
+    for (var i = 0; i < 5; i++) { px(8 + i, 8, 0); px(148 + i, 8, 0); px(150, 6 + i, 0); }
+    /* the needle: ink while it hears a string, dark when the sound has died */
+    line(needle / 50 * SPAN, 6, R - 2, live ? 0 : 1, true);
+    for (var y = -2; y <= 2; y++) for (var x = -3; x <= 3; x++) px(PX + x, H - 3 + y, 0);
+    var p = img.data;
+    for (var j = 0; j < buf.length; j++) { var c = RGB[buf[j]]; p[j * 4] = c[0]; p[j * 4 + 1] = c[1]; p[j * 4 + 2] = c[2]; p[j * 4 + 3] = 255; }
+    cx.putImageData(img, 0, 0);
+  }
+
+  function noteHtml(midi, flats) {
+    var n = Tuner.name(midi, flats);
+    return n.n + "<sub>" + n.o + "</sub>";
+  }
+  function render() {
+    var t = now();
+    if (live && t - lastHeard > 600) { live = false; okSince = 0; needleTo = shown ? needleTo : 0; dirty = true; }
+    var on = live && okSince && t - okSince >= Tuner.IN_TUNE_MS;
+    if (on !== lampOn) {
+      lampOn = on; dirty = true;
+      if (on && shown && shown.i >= 0) tuned[shown.i] = true;
+    }
+    var moved = Math.abs(needleTo - needle) > 0.05;
+    if (moved) needle += (needleTo - needle) * 0.35;
+    if (!dirty && !moved) return;
+    dirty = false;
+    draw();
+    var note = $("note"), ce = $("cents");
+    if (shown) {
+      note.innerHTML = noteHtml(shown.midi, tuning.flats);
+      var c = Math.round(shown.cents);
+      ce.textContent = (c > 0 ? "+" : c < 0 ? "-" : "") + Math.abs(c);
+    } else if (lock >= 0) { note.innerHTML = noteHtml(tuning.notes[lock], tuning.flats); ce.textContent = ""; }
+    else { note.textContent = "-"; ce.textContent = ""; }
+    note.className = ce.className = live ? "" : "stale";
+    var lamp = $("lamp"); lamp.textContent = T.ok; lamp.className = lampOn ? "on" : "";
+    var msg = $("msg");
+    msg.className = mic === "denied" ? "tap" : "";
+    msg.textContent = mic === "asking" ? T.asking : mic === "denied" ? T.denied : mic === "none" ? T.none
+      : live ? "" : (tuning.notes.length ? T.pluck : T.sing);
+    var bs = $("strings").children, show = lock >= 0 ? lock : cur;
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].className = (i === show ? "cur" : "") + (i === lock ? " lock" : "") + (tuned[i] ? " ok" : "");
+    }
+    var au = $("auto");
+    au.textContent = lock >= 0 ? T.locked : T.auto;
+    au.className = lock >= 0 ? "" : "on";
+    au.style.visibility = tuning.notes.length ? "visible" : "hidden";
+  }
+  function frame() { fit(); render(); requestAnimationFrame(frame); }
+
+  /* ---- the tuning ---- */
+  function tuningLabel(tu) { return (tu.group === "guitar" ? T.guitar + " · " : tu.group === "uke" ? T.uke + " · " : "") + (EN ? tu.en : tu.zh); }
+  function chooseTuning(tu, quiet) {
+    tuning = tu; set.tuning = tu.id; if (!quiet) store();
+    cur = -1; lock = -1; tuned = []; shown = null; live = false; needleTo = 0; okSince = 0; sm.reset();
+    $("tname").textContent = tuningLabel(tu);
+    var row = $("strings"); row.innerHTML = "";
+    tu.notes.forEach(function (m, i) {
+      var b = document.createElement("button");
+      b.innerHTML = noteHtml(m, tu.flats);
+      b.addEventListener("click", function () { tapString(i); });
+      row.appendChild(b);
+    });
+    row.style.display = tu.notes.length ? "flex" : "none";
+    dirty = true;
+  }
+  /* a tap locks that string (the needle reads only it); a tap on the locked one goes back to auto */
+  function tapString(i) {
+    PAD.sfx("tap");
+    lock = lock === i ? -1 : i;
+    if (lock >= 0) cur = lock;
+    shown = null; okSince = 0; sm.reset(); live = false; needleTo = 0;
+    dirty = true;
+  }
+  function playTone() {
+    var midi = lock >= 0 ? tuning.notes[lock] : cur >= 0 ? tuning.notes[cur] : shown ? shown.midi : tuning.notes.length ? tuning.notes[0] : 69;
+    var f = Tuner.hz(midi, set.a4);
+    /* the phone's speaker barely plays 82 Hz: a narrow pulse carries the note in its overtones, soft and with a long fade */
+    PAD.sfx({ wave: "square", duty: 1, from: f, to: f, ms: 1500, attack: 8, decay: 1200, vol: 0.45 });
+    toneUntil = now() + 1700; sm.reset();
+    if (!shown && midi) { shown = { i: tuning.notes.indexOf(midi), midi: midi, cents: 0 }; live = false; }
+    dirty = true;
+  }
+
+  /* ---- the microphone: on while the tuner screen is up, off on the list ---- */
+  function startMic() {
+    if (!PAD.mic) { mic = "none"; dirty = true; return; }
+    mic = "asking"; dirty = true;
+    PAD.mic.start().then(function (r) {
+      if (listOpen) { PAD.mic.stop(); mic = "off"; return; }
+      mic = r === "on" ? "on" : r === "denied" ? "denied" : "none"; dirty = true;
+    }, function () { mic = "none"; dirty = true; });
+  }
+  function stopMic() { if (PAD.mic) PAD.mic.stop(); mic = "off"; live = false; dirty = true; }
+
+  /* ---- the tuning list ---- */
+  var listOpen = false;
+  function buildList() {
+    var rows = $("rows"); rows.innerHTML = "";
+    var group = null;
+    Tuner.TUNINGS.forEach(function (tu) {
+      if (tu.group !== group) {
+        group = tu.group;
+        var h = document.createElement("h3"); h.textContent = T[group]; rows.appendChild(h);
+      }
+      var b = document.createElement("button");
+      b.className = "row" + (tu === tuning ? " sel" : "");
+      var l = document.createElement("b"); l.textContent = EN ? tu.en : tu.zh;
+      var s = document.createElement("span");
+      s.textContent = tu.notes.map(function (m) { return Tuner.name(m, tu.flats).n; }).join(" ");
+      b.appendChild(l); b.appendChild(s);
+      b.addEventListener("click", function () { PAD.sfx("ok"); chooseTuning(tu); closeList(); });
+      rows.appendChild(b);
+    });
+    var a = document.createElement("div"); a.id = "a4";
+    var lab = document.createElement("span");
+    function show() { lab.textContent = T.a4 + " = " + set.a4 + " " + T.hz; }
+    function step(d) {
+      return function () {
+        var v = set.a4 + d;
+        if (v < 432 || v > 446) { PAD.sfx("err"); return; }
+        set.a4 = v; store(); show(); PAD.sfx("tick");
+      };
+    }
+    var minus = document.createElement("button"); minus.textContent = "-"; minus.addEventListener("click", step(-1));
+    var plus = document.createElement("button"); plus.textContent = "+"; plus.addEventListener("click", step(1));
+    show(); a.appendChild(lab); a.appendChild(minus); a.appendChild(plus);
+    var h2 = document.createElement("h3"); h2.textContent = T.a4; rows.appendChild(h2);
+    rows.appendChild(a);
+  }
+  function openList() {
+    PAD.sfx("tap"); listOpen = true; stopMic(); buildList(); $("list").className = "open";
+    var sel = document.querySelector("#rows .sel"); if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: "nearest" });
+  }
+  function closeList() {
+    listOpen = false; $("list").className = "";
+    shown = null; sm.reset(); needleTo = 0; dirty = true;
+    startMic();
+  }
+
+  $("tuning").addEventListener("click", openList);
+  $("back").addEventListener("click", function () { PAD.sfx("tap"); closeList(); });
+  $("auto").addEventListener("click", function () { if (lock >= 0) tapString(lock); });
+  $("tone").addEventListener("click", playTone);
+  $("msg").addEventListener("click", function () { if (mic === "denied") { PAD.sfx("tap"); startMic(); } });
+  $("ltitle").textContent = T.list; $("back").textContent = T.back; $("tone").textContent = T.tone;
+  if (PAD.mic) PAD.on("sound", onSound);
+
+  /* keys work too (keyboard, or a runtime that shows the pad anyway): left / right pick a string, A plays it,
+     B leaves the list or a lock, START opens the list */
+  PAD.on("press", function (b) {
+    if (listOpen) { if (b === "b" || b === "start") { PAD.sfx("tap"); closeList(); } return; }
+    var n = tuning.notes.length;
+    if ((b === "left" || b === "right") && n) {
+      var i = lock >= 0 ? lock : cur >= 0 ? cur : (b === "left" ? n : -1);
+      i = Math.max(0, Math.min(n - 1, i + (b === "left" ? -1 : 1)));
+      lock = -1; tapString(i);
+    }
+    else if (b === "a") playTone();
+    else if (b === "b" && lock >= 0) tapString(lock);
+    else if (b === "start") openList();
+  });
+
+  function begin(saved) {
+    if (saved && saved.v === 1) {
+      if (Tuner.byId(saved.tuning)) set.tuning = saved.tuning;
+      if (saved.a4 >= 432 && saved.a4 <= 446 && saved.a4 === Math.round(saved.a4)) set.a4 = saved.a4;
+    }
+    chooseTuning(Tuner.byId(set.tuning), true);
+    startMic();
+    requestAnimationFrame(frame);
+  }
+  /* a save that cannot be read just means the defaults; nothing else is kept */
+  PAD.load("set").then(begin, function () { begin(null); });
+})();
+</script>
+</body>
+</html>

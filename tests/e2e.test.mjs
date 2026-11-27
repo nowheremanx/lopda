@@ -563,7 +563,7 @@ test("store: an app that asks for a capability shows its icons before install, a
   await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
   await p.waitForSelector("#store-list .store-item");
 
-  await p.fill("#store-q", "吹蜡烛");
+  await p.fill("#store-q", "调音器");
   const item = p.locator("#store-list .store-item");
   await item.waitFor();
   assert.equal(await item.locator(".store-perms .perm").count(), 1, "the entry shows the microphone as one icon");
@@ -589,7 +589,7 @@ test("store: an app that asks for a capability shows its icons before install, a
   await p.waitForSelector("#file-ask .ask-perms");
   await p.click("#file-ok");
   await p.waitForFunction(() => [...document.querySelectorAll("#store-list .store-item")]
-    .some((x) => x.textContent.includes("吹蜡烛") && x.querySelector("button").textContent === "打开"), null, { timeout: 15000 });
+    .some((x) => x.textContent.includes("调音器") && x.querySelector("button").textContent === "打开"), null, { timeout: 15000 });
 
   const granted = await p.evaluate(() => new Promise((resolve, reject) => {
     const req = indexedDB.open("lopda");
@@ -600,12 +600,12 @@ test("store: an app that asks for a capability shows its icons before install, a
       get.onerror = () => reject(get.error);
     };
   }));
-  assert.equal(granted?.apps?.["blow-candles"]?.mic, true, "the install dialog granted the microphone");
+  assert.equal(granted?.apps?.["string-tuner"]?.mic, true, "the install dialog granted the microphone");
 
   /* HOME scrolls the new tile into view: the grid is taller than the screen and the app sits at the end */
   await p.click("#home-key");
   await p.waitForTimeout(200);
-  const tileBox = await p.locator("#home .app", { hasText: "吹蜡烛" }).boundingBox();
+  const tileBox = await p.locator("#home .app", { hasText: "调音器" }).boundingBox();
   const viewBox = await p.locator("#v-home").boundingBox();
   assert.ok(tileBox && viewBox, "the installed app has a home tile");
   assert.ok(tileBox.y >= viewBox.y - 1 && tileBox.y + tileBox.height <= viewBox.y + viewBox.height + 1,
@@ -767,13 +767,13 @@ test("a production link runs the installed copy and fetches nothing when the reg
 
 test("a link: an app that asks for a capability is confirmed first, an unknown id stays home, a built-in opens", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await page(t, { locale: "zh-CN" });
-  await p.goto(base + "/runtime/?app=blow-candles", { waitUntil: "load" });
+  await p.goto(base + "/runtime/?app=string-tuner", { waitUntil: "load" });
   await p.waitForSelector("#file-ask .ask-perms", { timeout: 15000 });
   await p.click("#file-no");
   await p.waitForSelector("#file-ask", { state: "detached" });
   await p.waitForTimeout(300);
   assert.equal(await p.isHidden("#v-home"), false, "cancelling stays home");
-  assert.equal(await p.locator("#home .app", { hasText: "吹蜡烛" }).count(), 0, "and installs nothing");
+  assert.equal(await p.locator("#home .app", { hasText: "调音器" }).count(), 0, "and installs nothing");
 
   await p.goto(base + "/runtime/?app=no-such-app", { waitUntil: "load" });
   await p.waitForFunction(() => /没找到链接里的程序/.test(document.getElementById("toast").textContent), null, { timeout: 15000 });
@@ -9484,9 +9484,9 @@ test("photo puzzle: arcade counts down on the screen-edge fuse, pauses in the me
 
 /* ---------- the two demo apps: 滚珠迷宫 (tilt) and 吹蜡烛 (microphone), with the stubbed phone above ----------
    Each starts its sensor only when play starts and stops it when play pauses or ends; "denied" falls back to keys. */
-const runDemo = async (p, id) => {
-  const man = JSON.parse(readFileSync(join(ROOT, "registry/apps", id, "manifest.json"), "utf8"));
-  const html = readFileSync(join(ROOT, "registry/apps", id, "index.html"), "utf8");
+const runDemo = async (p, id, dir = "registry/apps") => {
+  const man = JSON.parse(readFileSync(join(ROOT, dir, id, "manifest.json"), "utf8"));
+  const html = readFileSync(join(ROOT, dir, id, "index.html"), "utf8");
   await p.evaluate(([man, html]) => { const a = Object.assign({}, man, { html }); window.LP.upsert("apps", a); window.LP.runApp(a); }, [man, html]);
   let f;
   await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.game).catch(() => false); }, id);
@@ -9540,7 +9540,7 @@ test("tilt-maze: B on the dialog falls back to keys, says so, and the D-pad push
 
 test("blow-candles: a round opens the mic, a loud sound puts candles out, the mic closes between rounds and on pause", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await sensePage(t);
-  const f = await runDemo(p, "blow-candles");
+  const f = await runDemo(p, "blow-candles", "sdk/examples");   /* left the store for the tuner (decisions.md section 75) */
   assert.equal(await micOn(p), false, "no mic on the title screen");
   await press(p, "a");
   await p.waitForSelector("#file-ask .box");
@@ -9578,7 +9578,7 @@ test("blow-candles: a round opens the mic, a loud sound puts candles out, the mi
 
 test("blow-candles: B on the dialog falls back to holding A, says so, and A puts a candle out", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await sensePage(t);
-  const f = await runDemo(p, "blow-candles");
+  const f = await runDemo(p, "blow-candles", "sdk/examples");   /* left the store for the tuner (decisions.md section 75) */
   await press(p, "a");
   await p.waitForSelector("#file-ask .box");
   await press(p, "b");
