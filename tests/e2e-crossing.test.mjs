@@ -206,3 +206,22 @@ test("crossing at 331x359: the results card's word rows are 32 px and the six-wo
   assert.ok(card.button.h >= 44, "NEXT ROUND is still a finger target");
   assert.deepEqual(errors, [], "no page errors");
 });
+
+test("crossing: the tutorial's word is saved with taught, so leaving on the last card does not replay the demo (#300)", { skip, timeout: 90000 }, async (t) => {
+  let { p, errors, frame } = await open(t, { round: 1, cleared: 0, taught: false, hints: 3, done: [] });
+  await press(p, "a");
+  let f = frame();
+  await until(p, () => f.evaluate(() => game.phase === "demoEnd"), "the demo to end");
+  const saved = await p.evaluate(() => JSON.parse(localStorage.getItem("lopda-dev:crossing")).game);
+  assert.equal(saved.taught, true, "the save that wrote the demo's word did not write taught");
+  const given = saved.done.length;
+  /* leave on the "your turn" card (no START) and come back */
+  await p.reload({ waitUntil: "load" });
+  await until(p, async () => { f = frame(); return !!f && await f.evaluate(() => !!(window.game && game.phase === "title")).catch(() => false); }, "the title again");
+  await press(p, "a");
+  await until(p, () => f.evaluate(() => game.phase === "play" || game.phase === "demo"), "the round again");
+  assert.equal(await f.evaluate(() => game.phase), "play", "the demo played a second time");
+  const again = await p.evaluate(() => JSON.parse(localStorage.getItem("lopda-dev:crossing")).game);
+  assert.equal(again.done.length, given, "a second word was handed over");
+  assert.deepEqual(errors, []);
+});

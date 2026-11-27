@@ -43,7 +43,7 @@ var TX = {
   how1: { zh: "音符到竖线时按 A。长条要按住，到尾再松。START 暂停。", en: "Press A as a note crosses the line. Hold long bars to the end. START pauses." },
   how2: { zh: "国王的眼睛睁开时，A、B 都别按。空心音符是假的，按了就露馅；眼睛闭上再起手。", en: "King's eye? Stop A/B. Hollow notes are fake; don't press. Resume when it closes." },
   how3: { zh: "菱形音符是磬，按 B。A 是竽，B 是磬；手忙脚乱时，先看清形状。", en: "Diamond notes are chimes: press B. A is sheng, B is chime. Read the shape first." },
-  how4: { zh: "长音会在眼睛睁开时结束：松手。眼睛闭上时接下一个音符。后面的曲子眼睛会眨一下，但还在看你，别提前按。", en: "Holds end when the eye opens: release. Resume when it closes. Later songs blink once but keep watching: wait." },
+  how4: { zh: "长音在眼睛睁开时结束：松手。眼睛闭上再接下一个音。眨一下眼也还在看你：别按。", en: "A hold ends when the eye opens: let go. Play on when it closes. A blink still watches: wait." },
   ready: { zh: "准备", en: "READY" },
   go: { zh: "开始！", en: "GO!" },
   watchWarn: { zh: "王上看过来了", en: "King is watching" },
@@ -427,17 +427,20 @@ game.scene("select", {
     for (var row = 0; row < VIEW_ROWS; row++) {
       var i = selectTop + row;
       if (i >= SONGS.length) break;
-      var s = SONGS[i], y = LIST_Y + row * ROW_H, on = i === selectSel;
+      var s = SONGS[i], y = LIST_Y + row * ROW_H, on = i === selectSel, band = !on && row % 2 === 1;
       if (on) g.rect(2, y, 156, ROW_H - 1, INK);
-      else if (row % 2) g.rect(2, y, 156, ROW_H - 1, MID);
+      else if (band) g.rect(2, y, 156, ROW_H - 1, MID);
+      /* the second line's colour: never DARK on a MID band (UI.md: dark on mid is too faint to read), and the
+         unplayed difficulty dots turn PAPER there, or they would be MID on MID and vanish */
+      var soft = on ? PAPER : band ? INK : DARK, off = band ? PAPER : MID;
       /* act badge */
       var act = "I".repeat(Math.max(1, s.act));
-      g.text(act, 6, y + 1, { color: on ? PAPER : DARK });
+      g.text(act, 6, y + 1, { color: soft });
       g.text((i + 1) + "." + T(s.name), 20, y + 1, { color: on ? PAPER : INK });
       var b = profile.best[selectEncore ? s.id + ":encore" : s.id];
-      g.text(b ? b.rank : T(TX.fresh), 154, y + 1, { align: "right", color: on ? PAPER : DARK });
-      for (var k = 0; k < 5; k++) g.rect(20 + k * 6, y + 15, 4, 2, k < s.difficulty ? (on ? PAPER : INK) : MID);
-      if (b) g.text(String(b.score), 154, y + 12, { align: "right", color: on ? PAPER : DARK });
+      g.text(b ? b.rank : T(TX.fresh), 154, y + 1, { align: "right", color: soft });
+      for (var k = 0; k < 5; k++) g.rect(20 + k * 6, y + 15, 4, 2, k < s.difficulty ? (on ? PAPER : INK) : off);
+      if (b) g.text(String(b.score), 154, y + 12, { align: "right", color: soft });
       if (!selectEncore && i === profile.story) {
         var mk = on ? PAPER : INK;
         g.rect(4, y + 15, 5, 1, mk);
