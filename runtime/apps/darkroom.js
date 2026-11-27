@@ -40,7 +40,8 @@ var D={
   gen:0,                     // bumped when the darkroom closes: work started before then stops
   pics:null,                 // the open roll's developed 800x700 pictures: {id, img:[], job:[]}; never stored
   prints:null,               // the three prints being made for the print menu: {key, jobs}
-  idx:0                      // the frame on the viewer
+  idx:0,                     // the frame on the viewer
+  negTok:0                   // bumped when a negative being made is given up (B)
 };
 
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
@@ -75,7 +76,9 @@ function renderKeys(){
   }else if(D.sheet==="name"){
     keys={select:null,start:null,b:softkey("b","sk.cancel"),a:softkey("a","sk.save")};
   }else if(D.sheet){
-    keys={select:null,start:null,b:softkey("b",D.sheet==="print"?"sk.cancel":"sk.back",!!D.busy),a:softkey("a","sk.confirm",!!D.busy)};
+    /* while the negative is being made, B gives it up (issue #305) */
+    var making=!!D.busy && D.sheet==="export";
+    keys={select:null,start:null,b:softkey("b",D.sheet==="print"||making?"sk.cancel":"sk.back",!!D.busy && !making),a:softkey("a","sk.confirm",!!D.busy)};
   }else if(D.mode==="view"){
     keys={select:null,start:softkey("start","sk.print",!!D.busy),b:softkey("b","sk.back",!!D.busy),a:null};
   }else{
@@ -145,8 +148,15 @@ function renderSheet(){
   sh.appendChild(head);
   if(D.sheet==="name"){ nameSheet(sh,r); renderKeys(); return; }
   if(D.sheet==="export" || D.sheet==="discard" || D.sheet==="erase") sh.appendChild(el("p","hint dk-note",tr(D.sheet==="export"?"dk.export.note":D.sheet==="discard"?"dk.discard.note":"dk.erase.note")));
-  else if(D.sheet==="print" && D.prints && D.prints.key===r.id+"-"+D.idx && D.prints.jobs["p-single"] && D.prints.jobs["p-single"].out && D.prints.jobs["p-single"].out.placed)
-    sh.appendChild(el("p","hint dk-note",tr("dk.print.place")));
+  else if(D.sheet==="print"){
+    /* 全部单张 opens every frame's place too, so the note speaks of it whenever one of them opens (issue #306) */
+    var mine=D.prints && D.prints.key===r.id+"-"+D.idx ? D.prints : null;
+    var single=mine && mine.jobs["p-single"] && mine.jobs["p-single"].out && mine.jobs["p-single"].out.placed;
+    if(single) sh.appendChild(el("p","hint dk-note",tr("dk.print.placeboth")));
+    else if(mine && mine.anyPlace) sh.appendChild(el("p","hint dk-note",tr("dk.print.placeall")));
+  }
+  /* the confirmation stays up while the negative is made, with the work in words, not only greyed keys (issue #305) */
+  if(D.busy && D.sheet==="export") sh.appendChild(el("p","hint dk-note dk-busy",D.busy));
   var ul=el("ul","lcd-menu");
   sheetItems().forEach(function(it,i){
     var li=el("li",i===D.sel?"on":""); li.appendChild(el("span","",tr(it.label)));
@@ -174,6 +184,8 @@ function saveName(){
   input.blur();
   if(name!==(r.name||"")){
     r.name=name;
+    /* the contact sheet and the negative carry the name: the ones made before it are dropped */
+    D.prints=null; D.neg=null;
     if(S.db) put(S.refs.rolls.doc(r.id),r);
   }
   sfx("ok"); toMenu("rename"); renderSheet(); render();
@@ -285,11 +297,13 @@ function exportNegative(){
   if(job.blob){ done(); save(job.blob); return; }
   /* leaving the darkroom (HOME) bumps D.gen: a negative finished after that is dropped, so no share sheet or save
      dialog opens over another screen (issue #304), the same gate as printOut and printAll */
-  var gen=D.gen;
+  var gen=D.gen, tok=++D.negTok, live=function(){ return gen===D.gen && tok===D.negTok; };
   busy(tr("dk.exporting"));
-  job.promise.then(function(b){ if(gen===D.gen) return save(b); },function(e){ if(gen!==D.gen) return; toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); })
-    .then(function(){ if(gen===D.gen) done(); });
+  job.promise.then(function(b){ if(live()) return save(b); },function(e){ if(!live()) return; toast(tr("save.failed",{code:(e&&e.message)||"?"})); sfx("err"); })
+    .then(function(){ if(live()) done(); });
 }
+/* B while the negative is made: nothing is saved, back to the roll's menu */
+function cancelExport(){ D.negTok++; D.busy=null; D.neg=null; sfx("miss"); toMenu("export"); renderSheet(); render(); }
 /* the sealed places go, the times and pictures stay; prints made from the old place are dropped */
 function erasePlaces(){
   var r=current(); if(!r) return;
@@ -726,7 +740,15 @@ function preparePrints(r){
   var key=r.id+"-"+D.idx, k=D.idx;
   if(D.prints && D.prints.key===key) return;
   var jobs={}, gen=D.gen;
-  D.prints={key:key, jobs:jobs};
+  D.prints={key:key, jobs:jobs, anyPlace:false};
+  /* does any frame 全部单张 would print open a place with this phone's keys? Only then the note names it (issue #306) */
+  r.frames.reduce(function(pr,f){
+    return pr.then(function(found){ return found || !f || f.blank || !f.geo ? found : placeOf(f).then(function(p){ return !!p; }); });
+  },Promise.resolve(false)).then(function(found){
+    if(!found || !D.prints || D.prints.jobs!==jobs) return;
+    D.prints.anyPlace=true;
+    if(D.sheet==="print") renderSheet();
+  });
   ["p-single","p-card","p-strip"].reduce(function(pr,kind){
     return pr.then(function(){
       if(gen!==D.gen || !D.prints || D.prints.jobs!==jobs) return;
@@ -830,6 +852,7 @@ function compareStocks(r){
 
 /* ---------- chin pad ---------- */
 function darkButton(b,down){
+  if(D.busy && D.sheet==="export" && D.mode!=="dev"){ if(b==="b" && down) cancelExport(); return; }
   if(D.mode==="dev" || D.busy) return;   /* developing and printing ignore every key */
   if(D.sheet==="name"){ if(!down) return; if(b==="a") saveName(); else if(b==="b") cancelName(); return; }
   if(D.sheet){
