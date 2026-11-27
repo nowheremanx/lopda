@@ -19,7 +19,7 @@ button:disabled{color:#4a5a32;border-style:dashed;box-shadow:none}
 header{flex:none;display:flex;gap:8px;padding:8px 12px 0;align-items:stretch}
 #chord{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:4px;text-align:left}
 #cname{font-size:20px;font-weight:bold;overflow-wrap:anywhere}
-#sort,#view{min-width:56px;padding:0 6px}
+#view{min-width:56px;padding:0 6px}
 main{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:10px 12px 6px}
 /* the picture takes the height that is left; Draw.paint scales it by a whole number to fit */
 #pwrap{flex:1;min-height:110px;display:flex;align-items:center;justify-content:center;touch-action:pan-y;cursor:pointer}
@@ -27,7 +27,8 @@ main{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:10px
 #qname{font-size:15px;text-align:center;flex:none}
 #line{font-size:15px;text-align:center;flex:none;font-weight:bold;overflow-wrap:anywhere}
 #tones{display:flex;justify-content:center;gap:6px;flex:none;flex-wrap:wrap}
-.tone{display:flex;flex-direction:column;align-items:center;min-width:36px;border:2px solid #1f2a14;padding:2px 0}
+/* each chord tone is a button that plays it alone */
+.tone{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:44px;padding:2px 4px;line-height:1.15}
 .tone b{font-size:15px}
 .tone span{font-size:13px;color:#4a5a32}
 footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
@@ -45,10 +46,11 @@ footer button{flex:1;min-width:0}
   padding:0 8px;min-height:44px;box-sizing:border-box;border-radius:0;outline:none}
 #q::placeholder{color:#4a5a32}
 #msg{font-size:15px;min-height:20px;margin-top:6px}
-.grid4,.grid3{display:grid;gap:8px}
+.grid4,.grid3,.grid2{display:grid;gap:8px}
 .grid4{grid-template-columns:repeat(4,1fr)}
 .grid3{grid-template-columns:repeat(3,1fr)}
-.grid4 button,.grid3 button{min-width:0;padding:0 4px;box-shadow:none}
+.grid2{grid-template-columns:repeat(2,1fr)}
+.grid4 button,.grid3 button,.grid2 button{min-width:0;padding:0 4px;box-shadow:none}
 .qual{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px 4px;line-height:1.15}
 .qual b{font-size:15px}
 .qual span{font-size:13px}
@@ -70,7 +72,7 @@ footer button{flex:1;min-width:0}
 </style>
 </head>
 <body>
-<header><button id="chord"><span id="cname"></span><span>▾</span></button><button id="sort"></button><button id="view"></button></header>
+<header><button id="chord"><span id="cname"></span><span>▾</span></button><button id="view"></button></header>
 <main>
   <div id="pwrap"><canvas id="pic" width="104" height="104"></canvas></div>
   <div id="qname"></div>
@@ -89,6 +91,7 @@ footer button{flex:1;min-width:0}
     <h3 id="bassH"></h3><div id="basses" class="grid4"></div>
     <h3 id="recentH"></h3><div id="recent" class="grid4"></div>
     <button id="tofind"></button>
+    <h3 id="sortH"></h3><div id="sorts" class="grid2"></div>
     <h3 id="volH"></h3><div id="vol" class="grid3"></div>
   </div>
 </div>
@@ -198,9 +201,12 @@ var Chords = (function () {
   function tones(c) {
     var Q = qual(c.q), out = [];
     if (c.bass !== null && c.bass !== undefined && Q.iv.map(function (i) { return mod12(c.root + i); }).indexOf(c.bass) < 0)
-      out.push({ pc: c.bass, lab: "/" });
-    for (var i = 0; i < Q.iv.length; i++) out.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i] });
-    return out;
+      out.push({ pc: c.bass, lab: "/", iv: null });
+    /* listed as they stack up from the root: a 9 is a ninth (14 semitones), not a second, so it comes last */
+    var up = [];
+    for (var i = 0; i < Q.iv.length; i++) up.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i], iv: Q.lab[i] === "9" ? Q.iv[i] + 12 : Q.iv[i] });
+    up.sort(function (a, b) { return a.iv - b.iv; });
+    return out.concat(up);
   }
 
   /* ---------------- the hand-written shapes (section 2.3) ---------------- */
@@ -641,20 +647,26 @@ var Guitar = (function () {
     return cache[midi];
   }
 
-  function stop() {
-    if (!ctx) return;
+  function hush(list) {
     var t = ctx.currentTime;
-    playing.forEach(function (p) {
+    list.forEach(function (p) {
       try { p.g.gain.cancelScheduledValues(t); p.g.gain.setTargetAtTime(0, t, 0.02); p.src.stop(t + 0.1); } catch (e) {}
     });
+  }
+  function stop() {
+    if (!ctx) return;
+    hush(playing);
     playing = [];
   }
 
-  /* notes: midi numbers, low string first; gap: seconds between strings (0.012 for a strum, 0.18 for an arpeggio) */
-  function play(notes, gap) {
+  /* notes: midi numbers, low string first; gap: seconds between strings (0.012 for a strum, 0.18 for an arpeggio).
+     ring: leave what is sounding alone (single tones tapped one after another ring together, so an interval is heard
+     both ways); at most 8 notes ring, the oldest go first */
+  function play(notes, gap, ring) {
     if (!level || !notes.length || !ensure()) return false;
     if (ctx.state === "suspended" && ctx.resume) ctx.resume();
-    stop();
+    if (!ring) stop();
+    else if (playing.length + notes.length > 8) hush(playing.splice(0, playing.length + notes.length - 8));
     var t0 = ctx.currentTime + 0.02;
     notes.forEach(function (m, k) {
       var b = bufferFor(m), src = ctx.createBufferSource(), g = ctx.createGain();
@@ -696,14 +708,14 @@ var Guitar = (function () {
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
     listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
-    bassLab: "bass", held: "hold for arpeggio"
+    bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"]
   } : {
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
     listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
-    bassLab: "低音", held: "长按是分解"
+    bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"]
   };
   function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
@@ -755,18 +767,17 @@ var Guitar = (function () {
     var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    $("sort").textContent = set.sort === "pos" ? t("pos") : t("common");
     $("view").textContent = set.view === "neck" ? t("neck") : t("box");
-    $("sort").classList.toggle("on", set.sort === "pos");
     $("view").classList.toggle("on", set.view === "neck");
     $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
       (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
     var tones = Chords.tones(c), row = $("tones");
     row.innerHTML = "";
     tones.forEach(function (x) {
-      var cell = el("div", "tone");
+      var cell = el("button", "tone");
       cell.appendChild(el("b", "", Chords.NAMES[x.pc]));
       cell.appendChild(el("span", "", x.lab === "/" ? t("bassLab") : x.lab));
+      cell.addEventListener("click", function () { playTone(x); });
       row.appendChild(cell);
     });
     paint();
@@ -790,6 +801,20 @@ var Guitar = (function () {
     sfx("tick");
   }
   function notesOf(v) { return Chords.midiOf(v.frets); }
+  /* one chord tone on its own, so the intervals can be heard: every tone is counted up from the root as the voicing plays
+     it (its lowest root, or the first root above the bass when the voicing leaves the root out), so R, 3, 5, b7, 9 climb
+     in order; a slash chord's extra bass is the voicing's lowest note */
+  function toneMidi(v, x) {
+    var notes = notesOf(v), low = Math.min.apply(null, notes), root = set.cur.root, r = null;
+    if (x.iv === null) return low;
+    notes.forEach(function (n) { if (Chords.mod12(n) === root && (r === null || n < r)) r = n; });
+    if (r === null) r = low + Chords.mod12(root - low);
+    return r + x.iv;
+  }
+  function playTone(x) {
+    var v = current().v;
+    if (!v || !Guitar.play([toneMidi(v, x)], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+  }
   function strum(arp) {
     var v = current().v;
     if (!v) return;
@@ -831,15 +856,15 @@ var Guitar = (function () {
   })();
   $("prev").addEventListener("click", function () { step(-1); });
   $("next").addEventListener("click", function () { step(1); });
-  function toggleSort() {
+  function toggleSort() { setSort(set.sort === "pos" ? "common" : "pos"); }
+  function setSort(to) {
     var v = current().v;
-    set.sort = set.sort === "pos" ? "common" : "pos";
+    set.sort = to;
     /* stay on the same voicing in the new order */
     var l = list(), id = v ? v.frets.join(",") : "";
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("tick"); store(); show();
   }
-  $("sort").addEventListener("click", toggleSort);
   $("view").addEventListener("click", function () { set.view = set.view === "neck" ? "box" : "neck"; sfx("tick"); store(); show(); });
   $("cname").parentNode.addEventListener("click", function () { openPicker(); });
 
@@ -891,6 +916,10 @@ var Guitar = (function () {
       rec.appendChild(choice(n, false, function () { var c = Chords.parse(n); if (!c) return; sfx("ok"); go(c, 0); closePicker(); }));
     });
     $("recentH").style.display = set.recent.length ? "" : "none";
+    var ord = $("sorts"); ord.innerHTML = "";
+    ["common", "pos"].forEach(function (id, i) {
+      ord.appendChild(choice(T.orders[i], set.sort === id, function () { if (set.sort !== id) setSort(id); else sfx("tick"); buildPicker(); }));
+    });
     var vol = $("vol"); vol.innerHTML = "";
     T.vol.forEach(function (label, i) {
       vol.appendChild(choice(label, set.vol === i, function () {
@@ -1021,6 +1050,7 @@ var Guitar = (function () {
   $("pback").textContent = t("back"); $("pok").textContent = t("ok"); $("qgo").textContent = t("find");
   $("q").placeholder = t("search"); $("rootH").textContent = t("root"); $("bassH").textContent = t("bass");
   $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
+  $("sortH").textContent = t("order");
   $("fback").textContent = t("back");
   $("fplay").textContent = t("listen"); $("fsee").textContent = t("see");
   document.documentElement.lang = EN ? "en" : "zh";

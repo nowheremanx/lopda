@@ -154,3 +154,11 @@ test("pictures: the box and the neck use only the four tones; the nut, the fret 
   assert.ok(n.px.every((t) => t >= 0 && t <= 3));
   assert.ok(n.px.some((t) => t === 2) && n.px.some((t) => t === 1), "chord tones in mid and dark across the neck");
 });
+
+test("tones: each chord tone carries its interval above the root, in stacking order; a slash chord's extra bass carries none", () => {
+  assert.deepEqual([...C.tones(C.parse("C9"))].map((x) => x.iv), [0, 4, 7, 10, 14], "the 9 is a ninth and comes last");
+  assert.deepEqual([...C.tones(C.parse("Cadd9"))].map((x) => x.lab), ["R", "3", "5", "9"]);
+  assert.deepEqual([...C.tones(C.parse("Csus2"))].map((x) => x.iv), [0, 2, 7], "a sus2's 2 stays a second");
+  assert.deepEqual([...C.tones(C.parse("Am/G"))].map((x) => x.iv), [null, 0, 3, 7]);
+  assert.deepEqual([...C.tones(C.parse("C/E"))].map((x) => x.iv), [0, 4, 7], "a bass that is a chord tone is not listed twice");
+});
