@@ -130,7 +130,7 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.1",
+      "version": "0.4.2",
       "released": "2026-11-23",
       "updated": "2026-11-24",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
@@ -143,8 +143,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "79134c20f32ffdf172e68de36b3bbc90ff502be32768b7a6f0fa4a19910ea94d",
-      "bytes": 300203
+      "sha256": "1fff14ff0a42577ae60d784f4b10388cacc89e5422564c57a59cba7818ad4678",
+      "bytes": 301183
     },
     {
       "spec": "lopda/1",
@@ -171,7 +171,7 @@
         "................",
         "................"
       ],
-      "version": "0.1.2",
+      "version": "0.1.3",
       "released": "2026-11-23",
       "updated": "2026-11-24",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
@@ -184,8 +184,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "ec205b30688ab01f8e8786bd277814c88370a266f76cc7151759b2f6dad0a4fa",
-      "bytes": 242396
+      "sha256": "2f1946120f61940a64342e3719a76f5fc66d72c4163120817f7ebf0266174faa",
+      "bytes": 244650
     },
     {
       "spec": "lopda/1",

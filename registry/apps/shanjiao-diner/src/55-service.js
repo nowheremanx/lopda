@@ -326,6 +326,7 @@ function finishService(early) {
   S.stats.lost += SERV.lost;
   S.stats.earned += SERV.earned;
   S.stats.tips += SERV.tips;
+  serviceLive = false;
   save();
   game.go("night");
 }
@@ -344,7 +345,12 @@ game.scene("service", {
     };
     game.ambience(S.weather === "rain" ? "rain" : null, 0.3);
     if (typeof playMusic === "function") playMusic("service");
+    /* the evening is saved once, here, as "service": leaving mid-evening and
+     * coming back starts this evening again with the stock it opened with */
+    S.phase = "service";
+    serviceLive = false;
     save();
+    serviceLive = true;
   },
   update: function (dt) {
     if (!SERV || SERV.done) return;

@@ -483,7 +483,7 @@ function startDevelop(r){
 /* ---------- the viewer: the print laid on the glass, the LCD's one place in colour ---------- */
 function openViewer(r){
   if(!r || !r.dev) return;
-  if(r.dev.v!==DEV.VERSION){ toast(tr("dk.newer")); sfx("err"); return; }
+  if(!DEV.known(r.dev.v)){ toast(tr("dk.newer")); sfx("err"); return; }
   D.sheet=""; renderSheet();
   if(!D.pics || D.pics.id!==r.id) D.pics={id:r.id, img:[], job:[]};
   D.mode="view"; D.idx=0;

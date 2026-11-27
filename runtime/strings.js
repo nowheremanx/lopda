@@ -274,7 +274,8 @@
       "rs.unreadable": "读不出这个文件", "rs.ask": "这个备份做于 {when}：{docs} 份文档、{files} 个文件，约 {size}。恢复会把这台掌机上的全部数据换成备份里的。",
       "rs.first": "先备份现在的数据", "rs.sure": "确定吗？现在的数据会全部被替换，不能撤销。", "rs.yes": "全部替换",
       "rs.working": "正在恢复，不要关闭…", "rs.done": "恢复好了，正在重新开机…",
-      "rs.failed": "恢复失败，什么都没有改。", "rs.lost": "恢复失败，原来的数据也没能写回。先把原来的数据存成备份文件：",
+      "rs.failed": "恢复失败，什么都没有改。",
+      "rs.nocopy": "刚才的备份没有保存。先把现在的数据备份好，才能恢复。", "rs.half": "上次恢复没有做完，照片、书这类文件可能对不上。请再恢复一次那个备份。", "rs.lost": "恢复失败，原来的数据也没能写回。先把原来的数据存成备份文件：",
 
       "upd.label": "系统", "upd.check": "检查更新", "upd.busy": "接收中…", "upd.restart": "重启升级",
       "upd.nosw": "这个浏览器不支持离线版本，刷新页面就是最新的。", "upd.latest": "已经是最新版 {v}。",
@@ -1279,7 +1280,8 @@
       "rs.unreadable": "Cannot read this file", "rs.ask": "Backup made {when}: {docs} documents, {files} files, about {size}. Restoring replaces all data on this handheld with the backup's.",
       "rs.first": "Back up current data first", "rs.sure": "Sure? All current data will be replaced. This cannot be undone.", "rs.yes": "Replace all",
       "rs.working": "Restoring, keep this open…", "rs.done": "Restored. Restarting…",
-      "rs.failed": "Restore failed. Nothing was changed.", "rs.lost": "Restore failed, and the old data could not be written back. Save it as a backup file first:",
+      "rs.failed": "Restore failed. Nothing was changed.",
+      "rs.nocopy": "That backup was not saved. Back up the current data first, then restore.", "rs.half": "The last restore did not finish. Photos, books and other files may not match. Restore that backup again.", "rs.lost": "Restore failed, and the old data could not be written back. Save it as a backup file first:",
 
       "upd.label": "System", "upd.check": "Check", "upd.busy": "Receiving…", "upd.restart": "Restart",
       "upd.nosw": "No offline copy in this browser. Reload the page for the latest.", "upd.latest": "Up to date: {v}.",
