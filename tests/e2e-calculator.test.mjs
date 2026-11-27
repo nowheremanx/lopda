@@ -1,4 +1,4 @@
-// Calculator 1.2.0: key sizes on the smallest frame, the arithmetic paths a player uses, and an old save that
+// Calculator 1.2.1: key sizes on the smallest frame, the arithmetic paths a player uses, and an old save that
 // must open at 0 with its memory kept. Needs Playwright, which the repo does not depend on, so the browser tests
 // skip without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-calculator.test.mjs
@@ -73,7 +73,7 @@ async function appFrame(p) {
 const state = (frame) => frame.evaluate(() => window.__calc());
 const tap = (frame, label) => frame.getByRole("button", { name: label, exact: true }).click();
 
-test("calculator: keys are 44 px or more (memory 32), do not overlap, and nothing scrolls at 331x359", { skip, timeout: 60000 }, async (t) => {
+test("calculator: every key is 44 px or more with 8 px between keys, and nothing scrolls at 331x359", { skip, timeout: 60000 }, async (t) => {
   const { frame, errors } = await open(t);
   assert.equal(await frame.evaluate(() => innerWidth), 331, "the app frame is 331 px wide");
   assert.equal(await frame.evaluate(() => innerHeight), 359, "the app frame is 359 px tall");
@@ -104,9 +104,15 @@ test("calculator: keys are 44 px or more (memory 32), do not overlap, and nothin
   assert.ok(m.scrollW <= m.w + 1, `the page does not scroll sideways (${m.scrollW} > ${m.w})`);
 
   const memory = m.boxes.filter((b) => b.m), main = m.boxes.filter((b) => !b.m);
-  assert.equal(memory.length, 4, "MC / MR / M- / M+ are the short row");
-  for (const b of memory) assert.ok(b.h >= 32, `${b.label} is ${b.h.toFixed(1)} px tall, want >= 32`);
-  for (const b of main) assert.ok(b.h >= 44, `${b.label} is ${b.h.toFixed(1)} px tall, want >= 44`);
+  assert.equal(memory.length, 4, "MC / MR / M- / M+ are the top row");
+  for (const b of m.boxes) assert.ok(b.h >= 44, `${b.label} is ${b.h.toFixed(1)} px tall, want >= 44`);
+  /* UI.md section 3: at least 8 px between separate targets (the grid gap; the pressed-look shadow is not a target) */
+  for (let i = 0; i < m.boxes.length; i++) for (let j = i + 1; j < m.boxes.length; j++) {
+    const a = m.boxes[i], b = m.boxes[j];
+    const dx = Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w), dy = Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h);
+    if (dx < 0 && dy < 0) continue;
+    assert.ok(Math.max(dx, dy) >= 7.5, `${a.label} and ${b.label} are only ${Math.max(dx, dy).toFixed(1)} px apart`);
+  }
 
   // the order players know
   assert.deepEqual(main.map((b) => b.label).slice(0, 4), ["C", "±", "%", "÷"]);
