@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import vm from "node:vm";
 import { join } from "node:path";
 import { read, ROOT } from "./helpers.mjs";
-import { boot } from "./app-vm.mjs";
+import { boot, mulberry32 } from "./app-vm.mjs";
 
 const ctx = vm.createContext({ console });
 vm.runInContext(read("registry/apps/luck-compass/src/luck.js"), ctx, { filename: "luck.js" });
@@ -406,5 +406,103 @@ test("the counter's 32px rows leave room for all five sections", () => {
     g.text = real;
     sections.pop();
     sections.pop();
+  }
+});
+
+test("YI defines the 64 King Wen hexagrams as distinct lower-first line patterns", () => {
+  const yiCtx = vm.createContext({ console });
+  vm.runInContext(read("registry/apps/luck-compass/src/yi.js"), yiCtx, { filename: "yi.js" });
+  const Y = yiCtx.YI, hexagrams = Y.HEXAGRAMS;
+  assert.equal(hexagrams.length, 64);
+  assert.deepEqual([...hexagrams.map((h) => h.number)], Array.from({ length: 64 }, (_, i) => i + 1));
+  assert.equal(new Set(hexagrams.map((h) => h.lines.join(""))).size, 64);
+  for (const h of hexagrams) {
+    assert.deepEqual([...h.lines], [...h.lower.lines, ...h.upper.lines], h.name);
+    assert.ok(h.judgment && /[\u3400-\u9fff]/.test(h.judgment), `${h.number} judgment`);
+    assert.ok(h.image && /[\u3400-\u9fff]/.test(h.image), `${h.number} image`);
+    assert.ok(h.english && h.english.length < 90, `${h.number} English gloss`);
+  }
+  for (const [name, pattern, number] of [
+    ["乾", "111111", 1], ["坤", "000000", 2], ["泰", "111000", 11],
+    ["否", "000111", 12], ["既济", "101010", 63], ["未济", "010101", 64]
+  ]) {
+    assert.equal(Y.byName(name).number, number);
+    assert.equal(Y.byName(name).lines.join(""), pattern);
+  }
+  assert.equal(Y.byName("屯").number, 3);
+  assert.equal(Y.byName("屯").lower.name, "震");
+  assert.equal(Y.byName("屯").upper.name, "坎");
+  assert.equal(Y.byName("蒙").number, 4);
+  assert.equal(Y.byLines([1, 1, 1, 0, 0, 0]).short, "泰");
+  assert.equal(Y.primary([9, 7, 8, 6, 7, 8]).number,
+    Y.byLines([1, 1, 0, 0, 1, 0]).number);
+  assert.deepEqual([...Y.TRIGRAMS[0].lines], [1, 1, 1]);
+  assert.equal(Y.TRIGRAMS[5].direction, 0);
+});
+
+test("YI changing lines and three-coin casting are reproducible and balanced", () => {
+  const yiCtx = vm.createContext({ console });
+  vm.runInContext(read("registry/apps/luck-compass/src/yi.js"), yiCtx);
+  const Y = yiCtx.YI, lines = [9, 7, 8, 6, 7, 8], changed = Y.changed(lines);
+  assert.equal(changed.lines[0], 0);
+  assert.equal(changed.lines[3], 1);
+  assert.deepEqual([...Y.changingLines(lines)], [1, 4]);
+  assert.equal(Y.changed([7, 8, 7, 8, 7, 8]), null);
+  const first = mulberry32(123), one = Array.from({ length: 6 }, () => Y.castLine(first));
+  const next = mulberry32(123), two = Array.from({ length: 6 }, () => Y.castLine(next));
+  assert.deepEqual(one, two);
+  const rng = mulberry32(827), counts = { 6: 0, 7: 0, 8: 0, 9: 0 };
+  for (let i = 0; i < 40000; i++) counts[Y.castLine(rng)]++;
+  for (const [line, expected] of [[6, 5000], [7, 15000], [8, 15000], [9, 5000]]) {
+    assert.ok(Math.abs(counts[line] - expected) <= 600, `${line}: ${counts[line]}`);
+  }
+});
+
+test("a hexagram cast saves each line, resumes today, and never overwrites a rejected save", async () => {
+  const env = bootStored("zh");
+  await settle();
+  env.app.ctx.get("openSection")("hexagram");
+  for (let i = 0; i < 6; i++) {
+    env.press("a");
+    for (let frame = 0; frame < 32; frame++) env.app.frame();
+    await settle();
+    assert.equal(env.saves.get("gua").lines.length, i + 1);
+  }
+  const save = env.saves.get("gua"), day = env.app.ctx.get("todayKey")();
+  assert.deepEqual(save, { v: 1, day, lines: save.lines });
+  assert.equal(env.app.ctx.get("sectionSummary")("hexagram").includes(env.app.ctx.get("YI").primary(save.lines).name), true);
+  const resumed = bootStored("zh", save);
+  await settle();
+  resumed.app.ctx.get("openSection")("hexagram");
+  assert.deepEqual([...resumed.app.ctx.get("guaState").lines], save.lines);
+  resumed.press("a");
+  for (let frame = 0; frame < 40; frame++) resumed.app.frame();
+  assert.equal(resumed.app.ctx.get("guaState").lines.length, 6);
+  const rejected = bootStored("zh", null, true);
+  await settle();
+  rejected.app.ctx.get("openSection")("hexagram");
+  rejected.press("a");
+  for (let frame = 0; frame < 32; frame++) rejected.app.frame();
+  await settle();
+  assert.equal(rejected.app.ctx.get("guaState").failed, true);
+  assert.equal(rejected.saves.has("gua"), false);
+});
+
+test("every visible hexagram and trigram-chart string fits the canvas in both languages", async () => {
+  for (const lang of ["zh", "en"]) {
+    const env = bootStored(lang);
+    await settle();
+    env.app.ctx.get("openSection")("hexagram");
+    env.app.ctx.get("guaState").lines = [9, 7, 8, 6, 7, 8];
+    const g = env.app.ctx.get("game").g, castLines = drawnLines(env.app);
+    for (const line of castLines) assert.ok(g.measure(line) <= SCREEN_W, `${lang} cast: ${line}`);
+    env.press("select");
+    env.press("right");
+    env.press("a");
+    const chartLines = drawnLines(env.app);
+    for (const line of chartLines) assert.ok(g.measure(line) <= SCREEN_W, `${lang} chart: ${line}`);
+    assert.ok(chartLines.includes(lang === "en" ? "Image Earth" : "卦象 地"));
+    assert.ok(chartLines.includes(lang === "en" ? "Family mother" : "家人 母"));
+    assert.ok(chartLines.includes(lang === "en" ? "Direction SW" : "方位 西南"));
   }
 });

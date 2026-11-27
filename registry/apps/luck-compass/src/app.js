@@ -142,6 +142,7 @@ function pageVisible() { return typeof document.hidden === "undefined" || !docum
 function wantedOwner() {
   if (section === "compass") return "compass";
   if (section === "fortune" && slipState.slip === null && !slipState.animating) return "fortune";
+  if (section === "hexagram" && guaState.lines.length < 6) return "hexagram";
   return null;
 }
 function clearMotionReadings() {
@@ -213,6 +214,8 @@ function sensorResume() {
 function onShake() {
   if (section === "fortune" && motionOwner === "fortune" && wanted && live &&
       slipState.slip === null && !slipState.animating) drawSlip();
+  if (section === "hexagram" && motionOwner === "hexagram" && wanted && live &&
+      guaState.lines.length < 6 && !guaState.animating) tossGuaLine();
 }
 if (typeof PAD !== "undefined" && PAD.on) {
   if (HAS_MOTION) PAD.on("tilt", onTilt);
@@ -526,7 +529,8 @@ var REDUCED_MOTION = typeof window.matchMedia === "function" &&
 var SECTIONS = [
   { id: "almanac", name: T({ zh: "老黄历", en: "Almanac" }) },
   { id: "fortune", name: T({ zh: "每日一签", en: "Fortune" }) },
-  { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) }
+  { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) },
+  { id: "hexagram", name: T({ zh: "八卦", en: "Hexagram" }) }
 ];
 var counterCursor = 0;
 var almanacOffset = 0, almanacScroll = 0, almanacTear = 0, almanacTearDir = 1;
@@ -558,6 +562,62 @@ function syncSlipDate() {
   slipScroll = 0;
   appendStatus = "";
   syncMotion();
+}
+var guaState = { day: todayKey(), lines: [], loaded: false, failed: false, animating: false };
+var guaScroll = 0, guaChart = false, guaPanel = false, guaCursor = 0;
+var GUA_ORDER = [2, 7, 1, 0, 5, 6, 3, 4]; /* clockwise from south: 离、坤、兑、乾、坎、艮、震、巽 */
+function syncGuaDate() {
+  var key = todayKey();
+  if (key === guaState.day) return;
+  guaState.day = key;
+  guaState.lines = [];
+  guaState.animating = false;
+  guaScroll = 0;
+  syncMotion();
+}
+function saveGua() {
+  if (guaState.failed || typeof PAD === "undefined" || typeof PAD.save !== "function") return;
+  try { PAD.save("gua", { v: 1, day: guaState.day, lines: guaState.lines.slice() }); } catch (e) {}
+}
+function readGua() {
+  if (typeof PAD === "undefined" || typeof PAD.load !== "function") { guaState.loaded = true; return; }
+  var result;
+  try { result = PAD.load("gua"); }
+  catch (e) { guaState.failed = true; guaState.loaded = true; return; }
+  Promise.resolve(result).then(function (d) {
+    var valid = d && d.v === 1 && d.day === todayKey() && Array.isArray(d.lines) &&
+      d.lines.length >= 1 && d.lines.length <= 6;
+    if (valid) for (var i = 0; i < d.lines.length; i++) {
+      if (typeof d.lines[i] !== "number" || d.lines[i] < 6 || d.lines[i] > 9 ||
+          Math.floor(d.lines[i]) !== d.lines[i]) { valid = false; break; }
+    }
+    if (valid) { guaState.day = d.day; guaState.lines = d.lines.slice(); }
+    guaState.loaded = true;
+    syncMotion();
+  }, function () {
+    guaState.failed = true;
+    guaState.loaded = true;
+  });
+}
+function tossGuaLine() {
+  syncGuaDate();
+  if (!guaState.loaded || guaState.lines.length >= 6 || guaState.animating) return;
+  guaState.animating = true;
+  syncMotion();
+  sfx("tick");
+  var span = REDUCED_MOTION ? 0.1 : 0.42;
+  if (!REDUCED_MOTION) {
+    game.after(0.14, function () { sfx("tick"); });
+    game.after(0.28, function () { sfx("tick"); });
+  }
+  game.after(span, function () {
+    guaState.lines.push(YI.castLine(Math.random));
+    guaState.animating = false;
+    guaScroll = 0;
+    saveGua();
+    sfx("ok");
+    syncMotion();
+  });
 }
 function slipItem() { return SLIPS.DATA[slipState.slip]; }
 function slipTitleText() {
@@ -638,7 +698,7 @@ function appendSlip() {
   });
 }
 function openSection(id) {
-  if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac") return;
+  if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac" && id !== "hexagram") return;
   game.go(id, null, { fade: false });
 }
 function backToCounter() { openSection("counter"); }
@@ -660,6 +720,15 @@ function sectionSummary(id) {
     var item = slipItem();
     return T({ zh: "第 " + item.num + " 签 " + item.grade.zh,
       en: "No. " + item.num + " " + item.grade.en });
+  }
+  if (id === "hexagram") {
+    syncGuaDate();
+    if (!guaState.lines.length) return T({ zh: "今日未占", en: "Not cast today" });
+    if (guaState.lines.length < 6) return T({ zh: "占卦 " + guaState.lines.length + "/6",
+      en: "Casting " + guaState.lines.length + "/6" });
+    var hex = YI.primary(guaState.lines);
+    return game.lang === "en" ? hex.number + " " + hex.short + " " + hex.name :
+      hex.name + " " + hex.short;
   }
   /* the counter always speaks of today, whatever day the compass was left on */
   var now = new Date(), p = LUCK.pillar(now.getFullYear(), now.getMonth() + 1, now.getDate()), gods = LUCK.gods(p.stem);
@@ -685,11 +754,14 @@ function drawCounter(g) {
   g.clear(g.PAPER);
   g.rect(0, 0, W, 38, g.INK);
   g.text(T({ zh: "玄机阁", en: "Oracle" }), CX, 9, { align: "center", color: g.PAPER });
-  for (var i = 0; i < SECTIONS.length; i++) {
-    var y = 43 + i * 34, summary = fitSummary(sectionSummary(SECTIONS[i].id), 134);
+  var entries = SECTIONS.slice(), hexIndex = -1;
+  for (var n = 0; n < entries.length; n++) if (entries[n].id === "hexagram") hexIndex = n;
+  if (hexIndex >= 0 && hexIndex < entries.length - 1) entries.push(entries.splice(hexIndex, 1)[0]);
+  for (var i = 0; i < entries.length; i++) {
+    var y = 43 + i * 34, summary = fitSummary(sectionSummary(entries[i].id), 134);
     if (i === counterCursor) g.rect(6, y - 2, 204, 31, g.INK);
     g.text(i === counterCursor ? "›" : " ", 8, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
-    g.text(SECTIONS[i].name, 21, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
+    g.text(entries[i].name, 21, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
     g.text(summary, 74, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
     g.line(8, y + 31, 208, y + 31, g.DARK);
   }
@@ -947,6 +1019,218 @@ function drawFortune(g) {
   fortuneFooter(g);
 }
 
+function guaLine(g, x, y, bits, changing, width, thickness) {
+  var tone = g.INK;
+  var half = Math.floor((width - 4) / 2);
+  if (bits) g.rect(x, y, width, thickness, tone);
+  else {
+    g.rect(x, y, half, thickness, tone);
+    g.rect(x + half + 4, y, width - half - 4, thickness, tone);
+  }
+  if (changing === 9) {
+    g.circle(x + width + 9, y + Math.floor(thickness / 2), 3, tone, false);
+    g.pixel(x + width + 9, y + Math.floor(thickness / 2), g.PAPER);
+  } else if (changing === 6) {
+    var markX = x + width + 6, markY = y - 1;
+    g.line(markX, markY, markX + 6, markY + 6, tone);
+    g.line(markX + 6, markY, markX, markY + 6, tone);
+  }
+}
+function guaTextLines(g) {
+  var h = YI.primary(guaState.lines), changed = YI.changed(guaState.lines), rows = [], wrap, i, names;
+  if (guaState.failed) rows.push(T({ zh: "存档读不出，今天不会保存", en: "Could not read the save; today won't be saved" }));
+  rows.push(game.lang === "en" ? h.number + " " + h.short + " · " + h.name : h.number + " " + h.name);
+  rows = rows.concat(g.wrap("卦辞：" + h.judgment, 196));
+  rows = rows.concat(g.wrap("大象：" + h.image, 196));
+  if (game.lang === "en") rows = rows.concat(g.wrap(h.english, 196));
+  names = YI.changingLines(guaState.lines);
+  if (changed) {
+    rows.push(T({ zh: "变卦 " + changed.number + " " + changed.name,
+      en: "Changes to " + changed.number + " " + changed.short + " · " + changed.name }));
+    var positions = ["初", "二", "三", "四", "五", "上"];
+    var lineNames = names.map(function (n) { return positions[n - 1]; });
+    rows.push(T({ zh: lineNames.join("、") + "爻变",
+      en: (names.length > 1 ? "Lines " : "Line ") + names.join(", ") + (names.length > 1 ? " change" : " changes") }));
+    rows = rows.concat(g.wrap("卦辞：" + changed.judgment, 196));
+  }
+  return rows;
+}
+function drawGuaFigure(g, x, bottom, lines, width, bits) {
+  var barWidth = width || 48, thickness = 4;
+  for (var i = 0; i < lines.length; i++) {
+    guaLine(g, x, bottom - i * 8, bits ? lines[i] : (lines[i] === 6 || lines[i] === 8 ? 0 : 1),
+      bits ? null : lines[i], barWidth, thickness);
+  }
+}
+function drawArrow(g, x, y) {
+  g.line(x - 9, y, x + 8, y, g.INK);
+  g.line(x + 3, y - 5, x + 8, y, g.INK);
+  g.line(x + 3, y + 5, x + 8, y, g.INK);
+}
+function drawTossCoins(g, centerY) {
+  for (var i = 0; i < 3; i++) {
+    var x = CX - 18 + i * 18, phase = game.time * 28 + i * 2.1;
+    var radius = guaState.animating ? Math.max(1, Math.round(Math.abs(Math.sin(phase)) * 6)) : 6;
+    var y = centerY == null ? 111 : centerY;
+    g.circle(x, y, 7, g.INK, false);
+    g.rect(x - radius, y - 1, radius * 2 + 1, 3, g.INK);
+    if (!guaState.animating || Math.sin(phase) > 0) g.pixel(x, y, g.PAPER);
+  }
+}
+function updateHexagram() {
+  syncGuaDate();
+  if (guaChart) { updateGuaChart(); return; }
+  if (game.pressed("b")) { backToCounter(); return; }
+  if (game.pressed("select")) { guaChart = true; guaPanel = false; sfx("tap"); return; }
+  if (guaState.lines.length === 6 && !guaState.animating) {
+    if (game.pressed("up")) { guaScroll = Math.max(0, guaScroll - 1); sfx("move"); }
+    if (game.pressed("down")) { guaScroll++; sfx("move"); }
+  }
+  var p = game.pointer;
+  if (p.pressed && !guaState.animating && guaState.lines.length < 6 && p.y >= 40 && p.y <= 205) {
+    tossGuaLine();
+  }
+  if (game.pressed("a")) tossGuaLine();
+}
+function drawHexagram(g) {
+  syncGuaDate();
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 19, g.INK);
+  g.text(T({ zh: "八卦", en: "Hexagram" }), CX, 2, { align: "center", color: g.PAPER });
+  if (!guaState.loaded) {
+    g.text(T({ zh: "存档读取中…", en: "Reading save…" }), CX, 96, { align: "center", color: g.DARK });
+  } else if (!guaState.lines.length) {
+    g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), CX, 42,
+      { align: "center", color: g.INK, width: 204 });
+    if (guaState.animating) {
+      drawTossCoins(g);
+    }
+    if (guaState.failed) g.text(T({ zh: "存档读不出，今天不会保存",
+      en: "Could not read the save; today won't be saved" }), CX, 190, { align: "center", color: g.DARK, width: 210 });
+  } else {
+    if (guaState.lines.length === 6) {
+      var changedHex = YI.changed(guaState.lines);
+      if (changedHex) {
+        drawGuaFigure(g, 17, 70, guaState.lines, 48);
+        drawArrow(g, CX, 47);
+        drawGuaFigure(g, 151, 70, changedHex.lines, 48, true);
+      } else {
+        drawGuaFigure(g, 81, 70, guaState.lines, 48);
+      }
+      var rows = guaTextLines(g), lineH = g.lineHeight || 14, max = Math.floor(124 / lineH);
+      guaScroll = Math.min(guaScroll, Math.max(0, rows.length - max));
+      g.clip(9, 81, 198, 124);
+      for (var i = guaScroll; i < rows.length && i < guaScroll + max; i++) {
+        g.text(rows[i], 10, 82 + (i - guaScroll) * lineH, { color: g.INK });
+      }
+      g.clip();
+    } else {
+      g.text(T({ zh: "占卦 " + guaState.lines.length + "/6",
+        en: "Casting " + guaState.lines.length + "/6" }), CX, 34, { align: "center", color: g.INK });
+      drawGuaFigure(g, 77, 114 + (guaState.lines.length - 1) * 4, guaState.lines, 48);
+      if (guaState.animating) drawTossCoins(g, 174);
+    }
+  }
+  var key = guaState.lines.length === 6 ?
+    T({ zh: "↑↓ 读 · SELECT 八卦图", en: "↑↓ read · SELECT trigrams" }) :
+    T({ zh: "A 起卦 · SELECT 八卦图", en: "A cast · SELECT trigrams" });
+  g.text(fitPageText(g, key, W), CX, 211, { align: "center", color: g.INK });
+  g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
+}
+function trigramDirection(deg) {
+  var map = { 0: ["北", "N"], 45: ["东北", "NE"], 90: ["东", "E"], 135: ["东南", "SE"],
+    180: ["南", "S"], 225: ["西南", "SW"], 270: ["西", "W"], 315: ["西北", "NW"] };
+  return game.lang === "en" ? map[deg][1] : map[deg][0];
+}
+var CHART_CY = 114;
+function trigramPoint(i) {
+  var angle = (-90 + i * 45) * Math.PI / 180;
+  /* figures 60 px out, names 26 px further: the whole ring fits between the title bar and the key line */
+  return { x: CX + Math.cos(angle) * 60, y: CHART_CY + Math.sin(angle) * 60 };
+}
+function trigramBounds(i) {
+  var p = trigramPoint(i), angle = (-90 + i * 45) * Math.PI / 180;
+  var lx = p.x + Math.cos(angle) * 26, ly = p.y + Math.sin(angle) * 26;
+  var x0 = Math.min(p.x - 12, lx - 7), x1 = Math.max(p.x + 12, lx + 7);
+  var y0 = Math.min(p.y - 8, ly - 7), y1 = Math.max(p.y + 9, ly + 7);
+  return { x: Math.round(x0 - 2), y: Math.round(y0 - 2),
+    w: Math.round(x1 - x0 + 4), h: Math.round(y1 - y0 + 4) };
+}
+function drawTrigram(g, trigram, x, y, color) {
+  for (var j = 0; j < 3; j++) {
+    var yy = Math.round(y + 5 - j * 6);
+    if (trigram.lines[j]) g.rect(x - 11, yy, 22, 3, color);
+    else { g.rect(x - 11, yy, 9, 3, color); g.rect(x + 2, yy, 9, 3, color); }
+  }
+}
+function drawTaiji(g) {
+  var x = CX, y = CHART_CY, r = 16;
+  g.circle(x, y, r, g.INK, true);
+  for (var dy = -15; dy <= 15; dy++) {
+    var half = Math.floor(Math.sqrt(r * r - dy * dy));
+    g.rect(x - half, y + dy, half, 1, g.PAPER);
+  }
+  g.circle(x, y - 8, 8, g.PAPER, true);
+  g.circle(x, y + 8, 8, g.INK, true);
+  g.circle(x, y - 8, 2, g.INK, true);
+  g.circle(x, y + 8, 2, g.PAPER, true);
+}
+function updateGuaChart() {
+  var p = game.pointer, i, point, dx, dy, closest = -1, distance = 10000;
+  if (game.pressed("select")) { guaChart = false; guaPanel = false; sfx("tap"); return; }
+  if (game.pressed("b")) {
+    if (guaPanel) guaPanel = false;
+    else guaChart = false;
+    sfx("tap"); return;
+  }
+  if (game.pressed("left")) { guaCursor = (guaCursor + 7) % 8; sfx("move"); }
+  if (game.pressed("right")) { guaCursor = (guaCursor + 1) % 8; sfx("move"); }
+  if (p.pressed) {
+    for (i = 0; i < 8; i++) {
+      point = trigramPoint(i); dx = p.x - point.x; dy = p.y - point.y;
+      if (dx * dx + dy * dy < distance) { distance = dx * dx + dy * dy; closest = i; }
+    }
+    if (distance < 29 * 29) { guaCursor = closest; guaPanel = true; sfx("tap"); }
+  }
+  if (game.pressed("a")) { guaPanel = true; sfx("tap"); }
+}
+function drawGuaChart(g) {
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 19, g.INK);
+  g.text(T({ zh: "后天八卦", en: "Later Heaven" }), CX, 2, { align: "center", color: g.PAPER });
+  drawTaiji(g);
+  for (var i = 0; i < 8; i++) {
+    var t = YI.TRIGRAMS[GUA_ORDER[i]], p = trigramPoint(i);
+    var angle = (-90 + i * 45) * Math.PI / 180;
+    var lx = p.x + Math.cos(angle) * 26, ly = p.y + Math.sin(angle) * 26;
+    var color = g.INK;
+    if (i === guaCursor) {
+      var box = trigramBounds(i);
+      g.rect(box.x, box.y, box.w, box.h, g.INK);
+      color = g.PAPER;
+    }
+    drawTrigram(g, t, p.x, p.y, color);
+    g.text(t.name, lx, ly - 6, { align: "center", color: color });
+  }
+  if (guaPanel) {
+    var selected = YI.TRIGRAMS[GUA_ORDER[guaCursor]];
+    g.window(22, 63, 172, 101);
+    g.text(selected.name, CX, 70, { align: "center", color: g.INK });
+    g.text(T({ zh: "卦象 ", en: "Image " }) +
+      (game.lang === "en" ? selected.imageEn : selected.image), CX, 89,
+      { align: "center", color: g.INK });
+    g.text(T({ zh: "家人 ", en: "Family " }) +
+      (game.lang === "en" ? selected.familyEn : selected.family), CX, 108,
+      { align: "center", color: g.INK });
+    g.text(T({ zh: "方位 ", en: "Direction " }) + trigramDirection(selected.direction),
+      CX, 127, { align: "center", color: g.INK });
+    g.text(T({ zh: "B 关闭", en: "B close" }), CX, 145, { align: "center", color: g.DARK });
+  }
+  g.text(fitPageText(g, T({ zh: "←→选 · A看 · B/SELECT返回", en: "←→ pick · A view · B/SELECT back" }), W),
+    CX, 211, { align: "center", color: g.INK });
+  g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
+}
+
 game.scene("counter", {
   enter: function () { section = "counter"; syncMotion(); },
   update: updateCounter,
@@ -984,6 +1268,12 @@ game.scene("compass", {
     if (panel) drawPanel(g, p.stem);
   }
 });
+game.scene("hexagram", {
+  enter: function () { section = "hexagram"; guaScroll = 0; syncGuaDate(); syncMotion(); },
+  update: updateHexagram,
+  draw: function (g) { if (guaChart) drawGuaChart(g); else drawHexagram(g); }
+});
 
 readSlip();
+readGua();
 game.start("counter");
