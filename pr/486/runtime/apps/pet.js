@@ -3011,13 +3011,29 @@ function inRoomBox(x,y,b){
    draws with; the long hold on a thing asks 去看看？, anywhere else it pats as it always did. */
 function tapPickCard(e){
   var pick=activePick(), scene=P.lastScene;
-  if(!pick || pick.kind!=="word" || !scene || scene.propPick!=="word" || !Art.resolve) return;
+  if(!pick || pick.kind!=="word" || !scene || scene.propPick!=="word" || !Art.resolve) return false;
   var at;
-  try{ at=Art.resolve(scene,roomNow()); }catch(err){ return; }
-  if(!at || !at.prop) return;
+  try{ at=Art.resolve(scene,roomNow()); }catch(err){ return false; }
+  if(!at || !at.prop) return false;
   var pt=roomPoint(e);
-  if(!pt || !inRoomBox(pt.x,pt.y,at.prop)) return;
+  if(!pt || !inRoomBox(pt.x,pt.y,at.prop)) return false;
   usePick();
+  return true;
+}
+/* A short tap (issue #375): the word card turns over as before; the pet, drawn in front of everything, is patted (asleep in
+   bed only the long press wakes it); a thing in the room asks 去看看？ as the long press does (asking is the confirmation, so
+   a tap takes no one anywhere). The empty floor and the egg stay still. */
+function shortTap(e){
+  if(tapPickCard(e)) return;
+  var pt=roomPoint(e);
+  if(!pt || !P.save || P.save.stage==="egg") return;
+  var at=null;
+  try{ at=P.lastScene && Art.resolve ? Art.resolve(P.lastScene,roomNow()) : null; }catch(err){ at=null; }
+  if(at && inRoomBox(pt.x,pt.y,at.pet)){ if(!inBedSleep()) patPet(); return; }
+  if(goAllowed()){
+    var target=roomTarget(pt.x,pt.y);
+    if(target) askGo(target);
+  }
 }
 /* ---------- 去看看？: a long press on a thing in the room asks before it takes you anywhere ----------
    The boxes are the art's own: the day's pick's prop through Art.resolve (the same resolver the room draws with),
@@ -3138,7 +3154,7 @@ function bindRoom(){
     cv.addEventListener(t,function(e){
       var tap=t==="pointerup" && !!P.roomHold;
       if(P.roomHold){ clearTimeout(P.roomHold); P.roomHold=0; }
-      if(tap) tapPickCard(e);
+      if(tap) shortTap(e);
     });
   });
   /* The play field itself moves climb: hold the left or right half, in addition to the chin pad. */
@@ -3380,6 +3396,7 @@ if(/[?&]debug\b/.test(location.search)){
       var out={x:s.petX,y:s.petY,zz:!!s.zz,stage:P.save?P.save.stage:null,act:P.action||"",phase:P.task?P.task.phase:"",dir:s.dir||"",awake:P.awakeLeft,flashes:P.flashSeq,outing:!!P.outing};
       var at=Art.resolve ? Art.resolve(s,roomNow()) : null;
       if(at && at.prop) out.prop={x:at.prop.x,y:at.prop.y,w:at.prop.w,h:at.prop.h};
+      if(at && at.pet) out.pet={x:at.pet.x,y:at.pet.y,w:at.pet.w,h:at.pet.h};
       return out;
     },
     room:function(){
