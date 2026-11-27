@@ -1,10 +1,10 @@
-// registry/apps/blow-candles: the title follows the play mode, the best score is kept from any
+// sdk/examples/blow-candles (in the store until 1.7, decisions.md section 75): the title follows the play mode, the best score is kept from any
 // round (not only the bonus), and the flames lean by the air each candle gets, the aim cue.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { boot } from "./app-vm.mjs";
 
-const APP = "registry/apps/blow-candles/index.html";
+const APP = "sdk/examples/blow-candles/index.html";
 const MIC_CAP = "对着话筒吹灭蜡烛";
 const KEY_CAP = "按住 A 吹灭蜡烛";
 

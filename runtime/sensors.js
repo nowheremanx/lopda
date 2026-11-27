@@ -8,7 +8,9 @@
  * window.LopdaSensors:
  *   pure (tests/sensors.test.mjs): quantize(v), tilt(beta, gamma, beta0) -> {x, y, flat}, heading(compass) -> 0..348.75 or null,
  *     shaker(now) -> fn(acc) -> true when it is a shake, limiter(hz, now, later) -> fn(send, value),
- *     level(samples) -> 0..1, pitch(samples, sampleRate) -> Hz (integer) or null
+ *     level(samples) -> 0..1, pitch(samples, sampleRate) -> Hz (integer) or null,
+ *     hz(samples, sampleRate) -> {pitch, hz}: pitch as above from the newest WINDOW*2 samples, hz the same note to 0.01 Hz
+ *     measured over every sample given, and down to -80 dB where pitch stops at -40 (a tuner needs it: 1 Hz is 21 cents at 82 Hz; decisions.md section 74)
  *   host(env) -> the runtime's one set of sensors. env:
  *     window, document, navigator     the page's (fakes in the tests)
  *     context(make)   the runtime's AudioContext (core.js audio())      session(type)   set navigator.audioSession.type
@@ -71,9 +73,13 @@ function level(s){
 /* the main pitch by normalised autocorrelation over 50-1500 Hz: the first strong peak after the curve has dipped,
    refined between samples; null for silence or for sound without a clear pitch (breath, noise) */
 function pitch(s,rate){
+  var hz=rawPitch(s,rate);
+  return hz===null ? null : Math.round(hz);
+}
+function rawPitch(s,rate,gate){
   var n=Math.min(WINDOW,s.length);
   var lo=Math.max(2,Math.floor(rate/PITCH_HI)), hi=Math.min(Math.floor(rate/PITCH_LO),s.length-n);
-  if(hi<=lo || rms(s,n)<0.01) return null;
+  if(hi<=lo || rms(s,n)<(gate||0.01)) return null;
   var r=new Float32Array(hi+2), e0=0, i, k;
   for(i=0;i<n;i++) e0+=s[i]*s[i];
   /* from lag 1, so a pitch near the top of the range still sees the curve dip before its peak */
@@ -92,7 +98,46 @@ function pitch(s,rate){
   if(best<0) return null;
   var a=r[best-1], b=r[best], c2=r[best+1], d=a-2*b+c2, shift=d ? 0.5*(a-c2)/d : 0;
   var hz=rate/(best+shift);
-  return hz>=PITCH_LO && hz<=PITCH_HI ? Math.round(hz) : null;
+  return hz>=PITCH_LO && hz<=PITCH_HI ? hz : null;
+}
+/* normalised autocorrelation of s at one lag, over the first n samples */
+function corr(s,k,n){
+  var c=0, e0=0, ek=0;
+  for(var i=0;i<n;i++){ c+=s[i]*s[i+k]; e0+=s[i]*s[i]; ek+=s[i+k]*s[i+k]; }
+  return c/(Math.sqrt(e0*ek)||1);
+}
+/* the highest point of the curve within w lags of L over the first n samples, refined between samples; null at the edge */
+function peak(s,L,w,n){
+  var k, r={}, top=-2, at=0;
+  for(k=L-w;k<=L+w;k++){ r[k]=corr(s,k,n); if(r[k]>top){ top=r[k]; at=k; } }
+  if(at<=L-w || at>=L+w) return null;
+  var a=r[at-1], b=r[at], c=r[at+1], d=a-2*b+c;
+  return at+(d ? 0.5*(a-c)/d : 0);
+}
+/* the integer pitch exactly as pitch() finds it on the newest WINDOW*2 samples (what the runtime always measured), then the
+   same note measured again over the whole buffer, in two steps:
+   1. pitch() takes the first peak nearly as high as the best, and noise makes early ones, so it can be up to a semitone
+      sharp: the highest point within 10 % of that period, compared over the whole buffer, is the period;
+   2. the peak at the largest whole number of periods that leaves half the buffer to compare measures the period m times
+      over, so noise moves it m times less. */
+function hz(s,rate){
+  var tail=s.length>WINDOW*2 ? s.subarray(s.length-WINDOW*2) : s;
+  var f=rawPitch(tail,rate), quiet=false;
+  /* pitch() ignores anything under -40 dB, but a guitar a metre from a phone is often quieter than that (owner's iPhone,
+     2026-11-27: the tuner heard nothing, then only hard plucks). The curve is normalised, so only that gate stands in the
+     way: hz looks down to -80 dB, where room noise alone never makes a clear enough peak, and then comes alone, with pitch
+     still null as before */
+  if(f===null){ f=rawPitch(tail,rate,0.0001); quiet=true; }
+  if(f===null) return {pitch:null, hz:null};
+  var best=f, P=rate/f, w=Math.max(2,Math.round(0.1*P)), n=s.length-Math.ceil(P)-w-2, p1, p2;
+  if(n>=WINDOW && (p1=peak(s,Math.round(P),w,n))!==null){
+    best=rate/p1;
+    var m=Math.max(1,Math.floor(s.length/2/p1)), L=Math.round(m*p1), w2=Math.max(2,Math.min(Math.round(0.02*L),Math.round(0.3*p1)));
+    n=s.length-L-w2-2;
+    if(m>1 && n>=WINDOW && (p2=peak(s,L,w2,n))!==null) best=rate*m/p2;
+  }
+  best=Math.round(best*100)/100;
+  return {pitch:quiet ? null : Math.round(f), hz:best>=PITCH_LO && best<=PITCH_HI ? best : Math.round(f)};
 }
 
 /* ---------- the runtime's sensors: one app at a time, only while it is in front ---------- */
@@ -225,7 +270,7 @@ function host(env){
     try{
       A.ctx=ctx;
       A.src=ctx.createMediaStreamSource(A.stream);
-      A.an=ctx.createAnalyser(); A.an.fftSize=2048;
+      A.an=ctx.createAnalyser(); A.an.fftSize=WINDOW*4;   /* level and pitch use the newest half, as when it was 2048; hz all of it */
       A.sink=ctx.createGain(); A.sink.gain.value=0;
       A.src.connect(A.an); A.an.connect(A.sink); A.sink.connect(ctx.destination);
       A.buf=new Float32Array(A.an.fftSize);
@@ -242,8 +287,14 @@ function host(env){
     if(env.owner()!==win){ stopMic(); return; }
     if(!A.an) return;
     A.an.getFloatTimeDomainData(A.buf);
-    var v={level:level(A.buf), pitch:pitch(A.buf,A.ctx.sampleRate)};
-    A.send(function(x){ if(live.mic===win) env.send(win,{op:"sound", level:x.level, pitch:x.pitch}); },v);
+    var p=hz(A.buf,A.ctx.sampleRate), v={level:level(A.buf.subarray(A.buf.length-WINDOW*2)), pitch:p.pitch};
+    if(p.hz!==null) v.hz=p.hz;
+    A.send(function(x){
+      if(live.mic!==win) return;
+      var m={op:"sound", level:x.level, pitch:x.pitch};
+      if(x.hz!==undefined) m.hz=x.hz;
+      env.send(win,m);
+    },v);
   }
   function stopTracks(stream){
     if(!stream) return;
@@ -282,6 +333,6 @@ function host(env){
   };
 }
 
-window.LopdaSensors={quantize:quantize, tilt:tilt, heading:heading, shaker:shaker, limiter:limiter, level:level, pitch:pitch, host:host,
+window.LopdaSensors={quantize:quantize, tilt:tilt, heading:heading, shaker:shaker, limiter:limiter, level:level, pitch:pitch, hz:hz, host:host,
   TILT_HZ:TILT_HZ, SOUND_HZ:SOUND_HZ, SHAKE:SHAKE, SHAKE_GAP:SHAKE_GAP};
 })();

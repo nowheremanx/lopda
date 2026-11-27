@@ -122,6 +122,59 @@ test("sensor mic: pitch of a synthetic sine within 2 %, null for silence and noi
   assert.equal(LS.pitch(noise, 48000), null);
 });
 
+/* hz (1.7.0, decisions.md section 74): pitch exactly as before from the newest 2048 samples, the same note to 0.01 Hz
+   over all 4096; a tuner needs about 2 cents, and 1 Hz is 21 cents at the guitar's low E */
+const cents = (a, b) => 1200 * Math.log2(a / b);
+const tone = (f, rate, n, harm, noise, seed) => {
+  let x = seed;
+  const rnd = () => ((x = (x * 16807) % 2147483647) / 2147483647) * 2 - 1;
+  return Float32Array.from({ length: n }, (_, i) =>
+    0.2 * harm.reduce((v, a, h) => v + a * Math.sin(2 * Math.PI * f * (h + 1) * i / rate + h), 0) + noise * rnd());
+};
+const STRINGS = [82.41, 110, 146.83, 196, 246.94, 329.63, 261.63, 392, 440, 880];
+const HARMS = [[1], [1, 0.8, 0.5, 0.3], [0.3, 1, 0.6, 0.4]];
+
+test("sensor mic: hz keeps pitch() unchanged on the newest 2048 samples, and is exact to 0.1 cent on clean tones", () => {
+  for (const rate of [44100, 48000]) for (const f of STRINGS) for (const harm of HARMS) {
+    const s = tone(f, rate, 4096, harm, 0, 1);
+    const r = LS.hz(s, rate);
+    assert.equal(r.pitch, LS.pitch(s.subarray(2048), rate), `${f} Hz at ${rate}: same pitch as before`);
+    assert.ok(Math.abs(cents(r.hz, f)) < 0.1, `${f} Hz at ${rate} ${harm}: ${r.hz}`);
+    assert.equal(r.hz, Math.round(r.hz * 100) / 100, "two decimals");
+  }
+  assert.deepEqual({ ...LS.hz(new Float32Array(4096), 48000) }, { pitch: null, hz: null });
+});
+
+test("sensor mic: hz in noise (about 20 dB) stays within a few cents where pitch() is up to a semitone sharp", () => {
+  let sq = 0, n = 0, worst = 0, seed = 1;
+  for (const rate of [44100, 48000]) for (const f of STRINGS) for (const harm of HARMS) for (let k = 0; k < 4; k++) {
+    const r = LS.hz(tone(f, rate, 4096, harm, 0.02, seed++), rate);
+    const c = cents(r.hz, f);
+    sq += c * c; n++; worst = Math.max(worst, Math.abs(c));
+  }
+  const rms = Math.sqrt(sq / n);
+  assert.ok(rms < 1, "rms " + rms.toFixed(2) + " cents");
+  assert.ok(worst < 5, "worst " + worst.toFixed(2) + " cents");
+});
+
+test("sensor mic: a quiet note (-50 dB and -70 dB) gets hz alone, pitch stays null as before; silence and noise get neither", () => {
+  for (const f of [82.41, 110, 329.63]) {
+    for (const k of [0.02, 0.002]) {
+      const s = tone(f, 48000, 4096, [1, 0.5, 0.3], 0, 3).map((v) => v * k);
+      assert.equal(LS.pitch(s.subarray(2048), 48000), null, "under pitch()'s -40 dB gate");
+      const r = LS.hz(s, 48000);
+      assert.equal(r.pitch, null);
+      assert.ok(Math.abs(cents(r.hz, f)) < 0.5, `${f} x${k}: ${r.hz}`);
+    }
+  }
+  let seed = 9;
+  for (const k of [0.01, 0.0003]) {
+    const noise = Float32Array.from({ length: 4096 }, () => (((seed = (seed * 16807) % 2147483647) / 2147483647) * 2 - 1) * k);
+    assert.deepEqual({ ...LS.hz(noise, 48000) }, { pitch: null, hz: null }, "noise at " + k);
+  }
+  assert.deepEqual({ ...LS.hz(new Float32Array(4096).fill(0.00001), 48000) }, { pitch: null, hz: null });
+});
+
 /* ---------- the host: fake window, document, navigator, audio ---------- */
 function world({ ios = true, micFails = null } = {}) {
   const c = clock();
@@ -145,7 +198,7 @@ function world({ ios = true, micFails = null } = {}) {
       },
     },
   };
-  let wave = new Float32Array(2048);
+  let wave = new Float32Array(4096);
   const node = () => ({ connect() {}, disconnect() {}, gain: { value: 1 } });
   const ctx = {
     sampleRate: 48000, state: "running", destination: {},
@@ -238,7 +291,7 @@ test("sensor motion: readings reach only the app in front", async () => {
 
 test("sensor mic: the session is play-and-record before getUserMedia, readings flow at most 20 a second, ambient after stop", async () => {
   const w = world();
-  w.setWave(sine(440, 48000, 2048, 0.8));
+  w.setWave(sine(440, 48000, 4096, 0.8));
   assert.equal(await w.host.startMic(w.app), "on");
   assert.deepEqual(w.session.log, ["play-and-record", "gum:play-and-record"]);
   assert.deepEqual(w.marks, [true]);
@@ -247,8 +300,9 @@ test("sensor mic: the session is play-and-record before getUserMedia, readings f
   assert.ok(s.length >= 1 && s.length <= 20);
   assert.ok(Math.abs(s[0].pitch - 440) <= 9, String(s[0].pitch));
   assert.ok(s[0].level > 0.9);
-  assert.deepEqual(Object.keys(s[0]).sort(), ["level", "op", "pitch"], "two numbers, never samples");
-  w.setWave(new Float32Array(2048)); w.c.advance(100);
+  assert.ok(Math.abs(s[0].hz - 440) <= 0.05, "hz to a fraction of a cent: " + s[0].hz);
+  assert.deepEqual(Object.keys(s[0]).sort(), ["hz", "level", "op", "pitch"], "three numbers, never samples");
+  w.setWave(new Float32Array(4096)); w.c.advance(100);
   assert.deepEqual({ ...w.msgs("sound").at(-1) }, { op: "sound", level: 0, pitch: null });
   w.host.stopMic();
   assert.equal(w.session.type, "ambient");

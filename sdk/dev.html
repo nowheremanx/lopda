@@ -72,7 +72,7 @@
       </div>
       <div class="row">
         <label>Mic level <input type="range" id="miclevel" min="0" max="1" step="0.03125" value="0" style="width:120px"> <span id="miclv">0</span></label>
-        <label>Pitch (Hz, empty = null) <input type="text" id="pitch" value="" style="width:6em"></label>
+        <label>Pitch (Hz, decimals allowed, empty = null) <input type="text" id="pitch" value="" style="width:6em"></label>
       </div>
       <label><input type="checkbox" id="realmic"> use this computer's microphone</label>
     </div>
@@ -479,12 +479,20 @@
   }
   function sound() {
     var v;
-    if (real) { real.an.getFloatTimeDomainData(real.buf); v = { level: LS.level(real.buf), pitch: LS.pitch(real.buf, real.ctx.sampleRate) }; document.getElementById("miclv").textContent = v.level + " · " + v.pitch; }
-    else {
-      var p = parseInt(document.getElementById("pitch").value, 10);
-      v = { level: Math.round(+document.getElementById("miclevel").value * 32) / 32, pitch: p >= 50 && p <= 1500 ? p : null };
+    if (real) {
+      real.an.getFloatTimeDomainData(real.buf);
+      var m = LS.hz(real.buf, real.ctx.sampleRate);
+      v = { level: LS.level(real.buf.subarray(real.buf.length - 2048)), pitch: m.pitch };
+      if (m.hz !== null) v.hz = m.hz;
+      document.getElementById("miclv").textContent = v.level + " · " + (m.hz === null ? null : m.hz);
     }
-    sendSound(function (x) { post({ op: "sound", level: x.level, pitch: x.pitch }); }, v);
+    else {
+      /* a typed pitch may have decimals: the app gets it rounded as pitch and exact as hz, like the runtime's (1.7.0+) */
+      var p = parseFloat(document.getElementById("pitch").value);
+      v = { level: Math.round(+document.getElementById("miclevel").value * 32) / 32, pitch: p >= 50 && p <= 1500 ? Math.round(p) : null };
+      if (v.pitch !== null) v.hz = Math.round(p * 100) / 100;
+    }
+    sendSound(function (x) { var m = { op: "sound", level: x.level, pitch: x.pitch }; if (x.hz !== undefined) m.hz = x.hz; post(m); }, v);
   }
   function stopReal() { if (!real) return; real.stream.getTracks().forEach(function (t) { t.stop(); }); try { real.ctx.close(); } catch (e) {} real = null; }
   function startReal() {
@@ -492,9 +500,9 @@
     if (!navigator.mediaDevices || !AC) { log("this browser has no microphone access"); return; }
     navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } }).then(function (stream) {
       if (!sensing.mic || !document.getElementById("realmic").checked) { stream.getTracks().forEach(function (t) { t.stop(); }); return; }
-      var ctx = new AC(), an = ctx.createAnalyser(); an.fftSize = 2048;
+      var ctx = new AC(), an = ctx.createAnalyser(); an.fftSize = 4096;
       ctx.createMediaStreamSource(stream).connect(an);
-      real = { stream: stream, ctx: ctx, an: an, buf: new Float32Array(2048) };
+      real = { stream: stream, ctx: ctx, an: an, buf: new Float32Array(4096) };
       log("listening to this computer's microphone");
     }, function (e) { log("microphone: " + e.name); document.getElementById("realmic").checked = false; });
   }
