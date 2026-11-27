@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lo-PDA Gallery</title>
+<meta name="description" content="Lo-PDA gallery: the best small apps for a fictional 1986 handheld, each with a short film, and a link that opens it on your phone.">
+<link rel="icon" href="../runtime/icons/icon-192.png">
+<link rel="stylesheet" href="../site/site.css">
+<style>
+@font-face{font-family:"VT323";font-display:swap;src:url(../runtime/fonts/vt323-002.woff2) format("woff2")}
+/* The landing page's look: graphite (the case) and paper (the LCD). Same tokens as ../index.html and ../events/. */
+:root{
+  --case:#171815; --case-2:#22241f; --case-line:#33362e;
+  --lcd-ink:#1f2a14; --lcd-dark:#4a5a32; --lcd-mid:#7d8a58; --lcd-paper:#a3ad7e;
+  --paper:#e9ebdf; --on-case:#eef0e6; --on-case-dim:#9a9f8c;
+  --home:#c4432f;
+  --f-display:-apple-system,"SF Pro Display",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+  --f-body:-apple-system,"SF Pro Text",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+  --f-lcd:"VT323",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--case);color:var(--on-case);font:17px/1.55 var(--f-body);-webkit-font-smoothing:antialiased}
+a{color:inherit}
+.wrap{max-width:1080px;margin:0 auto;padding-left:max(20px,env(safe-area-inset-left,0px));padding-right:max(20px,env(safe-area-inset-right,0px))}
+h1,h2{font-family:var(--f-display);font-weight:700;letter-spacing:-.03em;line-height:1.05;text-wrap:balance;margin:0}
+h1{font-size:clamp(36px,6vw,68px)}
+h2{font-size:clamp(28px,4vw,44px)}
+p{margin:0}
+.eyebrow{font:20px/1 var(--f-lcd);letter-spacing:.08em;text-transform:uppercase;color:var(--lcd-mid);margin-bottom:14px}
+.lede{font-size:clamp(18px,2.1vw,22px);line-height:1.45;max-width:44ch;color:var(--on-case-dim);margin-top:18px;text-wrap:pretty}
+
+/* the top bar is shared by every page of the site: ../site/site.css and ../site/site.js */
+.btn{display:inline-flex;align-items:center;min-height:44px;border-radius:999px;padding:12px 22px;font:600 16px/1 var(--f-body);text-decoration:none;border:0;cursor:pointer}
+.btn.home{background:var(--home);color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+.btn.ghost{background:transparent;color:inherit;box-shadow:inset 0 0 0 1.5px currentColor}
+footer{padding-block:32px;color:var(--on-case-dim);font-size:14px;border-top:1px solid var(--case-line);margin-top:56px}
+
+/* The app's screen, as filmed: the LCD in a case-coloured bezel. Covers and films are the app's own frame at 2x. */
+.screen{background:#0c0d0b;border-radius:14px;padding:10px;box-shadow:inset 0 -3px 0 rgba(0,0,0,.4)}
+.glass{position:relative;border-radius:6px;overflow:hidden;background:var(--lcd-paper);aspect-ratio:2/3}
+.glass img,.glass video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block}
+.glass video{opacity:0;transition:opacity .2s}
+.glass video.on{opacity:1}
+/* the app's page opens on the cover; the film plays only when asked (owner, 2026-11-26: a film always moving is too busy) */
+.glass.tap{cursor:pointer}
+.playb{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:10px;
+  padding:12px 20px 12px 16px;min-height:44px;border:0;border-radius:999px;background:rgba(31,42,20,.88);color:var(--lcd-paper);
+  font:600 16px/1 var(--f-body,system-ui);cursor:pointer;box-shadow:0 10px 30px -10px rgba(0,0,0,.7);transition:opacity .2s}
+.playb svg{width:18px;height:18px;fill:currentColor;flex:none}
+.playb{white-space:nowrap}
+@media (max-width:760px){.playb{font-size:15px;padding:10px 16px 10px 13px;gap:8px;bottom:10px}}
+.playb:hover{background:rgba(31,42,20,.96)}
+.glass.playing .playb{opacity:0;pointer-events:none}
+
+/* the overview: a grid of screens, as an examples page */
+.head{padding-block:clamp(40px,7vw,80px) clamp(28px,4vw,44px)}
+.grid{display:grid;gap:clamp(14px,2vw,24px);grid-template-columns:repeat(auto-fill,minmax(min(100%,230px),1fr))}
+@media (max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:12px} .grid .screen{padding:6px;border-radius:10px}}
+.item{display:flex;flex-direction:column;gap:10px;text-decoration:none;min-width:0}
+.item:hover .screen,.item:focus-visible .screen{outline:2px solid var(--lcd-mid);outline-offset:2px}
+.item .name{display:flex;align-items:center;gap:8px;font:600 17px/1.2 var(--f-display)}
+.item .name canvas{width:20px;height:20px;image-rendering:pixelated;flex:none}
+.glyph{display:inline-grid;place-items:center;flex:none;width:20px;height:20px;border-radius:3px;background:var(--lcd-paper);color:var(--lcd-ink);font:700 13px/1 var(--f-body)}
+.app .who .glyph{width:40px;height:40px;font-size:26px;border-radius:5px}
+.item .what{font-size:14px;line-height:1.35;color:var(--on-case-dim)}
+
+/* one app */
+.back{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;color:var(--on-case-dim);margin-top:16px}
+.back:hover{color:var(--on-case)}
+.app{display:grid;column-gap:clamp(24px,4vw,56px);grid-template-columns:minmax(0,380px) minmax(0,1fr);grid-template-rows:auto 1fr;
+  grid-template-areas:"screen top" "screen txt";align-items:start;padding-top:12px}
+.app .top{grid-area:top}.app .screen{grid-area:screen}.app .txt{grid-area:txt}
+@media (max-width:760px){.app{grid-template-columns:1fr;grid-template-rows:none;grid-template-areas:"top" "screen" "txt";row-gap:20px}
+  .app .screen{max-width:min(420px,40svh);width:100%;margin-inline:auto;box-sizing:border-box}}
+.app h1{font-size:clamp(30px,4vw,48px)}
+.app .who{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.app .who canvas{width:40px;height:40px;image-rendering:pixelated;flex:none}
+.app .who .n{font:600 22px/1.15 var(--f-display)}
+.app .who .m{font:18px/1 var(--f-lcd);letter-spacing:.06em;color:var(--lcd-mid);text-transform:uppercase;margin-top:4px}
+.app .note{margin-top:18px;font-size:17px;line-height:1.6;color:var(--on-case-dim);max-width:60ch;text-wrap:pretty}
+.app .desc{margin-top:14px;font-size:15px;color:var(--on-case-dim);max-width:60ch}
+.uses{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px;padding:0;list-style:none}
+.uses li{font:19px/1 var(--f-lcd);letter-spacing:.05em;padding:6px 10px 4px;border-radius:4px;background:var(--lcd-paper);color:var(--lcd-ink)}
+.acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:28px}
+.stills{display:grid;gap:14px;grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr));margin-top:clamp(36px,5vw,56px)}
+.stills .screen{padding:6px;border-radius:10px}
+@media (max-width:520px){.stills{grid-template-columns:1fr 1fr;gap:10px}}
+.pn{display:flex;justify-content:space-between;gap:16px;margin-top:40px;border-top:1px solid var(--case-line);padding-top:12px}
+.pn a{text-decoration:none;color:var(--on-case-dim);min-height:44px;display:inline-flex;align-items:center}
+.pn a:hover{color:var(--on-case)}
+.pn .nx{margin-left:auto;text-align:right}
+/* on a desktop the neighbours sit at the sides of the window, half way down, so a visitor can leaf through without
+   scrolling to the bottom (owner, 2026-11-26); the left and right arrow keys do the same. Phones keep the bottom row. */
+.side{position:fixed;top:50%;z-index:4;transform:translateY(-50%);display:none;place-items:center;width:56px;height:56px;border-radius:50%;
+  background:var(--case-2);border:1px solid var(--case-line);color:var(--on-case);text-decoration:none;font:28px/1 var(--f-body)}
+.side:hover{border-color:var(--on-case-dim)}
+.side.pv{left:max(12px,calc(50% - 540px - 76px))} .side.nx{right:max(12px,calc(50% - 540px - 76px))}
+@media (min-width:900px) and (hover:hover){.side{display:grid} .pn{display:none}}
+</style>
+</head>
+<body>
+<script src="../site/site.js" data-root="../" data-page="gallery"></script>
+<main id="main" class="wrap"></main>
+<footer><div class="wrap" data-t="foot">MIT · A fictional handheld, made for fun.</div></footer>
+
+<script src="gallery.js"></script>
+<script src="media.js"></script>
+<script>
+(function () {
+  // Page text. Each app's own text comes from gallery.js as {en, zh}; its name, icon and version from the registry.
+  var T = {
+    en: {
+      "foot": "MIT · A fictional handheld, made for fun.",
+      "head.e": "Gallery", "head.h": "Small apps, made with care.",
+      "head.p": "The best of the store, chosen by hand. Each one is a single HTML file under 512 KB, with no network. Tap one for a closer look, or open it on your phone.",
+      "back": "All apps", "play": "Watch it play", "open": "Open on your phone", "source": "Source", "uses": "What it uses",
+      "cat.game": "Game", "cat.productivity": "Tool", "cat.education": "Learning", "cat.create": "Create", "cat.story": "Story", "cat.life": "Life", "cat.other": "Other",
+      "missing": "No such app in the gallery.", "loading": "Loading..."
+    },
+    zh: {
+      "foot": "MIT · 一台虚构的掌机，做着玩的。",
+      "head.e": "精选应用", "head.h": "小应用，用心做。",
+      "head.p": "从商店里挑出来的精品。每一个都只是一个不到 512 KB 的 HTML 文件，不联网。点进去看详情，或者直接在手机上打开。",
+      "back": "全部应用", "play": "看看动起来", "open": "在手机上打开", "source": "源码", "uses": "用到了",
+      "cat.game": "游戏", "cat.productivity": "工具", "cat.education": "学习", "cat.create": "创作", "cat.story": "故事", "cat.life": "生活", "cat.other": "其他",
+      "missing": "精选里没有这个应用。", "loading": "载入中..."
+    }
+  };
+  var lang = LopdaSite.lang;   /* the site's language (../site/site.js); the top bar's button switches it */
+  function t(k) { return T[lang][k] || T.en[k] || k; }
+  function L(o) { return o ? (o[lang] || o.en || o.zh || "") : ""; }
+
+  var LIST = window.LOPDA_GALLERY || [], USES = window.LOPDA_GALLERY_USES || {}, MEDIA = window.LOPDA_GALLERY_MEDIA || {};
+  var REG = {};                          /* id -> the registry entry (name, icon, version, category, i18n) */
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var main = document.getElementById("main");
+
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  /* the app's 16 x 16 icon in the four tones, as the home screen draws it */
+  /* an app without a pixel icon shows its glyph on a paper tile, as the home screen does */
+  function icon(rows, glyph) {
+    if (!rows || !rows.length) { var gl = el("span", "glyph", glyph || ""); return gl; }
+    var c = el("canvas");
+    var n = rows.length; c.width = c.height = n; var x = c.getContext("2d");
+    rows.forEach(function (r, y) { for (var i = 0; i < n; i++) { var ch = r.charAt(i); if (ch === ".") continue; x.fillStyle = TONES[+ch] || TONES[0]; x.fillRect(i, y, 1, 1); } });
+    return c;
+  }
+  function name(id) { var a = REG[id]; if (!a) return id; return (lang === "en" && a.i18n && a.i18n.en && a.i18n.en.name) || a.name; }
+  function desc(id) { var a = REG[id]; if (!a) return ""; return (lang === "en" && a.i18n && a.i18n.en && a.i18n.en.description) || a.description || ""; }
+  /* the films are in both languages: the app draws its own text in the player's language. Fall back to the other one. */
+  function media(id) {
+    var m = MEDIA[id] || {}, l = m[lang] ? lang : (m.en ? "en" : (m.zh ? "zh" : null));
+    if (!l) return null;
+    var base = "media/" + id + "/" + l;
+    return { film: base + ".mp4", stills: Array.from({ length: m[l].stills || 0 }, function (_, i) { return base + "-" + (i + 1) + ".png"; }) };
+  }
+  /* a screen: the cover, and the film over it once it plays. The film is fetched only when it is asked to play. */
+  function screen(id, autoplay) {
+    var s = el("div", "screen"), g = el("div", "glass"), m = media(id);
+    s.appendChild(g);
+    if (!m) return s;
+    var img = el("img"); img.src = m.stills[0] || ""; img.alt = name(id); img.loading = "lazy"; img.decoding = "async"; g.appendChild(img);
+    var v = el("video"); v.muted = true; v.loop = true; v.playsInline = true; v.setAttribute("playsinline", ""); v.setAttribute("muted", "");
+    v.preload = "none"; v.setAttribute("aria-hidden", "true"); g.appendChild(v);
+    v.addEventListener("playing", function () { v.classList.add("on"); });
+    s.play = function (asked) { if (reduce && !asked) return; if (!v.src) v.src = m.film; var p = v.play(); if (p && p.catch) p.catch(function () {}); };
+    /* back to the cover: the film hides and starts again from the top next time */
+    s.stop = function () { if (!v.src) return; v.pause(); v.classList.remove("on"); try { v.currentTime = 0; } catch (e) {} };
+    if (autoplay) {
+      /* a button on the cover; a tap on the screen plays and pauses, and a pause keeps the frame */
+      var b = el("button", "playb"); b.type = "button";
+      b.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>';
+      b.appendChild(el("span", null, t("play")));
+      g.appendChild(b); g.classList.add("tap");
+      g.addEventListener("click", function () {
+        if (v.src && !v.paused) { v.pause(); g.classList.remove("playing"); }
+        else { s.play(true); g.classList.add("playing"); }
+      });
+    }
+    return s;
+  }
+
+  /* ---------- the overview ---------- */
+  function overview() {
+    document.title = lang === "zh" ? "Lo-PDA 精选应用" : "Lo-PDA Gallery";
+    main.textContent = "";
+    var head = el("header", "head");
+    head.appendChild(el("div", "eyebrow", t("head.e")));
+    head.appendChild(el("h1", null, t("head.h")));
+    head.appendChild(el("p", "lede", t("head.p")));
+    main.appendChild(head);
+    var grid = el("div", "grid");
+    LIST.forEach(function (e) {
+      if (!REG[e.id]) return;                 /* an app no longer in the store drops out of the gallery too */
+      var a = el("a", "item"); a.href = "?app=" + encodeURIComponent(e.id);
+      var s = screen(e.id, false); a.appendChild(s);
+      var n = el("div", "name"); n.appendChild(icon(REG[e.id].icon, REG[e.id].glyph)); n.appendChild(el("span", null, name(e.id))); a.appendChild(n);
+      a.appendChild(el("div", "what", L(e.title)));
+      /* the cover is the app's title screen; a pointer that hovers plays the film under it */
+      a.addEventListener("mouseenter", function () { if (hover) s.play(); });
+      a.addEventListener("mouseleave", function () { if (hover) s.stop(); });
+      a.addEventListener("click", function (ev) { if (ev.metaKey || ev.ctrlKey || ev.shiftKey) return; ev.preventDefault(); go(e.id); });
+      grid.appendChild(a);
+    });
+    main.appendChild(grid);
+    /* a finger cannot hover: on a phone the grid is a shelf of covers, like cartridge boxes (owner, 2026-11-26),
+       and the film plays on the app's own page */
+  }
+  var hover = window.matchMedia && matchMedia("(hover: hover)").matches;
+
+  /* ---------- one app ---------- */
+  function detail(id) {
+    var i = LIST.findIndex(function (e) { return e.id === id; }), e = LIST[i];
+    main.textContent = "";
+    var back = el("a", "back", "← " + t("back")); back.href = "./";
+    back.addEventListener("click", function (ev) { ev.preventDefault(); go(null); });
+    main.appendChild(back);
+    if (!e || !REG[id]) { main.appendChild(el("p", "lede", t("missing"))); return; }
+    document.title = name(id) + " · Lo-PDA";
+    var a = REG[id], box = el("section", "app");
+    /* the name and the one-line title come first on a phone, so the page says what it is before the picture
+       (owner, 2026-11-26); on a desktop they sit beside the screen, above the rest of the text */
+    var top = el("div", "top"), txt = el("div", "txt");
+    box.appendChild(top); box.appendChild(screen(id, true));
+    var who = el("div", "who"); who.appendChild(icon(a.icon, a.glyph));
+    var wn = el("div"); wn.appendChild(el("div", "n", name(id)));
+    wn.appendChild(el("div", "m", t("cat." + (a.category || "other")) + " · v" + a.version));
+    who.appendChild(wn); top.appendChild(who);
+    top.appendChild(el("h1", null, L(e.title)));
+    txt.appendChild(el("p", "note", L(e.note)));
+    txt.appendChild(el("p", "desc", desc(id)));
+    if (e.uses && e.uses.length) {
+      var u = el("ul", "uses"); u.setAttribute("aria-label", t("uses"));
+      e.uses.forEach(function (k) { if (USES[k]) u.appendChild(el("li", null, L(USES[k]))); });
+      txt.appendChild(u);
+    }
+    var acts = el("div", "acts");
+    /* the deep link: the handheld opens this app from the store (runtime/?app=<id>, decisions.md section 66) */
+    var open = el("a", "btn home", t("open")); open.href = "../runtime/?app=" + encodeURIComponent(id); acts.appendChild(open);
+    var src = el("a", "btn ghost", t("source")); src.href = "https://github.com/nowheremanx/lopda/tree/main/registry/apps/" + encodeURIComponent(id); acts.appendChild(src);
+    txt.appendChild(acts);
+    box.appendChild(txt);
+    main.appendChild(box);
+    /* the neighbours, so the gallery can be walked through like a shelf: at the bottom on a phone, at the sides on a
+       desktop, where the shelf also wraps round (the last app's next is the first) */
+    var shown = LIST.filter(function (x) { return REG[x.id]; }), j = shown.indexOf(e), n = shown.length;
+    var pn = el("div", "pn");
+    [[shown[j - 1], "pv", "\u2190 "], [shown[j + 1], "nx", ""]].forEach(function (p) {
+      if (!p[0]) return;
+      var l = el("a", p[1], p[1] === "nx" ? name(p[0].id) + " \u2192" : p[2] + name(p[0].id)); l.href = "?app=" + encodeURIComponent(p[0].id);
+      l.addEventListener("click", function (ev) { ev.preventDefault(); go(p[0].id); });
+      pn.appendChild(l);
+    });
+    main.appendChild(pn);
+    if (n > 1) [[shown[(j - 1 + n) % n], "pv", "\u2039"], [shown[(j + 1) % n], "nx", "\u203a"]].forEach(function (p) {
+      var l = el("a", "side " + p[1], p[2]); l.href = "?app=" + encodeURIComponent(p[0].id);
+      l.title = name(p[0].id); l.setAttribute("aria-label", name(p[0].id));
+      l.addEventListener("click", function (ev) { ev.preventDefault(); go(p[0].id); });
+      main.appendChild(l);
+    });
+  }
+
+  /* ---------- routing: ?app=<id> is one app, nothing is the overview ---------- */
+  function current() { var q = new URLSearchParams(location.search).get("app"); return q || null; }
+  function render() { var id = current(); if (id) detail(id); else overview(); }
+  function go(id) {
+    history.pushState(null, "", id ? "?app=" + encodeURIComponent(id) : location.pathname);
+    render(); window.scrollTo(0, 0);
+  }
+  window.addEventListener("popstate", render);
+  /* the arrow keys leaf through the apps on an app's page */
+  document.addEventListener("keydown", function (ev) {
+    if (ev.altKey || ev.metaKey || ev.ctrlKey || !current()) return;
+    var side = ev.key === "ArrowLeft" ? ".side.pv" : ev.key === "ArrowRight" ? ".side.nx" : null, l = side && document.querySelector(side);
+    if (l) { ev.preventDefault(); l.click(); }
+  });
+
+  function applyText() {
+    document.querySelectorAll("[data-t]").forEach(function (n) { n.textContent = t(n.getAttribute("data-t")); });
+  }
+  LopdaSite.onLang(function (l) { lang = l; applyText(); render(); });
+
+  applyText();
+  main.appendChild(el("p", "lede", t("loading")));
+  /* the store's own list: names, icons, versions. Same origin, generated by tools/build-index.mjs. */
+  fetch("../registry/index.json").then(function (r) { return r.json(); }).then(function (idx) {
+    (idx.apps || []).forEach(function (a) { REG[a.id] = a; });
+    render();
+  }).catch(function () { render(); });
+})();
+</script>
+</body>
+</html>
