@@ -112,13 +112,16 @@ function candidates(list,p,n){
 function suggest(p,n){ return loaded().then(function(list){ return candidates(list,p,n||MAX_CAND); }); }
 
 /* ---------- storage ---------- */
-function saveSet(){ if(D.refs) put(D.refs.set,D.set); }
+/* never before the stored settings are in memory: a failed read leaves the defaults there, and writing them would wipe
+   the word book, the history and the book order (issue #277; setWord had this guard already) */
+function saveSet(){ if(D.refs && D.loaded) put(D.refs.set,D.set); }
 function remember(word){
   D.set.history=[word].concat(D.set.history.filter(function(w){ return w!==word; })).slice(0,MAX_HISTORY);
   saveSet();
 }
 function inBook(word){ return D.set.words.some(function(x){ return x.w===word; }); }
 function toggleWord(word){
+  if(D.refs && !D.loaded){ toast(tr("dict.loading")); sfx("err"); return; }   /* the book is not read yet: no change that would not be kept */
   if(inBook(word)){ D.set.words=D.set.words.filter(function(x){ return x.w!==word; }); toast(tr("dict.removed")); sfx("tap"); }
   else { D.set.words=[{w:word, t:Date.now()}].concat(D.set.words).slice(0,MAX_WORDS); toast(tr("dict.added")); sfx("ok"); }
   saveSet();

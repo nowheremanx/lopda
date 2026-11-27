@@ -72,6 +72,9 @@ function entryDoc(e){
   return o;
 }
 function persistLog(){
+  /* not before the stored log is read: the log is written whole, so an unread one would be replaced by this session's
+     few lines (issue #384). loadDoc merges what came in meanwhile and writes it then. */
+  if(!R.loaded) return;
   if(!R.ref && LP.S.db) R.ref=LP.S.db.doc(RADIO_PATH);
   if(!R.ref) return;
   var log=[], i;
@@ -84,20 +87,22 @@ function loadDoc(){
   R.loading=true;
   R.ref=LP.S.db.doc(RADIO_PATH);
   R.ref.get().then(function(sn){
-    var d=sn.exists ? own(sn.data()) : null;
+    var d=sn.exists ? own(sn.data()) : null, fresh=R.log.length>0;
     if(d){
       var list=[], i;
       if(d.log && d.log.length) for(i=0;i<d.log.length;i++){ var e=readEntry(d.log[i]); if(e) list.push(e); }
-      if(list.length && !R.log.length) R.log=list.slice(-MAX_LOG);
+      /* lines that arrived while the read was out (or after a failed one) come after the stored ones */
+      if(list.length) R.log=list.concat(R.log).slice(-MAX_LOG);
       /* "tx", not the old "txMode": the default changed after the first iPhone test, so a switch set before it is dropped */
       if(d.tx==="playback" || d.tx==="record") R.txMode=d.tx;
       R.ch=d.ch===2?2:1;
     }
     R.loaded=true; R.loading=false;
+    if(fresh) persistLog();
     applyTxMode();
     applyChannel();
     render();
-  },function(){ R.loaded=true; R.loading=false; });
+  },function(){ R.loading=false; });   /* not loaded: the next open reads again, and nothing is written meanwhile */
 }
 /* null: the link's own default (playback on iPhones, see link.js) */
 function applyTxMode(){ if(LP.link && LP.link.setTxMode && R.txMode) LP.link.setTxMode(R.txMode); }

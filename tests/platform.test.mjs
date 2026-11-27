@@ -445,10 +445,26 @@ test("a failed write leaves that database as it was", async () => {
   next.docs.push({ path: NOTES + "/n2", data: { body: "new" } });
   await assert.rejects(P.replaceAll(next), (e) => e.code === "unavailable");
   opts.armed = false;
-  /* the documents' transaction had already committed; the files' one rolled back */
+  /* the documents' transaction had already committed, with the half-way marker; the files' one rolled back */
   const after = await plainDump(P);
   assert.deepEqual(after.files, before.files);
-  assert.equal(after.docs.length, before.docs.length + 1);
+  assert.equal(after.docs.length, before.docs.length + 2);
+  assert.ok(after.docs.some((x) => x.path === P.restorePath));
+  assert.equal(await P.restorePending(), true);
+  /* the next whole replace (the rollback, or a second restore) clears it */
+  await P.replaceAll({ docs: before.docs, files: (await P.dumpAll()).files });
+  assert.equal(await P.restorePending(), false);
+});
+
+test("a finished replaceAll leaves no half-way marker, even when the dump it writes holds one", async () => {
+  const { P } = platform();
+  await fill(P);
+  assert.equal(await P.restorePending(), false);
+  const d = await P.dumpAll();
+  d.docs.push({ path: P.restorePath, data: { at: 1 } });
+  await P.replaceAll(d);
+  assert.equal(await P.restorePending(), false);
+  assert.equal((await P.dumpAll()).docs.some((x) => x.path === P.restorePath), false);
 });
 
 test("replaceAll refuses a bad document path before writing anything", async () => {
