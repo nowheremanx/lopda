@@ -31,7 +31,7 @@ records only what has actually been met.
 
 There are also four small treasure rooms with a monster in the only doorway: a shield behind an
 armored bug on page 2, a blue potion on page 4, another blue potion on page 6, and holy water
-behind a wraith on page 9. The eleventh page puts the wick behind a last guard. These rooms are
+behind an Ink Nightmare on page 9. The eleventh page puts the wick behind a last guard. These rooms are
 never free: the question is whether the potion or shield is worth the HP now, before a gate or a
 keeper asks for that HP.
 

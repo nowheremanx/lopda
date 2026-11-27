@@ -243,3 +243,35 @@ test("lost-deck app: the ending fits above its hint, and the first press shows i
     const after = textsOf(app, L); assert.ok(!after.some((e) => lines.includes(e.s)), `${lang}: back on the title: ${JSON.stringify(after.map((e) => e.s))}`);
   }
 });
+
+test("lost-deck app: menus take a tap on their rows, the controls page takes A, and the end screens take a tap (#354)", async () => {
+  const p = fakePad({ save: { v: 1, unlocked: 3, best: {}, tips: {} } }), on = {};
+  p.pad.on = (type, fn) => { (on[type] = on[type] || []).push(fn); };
+  const app = boot(APP, { pad: p.pad, seed: 3 });
+  await settle(); frames(app, 5);
+  /* lo-game keeps no scene names on the stack, so each scene is told by a word only its draw uses */
+  const MARK = { title: "LOST DECK", help: "Doors open", decks: "Marks {a}", brief: "A go", pause: "Restart deck", play: "drawGun", dead: "SIGNAL LOST" };
+  const L = app.ctx.get("LD"), top = () => { const d = String(L.game.top().draw); return Object.keys(MARK).find((k) => d.includes(MARK[k])); };
+  /* a scene change fades through promises, so the event loop has to turn between the frames */
+  const run = async (n) => { for (let i = 0; i < n; i++) { frames(app, 1); await settle(); } };
+  const tap = async (x, y) => { app.pointer("pointerdown", x, y, 160, 160); await run(2); app.pointer("pointerup", x, y, 160, 160); await run(40); };
+  const key = async (b) => { (on.press || []).forEach((f) => f(b)); await run(2); (on.release || []).forEach((f) => f(b)); await run(40); };
+  await run(40);                                     /* past the opening fade */
+  assert.equal(top(), "title");
+  await tap(80, 94 + 2 * 16);                              /* 操作 */
+  assert.equal(top(), "help");
+  await key("a");
+  assert.equal(top(), "title", "A leaves the controls page");
+  await tap(80, 94 + 16);                                  /* 选层 */
+  assert.equal(top(), "decks");
+  await tap(80, 22 + 2 * 17 + 6);                          /* the third row, deck 3, is open */
+  assert.equal(top(), "brief");
+  L.dbgStart(0); await run(40);
+  await key("start");
+  assert.equal(top(), "pause");
+  await tap(30, 87 + 6);                                   /* 继续 */
+  assert.equal(top(), "play");
+  L.game.go("dead", null, { fade: false }); await run(60);
+  await tap(80, 80);
+  assert.equal(top(), "play", "a tap on the dead screen tries again");
+});
