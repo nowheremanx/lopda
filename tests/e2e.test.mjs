@@ -9170,15 +9170,18 @@ test("photo puzzle: 怎么玩 teaches four lessons; the board shows its gap; a l
   for (const d of ppDirs(s.tiles, plan)) await ppPress(p, f, d);
   s = await ppState(f);
   assert.deepEqual([s.tiles[0], s.tiles[1], s.tiles[2], s.lessonDone], [0, 1, 2, true]);
-  /* lesson 4: a 4×4 demo; any key stops it and the lesson is over */
+  /* lesson 4: a 4×4 demo of about 20 s; a key does not stop it (#383), it plays to the end */
   await press(p, "a");
   await until(p, async () => (await ppState(f)).lesson === 3, "lesson 4");
   assert.equal((await ppState(f)).n, 4);
   await until(p, async () => (await ppState(f)).demo, "the 4×4 demo");
   await press(p, "up");
+  await p.waitForTimeout(300);
+  assert.deepEqual([(await ppState(f)).demo, (await ppState(f)).lessonDone], [true, false], "a key leaves the demo running");
+  for (let i = 0; i < 4 && !(await ppState(f)).lessonDone; i++) await p.waitForTimeout(8000);
   await until(p, async () => (await ppState(f)).lessonDone, "the demo lesson done");
   assert.equal(await f.textContent("#msg"), "看完了：拼好一行，再拼下一行。");
-  assert.deepEqual(await labels(), ["回主菜单"]);
+  assert.deepEqual(await labels(), ["回主菜单", "再看一遍"]);
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "main", "back on the main menu");
   assert.equal((await ppState(f)).mode, "normal");
@@ -9302,7 +9305,7 @@ test("photo puzzle: arcade counts down on the screen-edge fuse, pauses in the me
   s = await ppState(f);
   assert.deepEqual([s.left, s.hasSave, s.fuse], [0, false, ""]);
   assert.deepEqual(await ppLabels(f), ["再来一局", "主菜单"]);
-  assert.equal(await f.textContent("#msg"), "时间到。已拼好 6/9");   /* the hole at home is not a placed piece */
+  assert.equal(await f.textContent("#msg"), "时间到。已拼好 6/8。");   /* the hole at home is not a placed piece */
   await p.waitForTimeout(600);
   assert.equal(await f.evaluate(() => PAD.load("game")), null, "a lost game is not kept");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);

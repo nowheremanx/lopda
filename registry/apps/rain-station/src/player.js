@@ -109,7 +109,8 @@ function advance() {
     game.sfx("ok");
     S.at++; run(); return;
   }
-  if (cur.kind === "end") { game.musicStop(); game.go("title"); }
+  /* the end song plays out over the quiet title (it is the last thing the story says); a new reading stops it */
+  if (cur.kind === "end") game.go("title");
 }
 
 /* the rows a choice or the title menu puts on screen, for taps: 22 canvas px is 44 css px at the smallest
@@ -148,6 +149,7 @@ game.scene("play", {
   enter: function (saved) {
     S = valid(saved) ? saved : fresh();
     view = "play"; heard = undefined;
+    game.musicStop();
     if (S.scene) { settle(); listen(S.scene, S.stage); }
     rebuildLog();
     run();
@@ -167,6 +169,9 @@ game.scene("play", {
       if (game.repeat("down")) { cur.idx = (cur.idx + 1) % n; game.sfx("move"); }
       if (game.pointer.pressed) {
         for (var k = 0; k < n; k++) if (inside(choiceRow(k, n), game.pointer.x, game.pointer.y)) { cur.idx = k; advance(); return; }
+        /* a tap beside the rows never picks one (a branch cannot be taken back, #394), but it answers: a tick,
+           and the box below says to tap a line */
+        game.sfx("tick");
         return;
       }
     }
@@ -230,8 +235,8 @@ function drawChoice(g) {
     g.text(T(c), 16, r.y + 4, { color: on ? g.PAPER : g.INK });
   });
   drawBox(g);
-  g.text(T({ zh: "↑↓ 选  A 确定", en: "Up/Dn  A: choose" }), 80, BOX_Y + 12, { align: "center", color: g.INK });
-  g.text(T({ zh: "B 回看", en: "B: log" }), 80, BOX_Y + 30, { align: "center", color: g.INK });
+  g.text(T({ zh: "点上面一行来选", en: "Tap a line above" }), 80, BOX_Y + 12, { align: "center", color: g.INK });
+  g.text(T({ zh: "↑↓ 选  A 确定  B 回看", en: "Up/Dn  A: pick  B: log" }), 80, BOX_Y + 30, { align: "center", color: g.INK });
 }
 
 function drawCard(g, title, sub, hint) {
