@@ -12,6 +12,7 @@
  *                            saveAll([{filename, data}], label) -> one share sheet with every file
  *   LopdaPlatform.dumpAll()  -> {docs: [{path, data}], files: [{key, value}]}, everything both databases hold
  *   LopdaPlatform.replaceAll({docs, files})  clears both databases and writes these back
+ *   LopdaPlatform.restorePending()  -> true when the last replaceAll stopped between its two databases
  */
 (function () {
   "use strict";
@@ -220,18 +221,30 @@
     });
     return Promise.all([docs, fl]).then(function (r) { return { docs: r[0], files: r[1] }; });
   }
+  /* A page ended between the two transactions (iOS ends background pages) would leave new documents over old files, with
+     nothing to say so. The documents' transaction therefore also writes this marker, and only a finished files transaction
+     takes it away: found at boot, it means the last restore stopped half way (issue #278). */
+  var PENDING = "data/users/local/restore-pending";
   function replaceAll(all) {
-    var docs = (all && all.docs) || [], fl = (all && all.files) || [];
+    var docs = ((all && all.docs) || []).filter(function (d) { return d && d.path !== PENDING; }), fl = (all && all.files) || [];
     try { docs.forEach(function (d) { checkPath(d.path, true); }); } catch (e) { return Promise.reject(e); }
     return tx("readwrite", function (os) {
       os.clear();
       docs.forEach(function (d) { os.put({ path: d.path, parent: d.path.slice(0, d.path.lastIndexOf("/")), data: d.data }); });
+      os.put({ path: PENDING, parent: PENDING.slice(0, PENDING.lastIndexOf("/")), data: { at: Date.now() } });
     }, 0).then(function () {
       return filesTx("readwrite", function (os) {
         os.clear();
         fl.forEach(function (f) { os.put(f.value, f.key); });
       });
+    }).then(function () {
+      /* both databases are whole: a marker left behind only costs a needless notice, so its removal cannot fail the restore */
+      return tx("readwrite", function (os) { os.delete(PENDING); }).catch(function () {});
     }).then(function () {});
+  }
+  /* -> true when a restore began and did not finish (see PENDING above) */
+  function restorePending() {
+    return tx("readonly", function (os) { return os.get(PENDING); }).then(function (rec) { return !!rec; });
   }
 
   /* ---------------- file export ---------------- */
@@ -315,5 +328,5 @@
     return Promise.resolve(false);
   }
 
-  window.LopdaPlatform = { db: db, files: files, downloads: downloads, persist: persist, dumpAll: dumpAll, replaceAll: replaceAll, user: { id: function () { return Promise.resolve("local"); } } };
+  window.LopdaPlatform = { db: db, files: files, downloads: downloads, persist: persist, dumpAll: dumpAll, replaceAll: replaceAll, restorePending: restorePending, restorePath: PENDING, user: { id: function () { return Promise.resolve("local"); } } };
 })();

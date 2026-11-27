@@ -136,6 +136,8 @@ var dataHooks={notes:[],apps:[]};
 function upsert(kind,obj){
   var arr=S[kind], i=arr.findIndex(function(x){ return x.id===obj.id; });
   if(i<0) arr.push(obj); else arr[i]=obj;
+  /* removed only hides the stale copy of something deleted in this session; put back (reinstalled), it is live again (issue #323) */
+  delete removed[kind][obj.id];
 }
 function dropLocal(kind,id){ S[kind]=S[kind].filter(function(x){ return x.id!==id; }); removed[kind][id]=true; }
 function applyRemote(kind,docs){
@@ -247,7 +249,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.6.1+5795f77";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.6.1+26fce1d";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
