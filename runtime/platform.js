@@ -7,7 +7,8 @@
  *
  *   LopdaPlatform.db         a tiny document store on IndexedDB
  *                            doc(path) / collection(path), get / set / update / delete / where
- *   LopdaPlatform.files      a key-value store for large binary data (dictionaries): get / put / del
+ *   LopdaPlatform.files      a key-value store for large binary data (dictionaries): get / put / del,
+ *                            keys(prefix) -> the keys only, to find parts nothing points to any more
  *   LopdaPlatform.downloads  save({filename, data}) -> share sheet on phones, download elsewhere;
  *                            saveAll([{filename, data}], label) -> one share sheet with every file
  *   LopdaPlatform.dumpAll()  -> {docs: [{path, data}], files: [{key, value}]}, everything both databases hold
@@ -204,7 +205,13 @@
   var files = {
     get: function (key) { return filesTx("readonly", function (os) { return os.get(key); }); },
     put: function (key, value) { return filesTx("readwrite", function (os) { return os.put(value, key); }).then(function () {}); },
-    del: function (key) { return filesTx("readwrite", function (os) { return os.delete(key); }).then(function () {}); }
+    del: function (key) { return filesTx("readwrite", function (os) { return os.delete(key); }).then(function () {}); },
+    /* the keys alone (no values read, so no megabytes), those that start with prefix */
+    keys: function (prefix) {
+      return filesTx("readonly", function (os) { return os.getAllKeys(); }).then(function (ks) {
+        return (ks || []).filter(function (k) { return typeof k === "string" && (!prefix || k.indexOf(prefix) === 0); });
+      });
+    }
   };
 
   /* ---------------- whole-device dump and load (the backup in Settings) ----------------
