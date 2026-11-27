@@ -9,6 +9,15 @@
 
 function title(body){ return String(body||"").split("\n")[0].trim(); }
 
+/* ---------- no colour glyphs on a four-tone screen (CLAUDE.md: no emoji anywhere). A note is the one place where the player
+   types freely, so what the phone would draw as a colour emoji is left out of it: typed, pasted, imported or quoted. Only
+   those: a pictograph that shows as text by default (© ™ ★ ↔ ☆) stays unless a variation selector asks for the colour form,
+   and so do digits and # in front of a keycap. A ZWJ sequence goes whole; leftover flags, skin tones, tags and selectors go */
+var EMO_ONE="(?:\\p{Extended_Pictographic}\\uFE0F|\\p{Emoji_Presentation}\\uFE0F?)[\\u{1F3FB}-\\u{1F3FF}]?";
+var EMOJI_SEQ=new RegExp(EMO_ONE+"(?:\\u200D(?:"+EMO_ONE+"|\\p{Extended_Pictographic}))*","gu");
+var EMOJI_REST=/[\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{E0020}-\u{E007F}⃣️]/gu;
+function dropEmoji(s){ return String(s==null?"":s).replace(EMOJI_SEQ,"").replace(EMOJI_REST,""); }
+
 /* ---------- the 摘抄 group (owner 2026-10-16): src "reader" or "dict", which LP.notes.append writes on notes it creates;
    or no src and a title that is 《…》 and nothing else. That covers quotes from before 0.21.0 and quotes that went through
    an export and an import, with no migration and no front matter field */
@@ -236,7 +245,7 @@ function fileName(t,blank,used,dir,ext){
 /* "notes/读书.md" -> "读书" */
 function stem(path){ var b=String(path||"").split("/").pop(); var i=b.lastIndexOf("."); return i>0 ? b.slice(0,i) : b; }
 
-window.LopdaNoteText={title:title, quote:quote, appSrc:appSrc, appOf:appOf, appCheck:appCheck, appNote:appNote, preview:preview, APP_TITLE:APP_TITLE, APP_TEXT:APP_TEXT, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
+window.LopdaNoteText={title:title, dropEmoji:dropEmoji, quote:quote, appSrc:appSrc, appOf:appOf, appCheck:appCheck, appNote:appNote, preview:preview, APP_TITLE:APP_TITLE, APP_TEXT:APP_TEXT, tags:tags, key:key, fold:fold, search:search, AROUND:AROUND,
   dayKey:dayKey, parseDay:parseDay, diaryIndex:diaryIndex, snippet:snippet, SNIPPET:SNIPPET, when:when, count:count, diaryTitle:diaryTitle, iso:iso, frontMatter:frontMatter, parseFront:parseFront,
   cleanName:cleanName, fileName:fileName, stem:stem, TAG_MAX:TAG_MAX, MAX_NAME:MAX_NAME};
 })();

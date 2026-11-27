@@ -533,6 +533,7 @@ function calButton(b){
     else if(b==="a") openAdd();
     else if(b==="start"){ if(canWrite()) openDiary(iso(C.y,C.m,C.d)); }
     else if(b==="left"||b==="right"){ select(selN()+(b==="left"?-1:1)); sfx("move"); render(); }
+    else if(b==="up"||b==="down") scrollDay(b==="up"?-1:1);
     return;
   }
   var step={left:-1, right:1, up:-7, down:7}[b];
@@ -542,6 +543,13 @@ function calButton(b){
   else if(b==="select") openSheet("list");
   /* the month view is the outermost screen: "back" is back to today; on today it does nothing (HOME leaves) */
   else if(b==="b" && selN()!==todayN()){ goToday(); sfx("tap"); }
+}
+/* ▲▼ on the day sheet scroll its lines by most of a screen (a day with many years of diaries runs long); at either end, nothing */
+function scrollDay(dir){
+  var box=document.querySelector("#cal-sheet .cal-lines"); if(!box) return;
+  var max=box.scrollHeight-box.clientHeight, to=Math.max(0,Math.min(max,box.scrollTop+dir*Math.max(24,Math.round(box.clientHeight*0.8))));
+  if(to===box.scrollTop) return;
+  box.scrollTop=to; sfx("move");
 }
 /* the notes finished loading or changed: redraw the marks */
 LP.onData("notes",function(){ if(!$("v-cal").hidden) render(C.sheet==="add" || C.sheet==="jump"); });
@@ -638,7 +646,7 @@ LP.builtin({id:"calendar", label:"app.calendar", icon:dateIcon, view:"cal", keep
       var s=soonest(), n=todayN();
       if(s && C.set.hinted!==n){
         C.set.hinted=n; saveSettings();
-        toast(s.days ? tr("cal.hint",{n:s.days, name:LP.noEmoji(s.a.name)}) : tr("cal.hinttoday",{name:LP.noEmoji(s.a.name)}));
+        toast(tr(s.days>1 ? "cal.hint" : s.days ? "cal.hintmorrow" : "cal.hinttoday",{n:s.days, name:LP.noEmoji(s.a.name)}));
       }
     }).catch(function(){});
   }});

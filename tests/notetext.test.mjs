@@ -244,3 +244,13 @@ test("app notes: front matter carries source: app:<id> and reads it back; nothin
   assert.doesNotMatch(NT.frontMatter({ created: 0, updated: 0, tags: [] }), /source/);
   for (const v of ["reader", "dict", "app:", "app:Bad Id", "x"]) assert.equal(NT.parseFront("---\nsource: " + v + "\n---\nx").meta.source, undefined, v);
 });
+
+test("dropEmoji: what would draw as a colour emoji goes; text pictographs, digits and line breaks stay (issue #361)", () => {
+  assert.equal(NT.dropEmoji("今天😀好"), "今天好");
+  assert.equal(NT.dropEmoji("© ™ ★ ↔ ☆ ♪ ❤"), "© ™ ★ ↔ ☆ ♪ ❤", "text by default: kept");
+  assert.equal(NT.dropEmoji("❤️ ok"), " ok", "a variation selector asks for the colour form");
+  assert.equal(NT.dropEmoji("👨‍👩‍👧 🏳️‍🌈 🏃‍♀️ 👍🏽 🇨🇳."), "    .", "sequences, flags and skin tones go whole");
+  assert.equal(NT.dropEmoji("1️⃣ #"), "1 #");
+  assert.equal(NT.dropEmoji("a\n\n  b\n"), "a\n\n  b\n", "nothing else is trimmed or touched");
+  assert.equal(NT.dropEmoji(null), "");
+});
