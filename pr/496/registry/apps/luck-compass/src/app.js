@@ -532,19 +532,7 @@ var SECTIONS = [
   { id: "almanac", name: T({ zh: "老黄历", en: "Almanac" }) },
   { id: "fortune", name: T({ zh: "每日一签", en: "Fortune" }) },
   { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) },
-  { id: "hexagram", name: T({ zh: "八卦", en: "I Ching" }) },
-  { id: "bazi", name: T({ zh: "八字", en: "Chart" }) }
-];
-var baziState = { loaded: false, failed: false, saved: null, chart: null, picker: false,
-  y: 1990, m: 1, d: 1, hour: null, field: 0 };
-var BAZI_HOURS = [
-  { label: "早子", en: "Early Rat", hour: 0 }, { label: "丑", en: "Ox", hour: 1 },
-  { label: "寅", en: "Tiger", hour: 3 }, { label: "卯", en: "Rabbit", hour: 5 },
-  { label: "辰", en: "Dragon", hour: 7 }, { label: "巳", en: "Snake", hour: 9 },
-  { label: "午", en: "Horse", hour: 11 }, { label: "未", en: "Goat", hour: 13 },
-  { label: "申", en: "Monkey", hour: 15 }, { label: "酉", en: "Rooster", hour: 17 },
-  { label: "戌", en: "Dog", hour: 19 }, { label: "亥", en: "Pig", hour: 21 },
-  { label: "晚子", en: "Late Rat", hour: 23 }, { label: "不知道", en: "Unknown", hour: null }
+  { id: "hexagram", name: T({ zh: "八卦", en: "I Ching" }) }
 ];
 var counterCursor = 0;
 var almanacOffset = 0, almanacScroll = 0, almanacGlossary = false, almanacGlossaryScroll = 0;
@@ -566,7 +554,7 @@ function makeScroller(offset) {
 }
 var slipScroller = makeScroller(), almanacScroller = makeScroller(),
   glossaryScroller = makeScroller(), guaScroller = makeScroller(),
-  guaExplainScroller = makeScroller(), baziExplainScroller = makeScroller();
+  guaExplainScroller = makeScroller();
 var scrollGestureMoved = false;
 function scrollUpdate(sc, area, total, dt, lineHeight) {
   var p = game.pointer, max = Math.max(0, total - area.h), dir = 0, releasedNow = false;
@@ -656,10 +644,8 @@ function syncSlipDate() {
   syncMotion();
 }
 var guaState = { day: todayKey(), lines: [], loaded: false, failed: false, animating: false, written: false };
-var guaScroll = 0, guaChart = false, guaExplain = false, guaExplainScroll = 0, guaPanel = false, guaCursor = 0;
+var guaScroll = 0, guaExplain = false, guaExplainScroll = 0;
 var guaAppendBusy = false, guaAppendStatus = "";
-var baziExplain = false, baziExplainScroll = 0, baziAppendBusy = false, baziAppendStatus = "";
-var GUA_ORDER = [2, 7, 1, 0, 5, 6, 3, 4]; /* clockwise from south: 离、坤、兑、乾、坎、艮、震、巽 */
 function syncGuaDate() {
   var key = todayKey();
   if (key === guaState.day) return;
@@ -817,7 +803,7 @@ function skipSlip() {
 }
 function openSection(id) {
   if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac" &&
-      id !== "hexagram" && id !== "bazi") return;
+      id !== "hexagram") return;
   game.go(id, null, { fade: false });
 }
 function backToCounter() { openSection("counter"); }
@@ -849,9 +835,6 @@ function sectionSummary(id) {
     return game.lang === "en" ? hex.number + " " + hex.short + " " + hex.name :
       hex.name + " " + hex.short;
   }
-  if (id === "bazi") return baziState.chart ?
-    T({ zh: "日主 " + baziState.chart.dayMaster, en: "Day master " + baziMasterEnglish(baziState.chart.dayMaster) }) :
-    T({ zh: "未填", en: "Not set" });
   /* the counter always speaks of today, whatever day the compass was left on */
   var now = new Date(), p = LUCK.pillar(now.getFullYear(), now.getMonth() + 1, now.getDate()), gods = LUCK.gods(p.stem);
   return GODS[0].name + " " + dirName(gods.xi);
@@ -1453,32 +1436,32 @@ function guaReading(lines) {
   rows.push({ kind: "source", text: EXPLAIN.RULE_SOURCE });
   return rows;
 }
-function guaTextLines(g) {
-  var h = YI.primary(guaState.lines), changed = YI.changed(guaState.lines), rows = [], names, i;
-  function add(text, color) {
-    var wrapped = g.wrap(text, 196);
-    for (var k = 0; k < wrapped.length; k++) rows.push({ text: wrapped[k], color: color == null ? g.INK : color });
+function guaResultRows(g) {
+  var primary = YI.primary(guaState.lines), changed = YI.changed(guaState.lines), rows = [];
+  var lineHeight = g.lineHeight || 14;
+  function textRows(text, color, bold) {
+    var wrapped = g.wrap(text, 192);
+    for (var i = 0; i < wrapped.length; i++)
+      rows.push({ type: "text", text: wrapped[i], color: color, bold: !!bold, height: lineHeight });
   }
-  if (guaState.failed) add(T({ zh: "存档读不出，今天不会保存", en: "Could not read the save; today won't be saved" }), g.DARK);
-  add(game.lang === "en" ? h.number + " " + h.short + " · " + h.name : h.number + " " + h.name);
-  add("卦辞：" + h.judgment);
-  add("大象：" + h.image);
-  if (game.lang === "en") add(h.english);
-  names = YI.changingLines(guaState.lines);
+  rows.push({ type: "figure", lines: guaState.lines.slice(), changed: changed, height: 54 });
+  rows.push({ type: "gap", height: 6 });
+  textRows(game.lang === "en" ? primary.number + " " + primary.short + " · " + primary.name :
+    "第" + primary.number + "卦 " + primary.name, g.INK, true);
   if (changed) {
-    add(T({ zh: "变卦 " + changed.number + " " + changed.name,
-      en: "Changes to " + changed.number + " " + changed.short + " · " + changed.name }));
-    var lineNames = names.map(function (n) { return EXPLAIN.LINE_NAMES[n - 1]; });
-    add(T({ zh: "动爻：" + lineNames.join("、"),
-      en: "Changing: " + names.join(", ") }));
-    add("卦辞：" + changed.judgment);
+    var names = YI.changingLines(guaState.lines).map(function (n) { return EXPLAIN.LINE_NAMES[n - 1]; });
+    textRows(T({ zh: "变卦 第" + changed.number + "卦 " + changed.name + " · 动爻：" + names.join("、"),
+      en: "Changed: " + changed.number + " " + changed.short + " · " + changed.name + " · lines " + YI.changingLines(guaState.lines).join(", ") }), g.DARK);
   }
-  add(T({ zh: "读法", en: "Reading" }));
-  var reading = guaReading(guaState.lines);
-  for (i = 0; i < reading.length; i++) {
-    var text = game.t(reading[i].text), color = reading[i].kind === "source" ? g.DARK : g.INK;
-    add(text, color);
-  }
+  rows.push({ type: "gap", height: 6 });
+  rows.push({ type: "label", text: T({ zh: "卦辞", en: "Judgment" }), color: g.INK, height: lineHeight });
+  rows.push({ type: "gap", height: 2 });
+  textRows(primary.judgment, g.INK);
+  rows.push({ type: "gap", height: 6 });
+  rows.push({ type: "label", text: T({ zh: "解读", en: "Reading" }), color: g.INK, height: lineHeight });
+  rows.push({ type: "gap", height: 2 });
+  if (game.lang === "en") textRows(primary.english, g.INK);
+  textRows(GUAREAD[primary.number - 1], game.lang === "en" ? g.DARK : g.INK);
   return rows;
 }
 function guaNoteText() {
@@ -1534,515 +1517,122 @@ function drawTossCoins(g, centerY) {
 }
 function updateHexagram(dt) {
   syncGuaDate();
-  if (guaChart) { updateGuaChart(); return; }
   if (guaExplain) { updateGuaExplain(dt); return; }
   if (game.pressed("b")) { backToCounter(); return; }
   if (game.pressed("select")) {
     if (guaState.lines.length === 6) {
       guaExplain = true; guaExplainScroll = 0; guaExplainScroller.offset = 0;
+      sfx("tap");
     }
-    else guaChart = true;
-    guaPanel = false; sfx("tap"); return;
+    return;
   }
   if (guaState.lines.length === 6 && !guaState.animating) {
-    var visibleRows = guaTextLines(game.g), lineHeight = game.g.lineHeight || 14;
-    guaScroll = scrollUpdate(guaScroller, { x: 9, y: 81, w: 198, h: 124 },
-      visibleRows.length * lineHeight, dt, lineHeight);
+    var rows = guaResultRows(game.g), total = 0;
+    for (var i = 0; i < rows.length; i++) total += rows[i].height;
+    guaScroll = scrollUpdate(guaScroller, { x: 9, y: 22, w: 198, h: 183 }, total, dt, game.g.lineHeight || 14);
     if (game.pressed("start")) appendGua();
   }
   var p = game.pointer;
-  if (p.pressed && !guaState.animating && guaState.lines.length < 6 && p.y >= 40 && p.y <= 205) {
-    tossGuaLine();
-  }
+  if (p.pressed && !guaState.animating && guaState.lines.length < 6 && p.y >= 40 && p.y <= 205) tossGuaLine();
   if (game.pressed("a")) tossGuaLine();
 }
 function drawHexagram(g) {
   syncGuaDate();
   g.clear(g.PAPER);
   g.rect(0, 0, W, 19, g.INK);
-  g.text(T({ zh: "八卦", en: "Hexagram" }), CX, 2, { align: "center", color: g.PAPER });
+  g.text(T({ zh: "八卦", en: "I Ching" }), CX, 2, { align: "center", color: g.PAPER });
   if (!guaState.loaded) {
     g.text(T({ zh: "存档读取中…", en: "Reading save…" }), CX, 96, { align: "center", color: g.DARK });
-  } else if (!guaState.lines.length) {
-    g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), CX, 42,
-      { align: "center", color: g.INK, width: 204 });
-    if (guaState.animating) {
-      drawTossCoins(g);
+  } else if (guaState.lines.length === 6) {
+    var rows = guaResultRows(g), total = 0, y = 22 - guaScroller.offset;
+    for (var i = 0; i < rows.length; i++) total += rows[i].height;
+    guaScroller.max = Math.max(0, total - 183);
+    guaScroll = guaScroller.offset;
+    g.clip(9, 22, 198, 183);
+    for (i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      if (row.type === "figure") {
+        var c = row.changed;
+        if (c) {
+          drawGuaFigure(g, 42, y + 47, row.lines, 42);
+          drawArrow(g, CX, y + 26);
+          drawGuaFigure(g, 123, y + 47, c.lines, 42, true);
+        } else drawGuaFigure(g, 87, y + 47, row.lines, 42);
+      } else if (row.type === "text") {
+        g.text(row.text, 10, y, { color: row.color });   /* a shadowed pixel font smears; the name stands out by its own line */
+      } else if (row.type === "label") {
+        g.text(row.text, 10, y, { color: g.INK });
+      }
+      y += row.height;
     }
+    g.clip();
+    drawScrollbar(g, guaScroller, { x: 9, y: 22, w: 198, h: 183 }, total);
+  } else {
+    if (!guaState.lines.length) g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), CX, 42,
+      { align: "center", color: g.INK, width: 204 });
+    else g.text(T({ zh: "占卦 " + guaState.lines.length + "/6", en: "Casting " + guaState.lines.length + "/6" }),
+      CX, 34, { align: "center", color: g.INK });
+    if (guaState.lines.length) drawGuaFigure(g, 77, 114 + (guaState.lines.length - 1) * 4, guaState.lines, 48);
+    if (guaState.animating) drawTossCoins(g);
     if (guaState.failed) g.text(T({ zh: "存档读不出，今天不会保存",
       en: "Could not read the save; today won't be saved" }), CX, 190, { align: "center", color: g.DARK, width: 210 });
-  } else {
-    if (guaState.lines.length === 6) {
-      var changedHex = YI.changed(guaState.lines);
-      if (changedHex) {
-        drawGuaFigure(g, 17, 70, guaState.lines, 48);
-        drawArrow(g, CX, 47);
-        drawGuaFigure(g, 151, 70, changedHex.lines, 48, true);
-      } else {
-        drawGuaFigure(g, 81, 70, guaState.lines, 48);
-      }
-      var rows = guaTextLines(g), lineH = g.lineHeight || 14;
-      guaScroller.max = Math.max(0, rows.length * lineH - 124);
-      guaScroll = guaScroller.offset;
-      g.clip(9, 81, 198, 124);
-      for (var i = 0; i < rows.length; i++) {
-        var y = 82 + i * lineH - guaScroll;
-        if (y >= 68 && y < 205) g.text(rows[i].text, 10, y, { color: rows[i].color });
-      }
-      g.clip();
-      drawScrollbar(g, guaScroller, { x: 9, y: 81, w: 198, h: 124 }, rows.length * lineH);
-    } else {
-      g.text(T({ zh: "占卦 " + guaState.lines.length + "/6",
-        en: "Casting " + guaState.lines.length + "/6" }), CX, 34, { align: "center", color: g.INK });
-      drawGuaFigure(g, 77, 114 + (guaState.lines.length - 1) * 4, guaState.lines, 48);
-      if (guaState.animating) drawTossCoins(g, 174);
-    }
   }
   var key = guaState.lines.length === 6 ?
-    T({ zh: "↑↓读 START记 SELECT说明", en: "↑↓read START notes SELECT info" }) :
-    T({ zh: "A 起卦 · SELECT 八卦图", en: "A cast · SELECT trigrams" });
-  g.text(fitPageText(g, key, W), CX, 211, { align: "center", color: g.INK });
-  var status = "";
-  if (guaState.lines.length === 6) {
-    if (typeof PAD === "undefined" || !PAD.notes) status = T({
-      zh: "这台掌机太老，不能写记事本。", en: "This handheld is too old to write notes."
-    });
-    else if (guaAppendBusy) status = T({ zh: "正在写入…", en: "Saving…" });
-    else if (guaAppendStatus === "denied") status = T({
-      zh: "没有写入 · 今天已抽", en: "Not saved · drawn today"
-    });
-    else if (guaState.written) status = T({ zh: "已写入", en: "Saved" });
-  }
-  g.text(fitPageText(g, status || HINT, W), CX, 226, { align: "center", color: g.DARK });
+    T({ zh: "START记事本 · SELECT详解", en: "START notes · SELECT more" }) :
+    T({ zh: "A 起卦", en: "A cast" });
+  var keyLines = g.wrap(key, W);
+  for (var ki = 0; ki < keyLines.length; ki++)
+    g.text(keyLines[ki], CX, 211 + ki * (g.lineHeight || 14), { align: "center", color: g.INK });
 }
 function guaExplainRows(g) {
-  var rows = g.wrap(EXPLAIN.HOW[game.lang], 196), data = ZHOUYI[YI.primary(guaState.lines).number - 1];
-  rows = rows.concat(g.wrap("彖曰：" + data.tuan, 196));
+  var lineHeight = g.lineHeight || 14, rows = [], width = 192;
+  var primary = YI.primary(guaState.lines), data = ZHOUYI[primary.number - 1];
+  function add(label, text, color) {
+    if (label) {
+      rows.push({ type: "label", text: label, color: g.INK, height: lineHeight });
+      rows.push({ type: "gap", height: 2 });
+    }
+    var wrapped = g.wrap(text, width);
+    for (var i = 0; i < wrapped.length; i++) rows.push({ type: "text", text: wrapped[i], color: color == null ? g.INK : color, height: lineHeight });
+    rows.push({ type: "gap", height: 6 });
+  }
+  var reading = guaReading(guaState.lines), count = YI.changingLines(guaState.lines).length;
+  add(T({ zh: "读法", en: "Reading rule" }), EXPLAIN.RULES[count][game.lang]);
+  for (var r = 0; r < reading.length; r++) if (reading[r].kind === "text") {
+    var quote = game.t(reading[r].text);
+    /* The rule source is repeated at the end of this page, after the casting instructions. */
+    add("", quote);
+  }
+  add(T({ zh: "彖", en: "Tuan" }), data.tuan);
+  add(T({ zh: "怎么起卦", en: "How to cast" }), EXPLAIN.HOW[game.lang]);
+  var source = g.wrap(EXPLAIN.RULE_SOURCE[game.lang], width);
+  for (var j = 0; j < source.length; j++) rows.push({ type: "text", text: source[j], color: g.DARK, height: lineHeight });
   return rows;
 }
 function updateGuaExplain(dt) {
-  if (game.pressed("b")) { guaExplain = false; guaExplainScroll = 0; sfx("tap"); return; }
-  if (game.pressed("select")) { guaExplain = false; guaChart = true; guaPanel = false; sfx("tap"); return; }
-  var rows = guaExplainRows(game.g), lineH = game.g.lineHeight || 14;
-  guaExplainScroll = scrollUpdate(guaExplainScroller, { x: 10, y: 27, w: 196, h: 174 },
-    rows.length * lineH, dt, lineH);
+  if (game.pressed("b") || game.pressed("select")) { guaExplain = false; guaExplainScroll = 0; guaScroller.offset = 0; sfx("tap"); return; }
+  var rows = guaExplainRows(game.g), total = 0;
+  for (var i = 0; i < rows.length; i++) total += rows[i].height;
+  guaExplainScroll = scrollUpdate(guaExplainScroller, { x: 10, y: 27, w: 196, h: 174 }, total, dt, game.g.lineHeight || 14);
 }
 function drawGuaExplain(g) {
   g.clear(g.PAPER);
   g.rect(0, 0, W, 19, g.INK);
-  g.text(T({ zh: "八卦 · 说明", en: "I Ching · Reading" }), CX, 2, { align: "center", color: g.PAPER });
-  var rows = guaExplainRows(g), lineH = g.lineHeight || 14, area = { x: 10, y: 27, w: 196, h: 174 };
-  guaExplainScroller.max = Math.max(0, rows.length * lineH - area.h);
+  g.text(T({ zh: "八卦 · 详解", en: "I Ching · More" }), CX, 2, { align: "center", color: g.PAPER });
+  var rows = guaExplainRows(g), total = 0, area = { x: 10, y: 27, w: 196, h: 174 };
+  for (var i = 0; i < rows.length; i++) total += rows[i].height;
+  guaExplainScroller.max = Math.max(0, total - area.h);
   guaExplainScroll = guaExplainScroller.offset;
-  g.clip(10, 27, 196, 174);
-  for (var i = 0; i < rows.length; i++) {
-    var y = 28 + i * lineH - guaExplainScroll;
-    if (y >= 15 && y < 202) g.text(rows[i], 13, y, { color: g.INK });
+  g.clip(area.x, area.y, area.w, area.h);
+  var y = area.y - guaExplainScroll;
+  for (i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (row.type !== "gap") g.text(row.text, 10, y, { color: row.color });
+    y += row.height;
   }
   g.clip();
-  drawScrollbar(g, guaExplainScroller, area, rows.length * lineH);
-  g.text(T({ zh: "↑↓读 · SELECT八卦图 · B返回", en: "↑↓ read · SELECT chart · B back" }), CX, 211,
-    { align: "center", color: g.INK });
-  g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
-}
-function trigramDirection(deg) {
-  var map = { 0: ["北", "N"], 45: ["东北", "NE"], 90: ["东", "E"], 135: ["东南", "SE"],
-    180: ["南", "S"], 225: ["西南", "SW"], 270: ["西", "W"], 315: ["西北", "NW"] };
-  return game.lang === "en" ? map[deg][1] : map[deg][0];
-}
-var CHART_CY = 114;
-function trigramPoint(i) {
-  var angle = (-90 + i * 45) * Math.PI / 180;
-  /* figures 60 px out, names 26 px further: the whole ring fits between the title bar and the key line */
-  return { x: CX + Math.cos(angle) * 60, y: CHART_CY + Math.sin(angle) * 60 };
-}
-function trigramBounds(i) {
-  var p = trigramPoint(i), angle = (-90 + i * 45) * Math.PI / 180;
-  var lx = p.x + Math.cos(angle) * 26, ly = p.y + Math.sin(angle) * 26;
-  var x0 = Math.min(p.x - 12, lx - 7), x1 = Math.max(p.x + 12, lx + 7);
-  var y0 = Math.min(p.y - 8, ly - 7), y1 = Math.max(p.y + 9, ly + 7);
-  return { x: Math.round(x0 - 2), y: Math.round(y0 - 2),
-    w: Math.round(x1 - x0 + 4), h: Math.round(y1 - y0 + 4) };
-}
-function drawTrigram(g, trigram, x, y, color) {
-  for (var j = 0; j < 3; j++) {
-    var yy = Math.round(y + 5 - j * 6);
-    if (trigram.lines[j]) g.rect(x - 11, yy, 22, 3, color);
-    else { g.rect(x - 11, yy, 9, 3, color); g.rect(x + 2, yy, 9, 3, color); }
-  }
-}
-function drawTaiji(g) {
-  var x = CX, y = CHART_CY, r = 16;
-  g.circle(x, y, r, g.INK, true);
-  for (var dy = -15; dy <= 15; dy++) {
-    var half = Math.floor(Math.sqrt(r * r - dy * dy));
-    g.rect(x - half, y + dy, half, 1, g.PAPER);
-  }
-  g.circle(x, y - 8, 8, g.PAPER, true);
-  g.circle(x, y + 8, 8, g.INK, true);
-  g.circle(x, y - 8, 2, g.INK, true);
-  g.circle(x, y + 8, 2, g.PAPER, true);
-}
-function updateGuaChart() {
-  var p = game.pointer, i, point, dx, dy, closest = -1, distance = 10000;
-  if (game.pressed("select")) { guaChart = false; guaExplain = false; guaPanel = false; sfx("tap"); return; }
-  if (game.pressed("b")) {
-    if (guaPanel) guaPanel = false;
-    else guaChart = false;
-    sfx("tap"); return;
-  }
-  if (game.pressed("left")) { guaCursor = (guaCursor + 7) % 8; sfx("move"); }
-  if (game.pressed("right")) { guaCursor = (guaCursor + 1) % 8; sfx("move"); }
-  if (p.pressed) {
-    for (i = 0; i < 8; i++) {
-      point = trigramPoint(i); dx = p.x - point.x; dy = p.y - point.y;
-      if (dx * dx + dy * dy < distance) { distance = dx * dx + dy * dy; closest = i; }
-    }
-    if (distance < 29 * 29) { guaCursor = closest; guaPanel = true; sfx("tap"); }
-  }
-  if (game.pressed("a")) { guaPanel = true; sfx("tap"); }
-}
-function drawGuaChart(g) {
-  g.clear(g.PAPER);
-  g.rect(0, 0, W, 19, g.INK);
-  g.text(T({ zh: "后天八卦", en: "Later Heaven" }), CX, 2, { align: "center", color: g.PAPER });
-  drawTaiji(g);
-  for (var i = 0; i < 8; i++) {
-    var t = YI.TRIGRAMS[GUA_ORDER[i]], p = trigramPoint(i);
-    var angle = (-90 + i * 45) * Math.PI / 180;
-    var lx = p.x + Math.cos(angle) * 26, ly = p.y + Math.sin(angle) * 26;
-    var color = g.INK;
-    if (i === guaCursor) {
-      var box = trigramBounds(i);
-      g.rect(box.x, box.y, box.w, box.h, g.INK);
-      color = g.PAPER;
-    }
-    drawTrigram(g, t, p.x, p.y, color);
-    g.text(t.name, lx, ly - 6, { align: "center", color: color });
-  }
-  if (guaPanel) {
-    var selected = YI.TRIGRAMS[GUA_ORDER[guaCursor]];
-    g.window(22, 63, 172, 101);
-    g.text(selected.name, CX, 70, { align: "center", color: g.INK });
-    g.text(T({ zh: "卦象 ", en: "Image " }) +
-      (game.lang === "en" ? selected.imageEn : selected.image), CX, 89,
-      { align: "center", color: g.INK });
-    g.text(T({ zh: "家人 ", en: "Family " }) +
-      (game.lang === "en" ? selected.familyEn : selected.family), CX, 108,
-      { align: "center", color: g.INK });
-    g.text(T({ zh: "方位 ", en: "Direction " }) + trigramDirection(selected.direction),
-      CX, 127, { align: "center", color: g.INK });
-    g.text(T({ zh: "B 关闭", en: "B close" }), CX, 145, { align: "center", color: g.DARK });
-  }
-  g.text(fitPageText(g, T({ zh: "←→选 · A看 · B/SELECT返回", en: "←→ pick · A view · B/SELECT back" }), W),
-    CX, 211, { align: "center", color: g.INK });
-  g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
-}
-
-function baziHourIndex(hour) {
-  for (var i = 0; i < BAZI_HOURS.length; i++) if (BAZI_HOURS[i].hour === hour) return i;
-  return BAZI_HOURS.length - 1;
-}
-function baziHourText(hour) {
-  var option = BAZI_HOURS[baziHourIndex(hour)];
-  if (option.hour === null) return T({ zh: "不知道", en: "Unknown" });
-  var range = option.hour === 0 ? "0-1" : option.hour === 23 ? "23-24" : option.hour + "-" + (option.hour + 2);
-  return game.lang === "en" ? option.en + " " + range : option.label + " " + range;
-}
-function baziMasterEnglish(master) {
-  var elements = ["木", "火", "土", "金", "水"], english = ["Wood", "Fire", "Earth", "Metal", "Water"];
-  return master.charAt(0) + " " + english[elements.indexOf(master.charAt(1))];
-}
-function baziHourBranch(hour) {
-  return hour === null ? null : LUCK.BRANCHES[Math.floor((hour + 1) / 2) % 12];
-}
-function validBaziSave(value) {
-  return !!(value && value.v === 1 && BAZI.valid(value.y, value.m, value.d) &&
-    (value.hour === null || (typeof value.hour === "number" && Math.floor(value.hour) === value.hour &&
-      value.hour >= 0 && value.hour <= 23)));
-}
-function readBazi() {
-  if (typeof PAD === "undefined" || typeof PAD.load !== "function") { baziState.loaded = true; return; }
-  var result;
-  try { result = PAD.load("bazi"); }
-  catch (e) { baziState.failed = true; baziState.loaded = true; return; }
-  Promise.resolve(result).then(function (value) {
-    baziState.loaded = true;
-    if (validBaziSave(value)) {
-      baziState.saved = { v: 1, y: value.y, m: value.m, d: value.d, hour: value.hour };
-      baziState.chart = BAZI.chart(value.y, value.m, value.d, value.hour);
-    }
-  }, function () {
-    baziState.failed = true;
-    baziState.loaded = true;
-  });
-}
-function beginBaziEdit() {
-  var value = baziState.saved;
-  baziState.y = value ? value.y : 1990;
-  baziState.m = value ? value.m : 1;
-  baziState.d = value ? value.d : 1;
-  baziState.hour = value ? value.hour : null;
-  baziState.field = 0;
-  baziState.picker = true;
-}
-function saveBazi() {
-  var value = { v: 1, y: baziState.y, m: baziState.m, d: baziState.d, hour: baziState.hour };
-  baziState.saved = value;
-  baziState.chart = BAZI.chart(value.y, value.m, value.d, value.hour);
-  baziState.picker = false;
-  baziAppendStatus = "";
-  if (!baziState.failed && typeof PAD !== "undefined" && typeof PAD.save === "function") {
-    try { PAD.save("bazi", value); } catch (e) {}
-  }
-  sfx("ok");
-}
-function baziNoteText() {
-  var chart = baziState.chart, saved = baziState.saved;
-  var date = saved.y + "-" + pad2(saved.m) + "-" + pad2(saved.d);
-  var hour = baziHourBranch(saved.hour);
-  var pillars = [chart.year, chart.month, chart.day, chart.hour].map(function (index) {
-    return index === null ? "" : ALMANAC.name(index);
-  }).filter(function (name) { return !!name; }).join(" ");
-  if (game.lang === "en") {
-    return date + " hour " + (hour === null ? "unknown" : hour) + "  " + pillars +
-      "  Day master " + baziMasterEnglish(chart.dayMaster);
-  }
-  return date + " " + (hour === null ? "时辰未知" : hour + "时") + "  " + pillars +
-    "  日主 " + chart.dayMaster;
-}
-function appendBazi() {
-  if (!baziState.chart || baziAppendBusy) return;
-  if (typeof PAD === "undefined" || !PAD.notes || typeof PAD.notes.append !== "function") return;
-  baziAppendBusy = true;
-  var result;
-  try { result = PAD.notes.append(game.lang === "en" ? "Birth chart" : "八字", baziNoteText()); }
-  catch (e) { result = Promise.reject(e); }
-  Promise.resolve(result).then(function (answer) {
-    baziAppendBusy = false;
-    baziAppendStatus = answer === "saved" ? "saved" : "denied";
-    sfx(answer === "saved" ? "ok" : "err");
-  }, function () {
-    baziAppendBusy = false;
-    baziAppendStatus = "denied";
-    sfx("err");
-  });
-}
-function baziExplainRows(g) {
-  var rows = [], width = 196;
-  for (var i = 0; i < EXPLAIN.BAZI.length; i++) {
-    var entry = EXPLAIN.BAZI[i], title = g.wrap(entry.term[game.lang], width);
-    var body = g.wrap(entry.text[game.lang], width);
-    for (var j = 0; j < title.length; j++) rows.push({ text: title[j], color: g.INK });
-    for (j = 0; j < body.length; j++) rows.push({ text: body[j], color: g.DARK });
-  }
-  return rows;
-}
-function updateBaziExplain(dt) {
-  if (game.pressed("b") || game.pressed("select")) {
-    baziExplain = false; baziExplainScroll = 0; sfx("tap"); return;
-  }
-  var rows = baziExplainRows(game.g), lineH = game.g.lineHeight || 14;
-  baziExplainScroll = scrollUpdate(baziExplainScroller, { x: 10, y: 27, w: 196, h: 174 },
-    rows.length * lineH, dt, lineH);
-}
-function drawBaziExplain(g) {
-  g.clear(g.PAPER);
-  g.rect(0, 0, W, 19, g.INK);
-  g.text(T({ zh: "八字 · 说明", en: "Chart · Terms" }), CX, 2, { align: "center", color: g.PAPER });
-  var rows = baziExplainRows(g), lineH = g.lineHeight || 14, area = { x: 10, y: 27, w: 196, h: 174 };
-  baziExplainScroller.max = Math.max(0, rows.length * lineH - area.h);
-  baziExplainScroll = baziExplainScroller.offset;
-  g.clip(10, 27, 196, 174);
-  for (var i = 0; i < rows.length; i++) {
-    var y = 28 + i * lineH - baziExplainScroll;
-    if (y >= 15 && y < 202) g.text(rows[i].text, 13, y, { color: rows[i].color });
-  }
-  g.clip();
-  drawScrollbar(g, baziExplainScroller, area, rows.length * lineH);
-  g.text(T({ zh: "↑↓读 · B/SELECT返回", en: "↑↓ read · B/SELECT back" }), CX, 211,
-    { align: "center", color: g.INK });
-  g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
-}
-function clampBaziDay() {
-  var max = new Date(Date.UTC(baziState.y, baziState.m, 0)).getUTCDate();
-  baziState.d = Math.min(baziState.d, max);
-}
-function changeBaziValue(amount) {
-  if (baziState.field === 0) {
-    baziState.y = Math.max(1900, Math.min(2100, baziState.y + amount));
-    clampBaziDay();
-  } else if (baziState.field === 1) {
-    baziState.m = Math.max(1, Math.min(12, baziState.m + amount));
-    clampBaziDay();
-  } else if (baziState.field === 2) {
-    var max = new Date(Date.UTC(baziState.y, baziState.m, 0)).getUTCDate();
-    baziState.d = Math.max(1, Math.min(max, baziState.d + amount));
-  } else {
-    var index = (baziHourIndex(baziState.hour) + amount + BAZI_HOURS.length) % BAZI_HOURS.length;
-    baziState.hour = BAZI_HOURS[index].hour;
-  }
-  sfx("move");
-}
-var baziHeld = { dir: 0, t: 0, next: 0 };
-function baziHold(dir, dt) {
-  if (!dir) { baziHeld.dir = 0; return; }
-  if (dir !== baziHeld.dir || game.pressed(dir < 0 ? "left" : "right")) {                  /* a fresh press: one step now */
-    baziHeld.dir = dir; baziHeld.t = 0; baziHeld.next = 0.35;
-    changeBaziValue(dir);
-    return;
-  }
-  baziHeld.t += dt || 0;
-  if (baziHeld.t < baziHeld.next) return;
-  var fast = baziHeld.t > 1.2;
-  baziHeld.next = baziHeld.t + (fast ? 0.05 : 0.09);
-  changeBaziValue(dir * (fast && baziState.field === 0 ? 10 : 1));
-}
-function updateBazi(dt) {
-  if (!baziState.loaded) return;
-  if (!baziState.saved && !baziState.picker) beginBaziEdit();
-  if (baziState.picker) {
-    if (game.pressed("b")) {
-      baziState.picker = false;
-      if (!baziState.saved) backToCounter();
-      else sfx("tap");
-      return;
-    }
-    /* Up/Down pick the field, Left/Right change its value; holding a key (or a finger on an arrow) repeats,
-       and after a second the year moves ten at a time, so 1990 to 2020 is a short hold, not thirty presses. */
-    if (game.pressed("up")) { baziState.field = (baziState.field + 3) % 4; sfx("move"); }
-    if (game.pressed("down")) { baziState.field = (baziState.field + 1) % 4; sfx("move"); }
-    var p = game.pointer, dir = 0;
-    /* pressed() never misses a tap shorter than a frame; btn() carries the hold */
-    if (game.pressed("left") || game.btn("left")) dir = -1;
-    else if (game.pressed("right") || game.btn("right")) dir = 1;
-    if (p.pressed) {
-      var row = Math.floor((p.y - 44) / 38);
-      if (row >= 0 && row < 4 && p.y < 44 + 4 * 38) baziState.field = row;
-      if (p.y >= 208 && p.y < 239 && p.x > 150) { saveBazi(); return; }
-    }
-    if (p.down && !dir) {
-      var heldRow = Math.floor((p.y - 44) / 38);
-      if (heldRow === baziState.field && heldRow >= 0 && heldRow < 4) {
-        if (p.x >= 12 && p.x < 54) dir = -1;
-        else if (p.x >= 162 && p.x < 204) dir = 1;
-      }
-    }
-    baziHold(dir, dt);
-    if (game.pressed("a")) saveBazi();
-    return;
-  }
-  if (baziExplain) { updateBaziExplain(dt); return; }
-  if (game.pressed("b")) { backToCounter(); return; }
-  if (game.pressed("a")) { beginBaziEdit(); sfx("tap"); }
-  else if (game.pressed("start")) appendBazi();
-  else if (game.pressed("select")) {
-    baziExplain = true; baziExplainScroll = 0; baziExplainScroller.offset = 0; sfx("tap");
-  }
-}
-function drawBaziPicker(g) {
-  g.clear(g.PAPER);
-  g.rect(0, 0, W, 19, g.INK);
-  g.text(T({ zh: "八字 · 填写", en: "Chart · Birth" }), CX, 2, { align: "center", color: g.PAPER });
-  var names = game.lang === "en" ? ["Year", "Month", "Day", "Hour"] : ["年", "月", "日", "时辰"];
-  var values = game.lang === "en" ?
-    [String(baziState.y), String(baziState.m), String(baziState.d), baziHourText(baziState.hour)] :
-    [baziState.y + "年", baziState.m + "月", baziState.d + "日", baziHourText(baziState.hour)];
-  for (var i = 0; i < 4; i++) {
-    var y = 44 + i * 38;
-    if (i === baziState.field) g.rect(8, y, 200, 34, g.INK);
-    var color = i === baziState.field ? g.PAPER : g.INK;
-    g.text(names[i], CX, y + 1, { align: "center", color: color });
-    g.text(values[i], CX, y + 18, { align: "center", color: color });
-    g.frame(12, y + 1, 40, 32, i === baziState.field ? g.PAPER : g.INK);
-    g.frame(164, y + 1, 40, 32, i === baziState.field ? g.PAPER : g.INK);
-    g.line(36, y + 9, 28, y + 17, color);
-    g.line(28, y + 17, 36, y + 25, color);
-    g.line(180, y + 9, 188, y + 17, color);
-    g.line(188, y + 17, 180, y + 25, color);
-  }
-  if (baziState.failed) {
-    var message = T({ zh: "存档读不出，这次不会保存",
-      en: "Could not read; it won't save this time" });
-    var messageLines = g.wrap(message, 208);
-    for (var line = 0; line < messageLines.length && line < 2; line++)
-      g.text(messageLines[line], CX, 184 + line * 13, { align: "center", color: g.DARK });
-  }
-  g.text(fitPageText(g, T({ zh: "↑↓选 ←→改(按住快) A确认",
-    en: "↑↓ field ←→ edit A save" }), W), CX, 214, { align: "center", color: g.INK });
-  g.text(fitPageText(g, HINT, W), CX, 229, { align: "center", color: g.DARK });
-}
-function drawBaziChart(g) {
-  var chart = baziState.chart;
-  g.clear(g.PAPER);
-  g.rect(0, 0, W, 19, g.INK);
-  g.text(T({ zh: "八字", en: "Chart" }), CX, 2, { align: "center", color: g.PAPER });
-  var dateLine = game.lang === "en" ?
-    baziState.saved.y + "-" + pad2(baziState.saved.m) + "-" + pad2(baziState.saved.d) + " hour " +
-      (baziState.saved.hour === null ? "unknown" : baziHourBranch(baziState.saved.hour)) :
-    baziState.saved.y + "年" + baziState.saved.m + "月" + baziState.saved.d + "日 " +
-      (baziState.saved.hour === null ? "时辰未知" : baziHourBranch(baziState.saved.hour) + "时");
-  if (baziState.failed) dateLine += T({ zh: " · 不保存", en: " · no save" });
-  g.text(fitPageText(g, dateLine, 212), CX, 22, { align: "center", color: g.INK });
-  var columns = [
-    { key: "hour", label: T({ zh: "时", en: "Hour" }), x: 29 },
-    { key: "day", label: T({ zh: "日", en: "Day" }), x: 81 },
-    { key: "month", label: T({ zh: "月", en: "Month" }), x: 135 },
-    { key: "year", label: T({ zh: "年", en: "Year" }), x: 187 }
-  ];
-  for (var i = 0; i < columns.length; i++) {
-    var col = columns[i], index = chart[col.key];
-    g.text(col.label, col.x, 40, { align: "center", color: g.INK });
-    g.frame(col.x - 19, 54, 38, 22, g.INK);
-    g.frame(col.x - 19, 78, 38, 22, g.INK);
-    g.text(index === null ? T({ zh: "未知", en: "?" }) : LUCK.STEMS[index % 10],
-      col.x, 58, { align: "center", color: g.INK });
-    g.text(index === null ? T({ zh: "未知", en: "?" }) : LUCK.BRANCHES[index % 12],
-      col.x, 82, { align: "center", color: g.INK });
-  }
-  g.text(T({ zh: "纳音", en: "Na Yin" }), CX, 102, { align: "center", color: g.INK });
-  for (i = 0; i < columns.length; i++) {
-    var naYinColumn = columns[i], naYinIndex = chart[naYinColumn.key];
-    g.text(naYinIndex === null ? T({ zh: "未知", en: "?" }) : chart.nayin[naYinColumn.key],
-      naYinColumn.x, 116, { align: "center", color: g.INK });
-  }
-  var elements = ["木", "火", "土", "金", "水"];
-  var labels = game.lang === "en" ? ["Wd", "Fi", "Ea", "Me", "Wa"] : elements;
-  var centers = [18, 63, 108, 153, 198];
-  g.text(T({ zh: "五行", en: "Elements" }), CX, 130, { align: "center", color: g.INK });
-  for (i = 0; i < elements.length; i++) {
-    var count = chart.counts[elements[i]], barHeight = Math.min(24, count * 3);
-    g.text(labels[i], centers[i], 142, { align: "center", color: g.INK });
-    g.frame(centers[i] - 5, 157, 10, 26, g.INK);
-    if (barHeight) g.rect(centers[i] - 3, 181 - barHeight, 6, barHeight, g.DARK);
-    g.text(String(count), centers[i], 183, { align: "center", color: g.INK });
-  }
-  var zodiac = game.lang === "en" ? ZODIAC_EN[chart.year % 12] : chart.zodiac;
-  var summary = T({ zh: "属" + chart.zodiac + " · 日主 " + chart.dayMaster,
-    en: zodiac + " · Day master " + baziMasterEnglish(chart.dayMaster) });
-  g.text(summary, CX, 196, { align: "center", color: g.INK });
-  g.text(fitPageText(g, T({ zh: "A修改 START记 SELECT说明", en: "A edit START notes SELECT terms" }), W),
-    CX, 211, { align: "center", color: g.INK });
-  var status = "";
-  if (typeof PAD === "undefined" || !PAD.notes) status = T({
-    zh: "这台掌机太老，不能写记事本。", en: "This handheld is too old to write notes."
-  });
-  else if (baziAppendBusy) status = T({ zh: "正在写入…", en: "Saving…" });
-  else if (baziAppendStatus === "denied") status = T({ zh: "没有写入", en: "Not saved" });
-  else if (baziAppendStatus === "saved") status = T({ zh: "已写入", en: "Saved" });
-  g.text(fitPageText(g, status || HINT, W), CX, 226, { align: "center", color: g.DARK });
-}
-function drawBazi(g) {
-  if (!baziState.loaded) {
-    g.clear(g.PAPER);
-    g.rect(0, 0, W, 19, g.INK);
-    g.text(T({ zh: "八字", en: "Chart" }), CX, 2, { align: "center", color: g.PAPER });
-    g.text(T({ zh: "存档读取中…", en: "Reading save…" }), CX, 112, { align: "center", color: g.DARK });
-    return;
-  }
-  if (baziExplain) { drawBaziExplain(g); return; }
-  if (baziState.picker || !baziState.chart) drawBaziPicker(g);
-  else drawBaziChart(g);
+  drawScrollbar(g, guaExplainScroller, area, total);
+  g.text(T({ zh: "↑↓ 读 · B/SELECT 返回", en: "↑↓ read · B/SELECT back" }), CX, 211, { align: "center", color: g.INK });
 }
 
 game.scene("counter", {
@@ -2085,19 +1675,9 @@ game.scene("compass", {
 game.scene("hexagram", {
   enter: function () { section = "hexagram"; guaScroll = 0; syncGuaDate(); syncMotion(); },
   update: updateHexagram,
-  draw: function (g) { if (guaChart) drawGuaChart(g); else if (guaExplain) drawGuaExplain(g); else drawHexagram(g); }
-});
-game.scene("bazi", {
-  enter: function () {
-    section = "bazi";
-    if (baziState.loaded && !baziState.saved) beginBaziEdit();
-    syncMotion();
-  },
-  update: updateBazi,
-  draw: drawBazi
+  draw: function (g) { if (guaExplain) drawGuaExplain(g); else drawHexagram(g); }
 });
 
 readSlip();
 readGua();
-readBazi();
 game.start("counter");

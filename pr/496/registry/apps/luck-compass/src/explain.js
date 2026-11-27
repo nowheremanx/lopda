@@ -52,29 +52,5 @@ var EXPLAIN = (function () {
   ];
   var LINE_NAMES = ["初", "二", "三", "四", "五", "上"];
 
-  /* 八字: the terms on the chart */
-  var BAZI = [
-    { term: { zh: "四柱", en: "Four pillars" },
-      text: {
-        zh: "出生的年、月、日、时各用一对干支记下，就是四柱，共八个字，所以叫八字。年按立春换，月按节气里的「节」换（立春、惊蛰、清明……），这里按节气当天整天算，不细到交节的时刻；晚上 23 点以后算第二天（子初换日）。",
-        en: "The year, month, day and hour of birth, each as a stem and branch: eight characters. The year turns at 立春 and the month at each 节, counted by whole days here; from 23:00 the day counts as the next."
-      } },
-    { term: { zh: "日主", en: "Day master" },
-      text: {
-        zh: "日柱的天干。子平法以日干代表本人，其余七个字都拿来和它对照（见《渊海子平》）。这里只标出它和它的五行。",
-        en: "The day pillar's stem. In the 子平 method it stands for the person, and the other seven characters are read against it (渊海子平). This page only names it and its element."
-      } },
-    { term: { zh: "纳音", en: "Na yin" },
-      text: {
-        zh: "六十甲子两两一组，配一个五行名目，如甲子、乙丑「海中金」。名目和取象见明代《三命通会·论纳音取象》。",
-        en: "The sixty stem-branch pairs go in thirty pairs, each with an element name such as 海中金 for 甲子 and 乙丑 (三命通会)."
-      } },
-    { term: { zh: "五行计数", en: "Element counts" },
-      text: {
-        zh: "这里只数八个字表面上的五行：天干、地支各算一个，不算地支里的藏干，也不论旺衰、月令和生克。所以它只是个计数，不代表命里五行的强弱，更不是喜用神。",
-        en: "A plain count of the visible characters' elements: no hidden stems, no seasonal strength, no interactions. It is a tally, not a reading of strength."
-      } }
-  ];
-
-  return { ALMANAC: ALMANAC, HOW: HOW, RULE_SOURCE: RULE_SOURCE, RULES: RULES, LINE_NAMES: LINE_NAMES, BAZI: BAZI };
+  return { ALMANAC: ALMANAC, HOW: HOW, RULE_SOURCE: RULE_SOURCE, RULES: RULES, LINE_NAMES: LINE_NAMES };
 })();
