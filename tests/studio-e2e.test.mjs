@@ -4614,3 +4614,222 @@ test("studio: score notes go to the AI with the photos, and what they changed le
   assert.match(lines[1], /分解和弦/);
   assert.deepEqual(errors, []);
 });
+
+/* ---------- the DeepSeek review's P0 issues (#444-#449) ---------- */
+/* an AI line that answers one edit, setting the tempo to bpm */
+async function fakeAiTempo(p, bpm) {
+  await p.evaluate((n) => {
+    LP.ai.on = () => true;
+    LP.ai.line = () => ({ id: "l1", name: "Test", provider: "openrouter", vision: true });
+    LP.ai.ask = () => Promise.resolve(JSON.stringify({ reply: "改到 " + n, calls: [{ tool: "set", bpm: n }], done: true }));
+  }, bpm);
+}
+async function askAiEdit(p, text) {
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  await p.fill("#studio-ai-input", text);
+  await p.click("#studio-ai-edit");
+  await p.waitForSelector("#studio-sheet .st-ai-preview");
+}
+
+test("studio: an AI edit preview belongs to its tape; after another tape is opened it is gone (#444)", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await fakeAiTempo(p, 100);
+  await askAiEdit(p, "改成 100");
+  await p.keyboard.press("z");                                           /* the preview waits in the sheet */
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openMyTapes(p);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新磁带" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  const before = await p.textContent("#studio-bpm");
+  await openMenu(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "让 AI 改" }).click();
+  await p.waitForSelector("#studio-ai-input");
+  assert.equal(await p.locator("#studio-sheet .st-ai-preview").count(), 0, "the other tape's preview is not offered here");
+  assert.equal(await p.textContent("#studio-bpm"), before, "the new tape is untouched");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: 采用并试听 while a pattern loops stops it and plays the song from the top (#449)", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.click("#studio-play");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-mode") === "pattern");
+  await fakeAiTempo(p, 100);
+  await askAiEdit(p, "改成 100");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "采用并试听" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForFunction(() => {
+    const v = document.querySelector("#v-studio");
+    return v.getAttribute("data-screen") === "song" && v.getAttribute("data-playing") === "true" && v.getAttribute("data-mode") === "song"
+      && v.getAttribute("data-play-slot") === "0";
+  });
+  assert.match(await p.textContent("#studio-bpm"), /100 BPM/);
+  await p.click("#studio-play");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: clearing a tape keeps its folder and its versions, and saves what it held first (#445)", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await openFolders(p);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新文件夹" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "Ideas");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新磁带" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  const openVersions = async () => {
+    await openEdit(p);
+    await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
+    await p.waitForSelector("#studio-sheet .st-proj-list");
+    await p.waitForFunction(() => !/读取中/.test((document.querySelector("#studio-sheet .st-proj-list") || {}).textContent || ""));
+  };
+  await openVersions();
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "存一个版本" }).click();
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 2);
+  await p.keyboard.press("z");                                           /* B closes the versions sheet */
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "清空这一盘" }).click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openVersions();
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 3, "the saved version is still there, plus one from before the clear");
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /清空之前/);
+  await p.keyboard.press("z");                                           /* B closes the versions sheet */
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.waitForTimeout(400);                                           /* the cleared tape's save */
+  await openFolders(p);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /Ideas\s*1/, "the cleared tape stays in its folder");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: copies is not a folder name, and tapes already filed under it show in My tapes (#446)", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await openFolders(p);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "新文件夹" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "Ideas");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "确认" }).click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "改名文件夹" }).click();
+  await p.waitForSelector("#studio-sheet .st-name");
+  await p.fill("#studio-sheet .st-name", "copies");
+  await p.locator("#studio-sheet .st-sheet-btn", { hasText: "确认" }).click();
+  await p.waitForFunction(() => /这个名字不能用/.test(document.querySelector("#toast").textContent));
+
+  /* a tape and a folder name from before the fix, as a workspace from elsewhere would bring them */
+  await p.evaluate(async () => {
+    const base = LopdaPlatform.db.doc("data/users/local/studio");
+    const meta = (await base.get()).data();
+    meta.folders = ["copies"];
+    await base.set(meta);
+    const s = LopdaSong.newSong(Date.now());
+    s.name = "lost tape";
+    s.folder = "copies";
+    await base.collection("items").doc("lost1").set(s);
+  });
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await openTile(p);
+  await openFolders(p);
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /copies/, "no user folder called copies");
+  await openMyTapes(p);
+  assert.match(await p.textContent("#studio-sheet .st-proj-list"), /lost tape/, "the tape is back in My tapes");
+  assert.deepEqual(errors, []);
+});
+
+test("studio: a workspace import that fails halfway puts every tape back (#447)", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await p.locator('#studio-grid .st-cell[data-step="0"]').click();       /* this tape's own edit, to find again */
+  assert.equal(await cellOn(p, 0), false);
+  await p.waitForTimeout(400);
+  const zip = await p.evaluate(() => {
+    const s = LopdaSong.newSong(Date.now());
+    s.name = "boom";
+    const parts = LopdaZip.writeParts([
+      { name: "workspace.json", data: JSON.stringify({ v: 1, current: "boom1", meta: { toured: {}, folders: [] } }) },
+      { name: "items/boom1.json", data: JSON.stringify(s) },
+      { name: "versions/boom1.json", data: JSON.stringify({ v: 1, versions: [] }) }
+    ]);
+    return new Blob(parts).arrayBuffer().then((b) => Array.from(new Uint8Array(b)));
+  });
+  /* the zip's tape cannot be stored (as when the phone is out of space) */
+  await p.evaluate(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (rec) {
+      if (rec && rec.data && rec.data.name === "boom") throw new DOMException("full", "QuotaExceededError");
+      return put.apply(this, arguments);
+    };
+  });
+  await p.setInputFiles("#studio-import-file", { name: "workspace.zip", mimeType: "application/zip", buffer: Buffer.from(zip) });
+  await p.waitForSelector("#studio-sheet .st-ask", { timeout: 30000 });
+  await p.locator("#studio-sheet .st-ask .btn", { hasText: "确认" }).click();
+  await p.waitForFunction(() => /存不了|失败/.test(document.querySelector("#toast").textContent), null, { timeout: 30000 });
+  const items = await p.evaluate(async () => {
+    const got = await LopdaPlatform.db.doc("data/users/local/studio").collection("items").get();
+    return got.docs.map((d) => ({ id: d.id, name: d.data().name, step0: (d.data().patterns[0].notes.drums || []).some((n) => n.t === 0 && n.key === "kick") }));
+  });
+  assert.equal(items.length, 1, "only the old tape is stored");
+  assert.notEqual(items[0].name, "boom");
+  assert.equal(items[0].step0, false, "the old tape is back with its edit");
+  assert.deepEqual(errors.filter((e) => !/full|Quota/.test(e)), []);
+});
+
+test("studio: with the version list unread, 存一个版本 saves nothing and leaves the ten stored versions alone (#448)", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  const id = await p.evaluate(async () => (await LopdaPlatform.db.doc("data/users/local/studio").get()).data().current);
+  /* ten versions already stored for this tape */
+  await p.evaluate(async (tid) => {
+    const s = (await LopdaPlatform.db.doc("data/users/local/studio").collection("items").doc(tid).get()).data();
+    const versions = [];
+    for (let i = 0; i < 10; i++) versions.push({ at: 2000 - i, name: "v" + i, song: s });
+    await LopdaPlatform.db.doc("data/users/local/studio").collection("versions").doc(tid).set({ v: 1, versions });
+  }, id);
+  await p.click("#home-key");
+  await p.waitForTimeout(250);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  /* the versions document cannot be read on this open */
+  await p.evaluate(() => {
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (key) {
+      if (typeof key === "string" && /\/studio\/versions\//.test(key) && !window.__letVersions) throw new DOMException("broken", "UnknownError");
+      return get.apply(this, arguments);
+    };
+  });
+  await openTile(p);
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
+  await p.waitForSelector("#studio-sheet .st-proj-list");
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "存一个版本" }).click();
+  await p.waitForFunction(() => /版本没读出来/.test(document.querySelector("#toast").textContent));
+  await p.evaluate(() => { window.__letVersions = true; });
+  const names = await p.evaluate(async (tid) => {
+    const v = await LopdaPlatform.db.doc("data/users/local/studio").collection("versions").doc(tid).get();
+    return v.data().versions.map((x) => x.name);
+  }, id);
+  assert.deepEqual(names, ["v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"], "the ten versions are untouched");
+  /* the versions row reads again instead of staying on 读取中 */
+  await p.keyboard.press("z");                                           /* B closes the versions sheet */
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openEdit(p);
+  await p.locator("#studio-sheet .lcd-menu li", { hasText: "版本" }).first().click();
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 11);
+  assert.deepEqual(errors, []);
+});
