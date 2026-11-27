@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>传感器台</title>
+<!-- Lo-PDA app (lopda/1): Sensor Desk, the reference app for PAD.motion and PAD.mic (SPEC.md 6.4).
+     It shows every reading live, the line of code behind it, and every answer start() can give.
+     Copyright (c) 2026 Haowei Wu. MIT License. -->
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14;
+    font-family: ui-monospace, Menlo, "PingFang SC", monospace; }
+  body { display: flex; flex-direction: column; }
+  header { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    padding: 8px 12px; border-bottom: 2px solid #1f2a14; }
+  header h1 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .08em; }
+  header span { font-size: 14px; color: #4a5a32; letter-spacing: .12em; }
+  main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
+    padding: 12px; display: flex; flex-direction: column; gap: 14px; }
+  section { display: flex; flex-direction: column; gap: 8px; }
+  section + section { border-top: 2px solid #1f2a14; padding-top: 12px; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: .06em; }
+  .state { font-size: 14px; }
+  .row { display: flex; gap: 8px; }
+  button { flex: 1; min-height: 44px; padding: 0 16px; font: inherit; font-size: 16px; color: #a3ad7e;
+    background: #1f2a14; border: 2px solid #1f2a14; box-shadow: 3px 3px 0 #4a5a32; cursor: pointer;
+    touch-action: manipulation; }
+  button:not([aria-disabled="true"]):active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #4a5a32; }
+  button[aria-disabled="true"] { background: #a3ad7e; color: #4a5a32; border: 2px dashed #4a5a32;
+    box-shadow: none; cursor: default; }
+  #bubble { display: block; width: 152px; height: 152px; margin: 0 auto; image-rendering: pixelated; }
+  .vals { display: flex; flex-direction: column; }
+  .vrow { display: grid; grid-template-columns: 64px 1fr auto; gap: 8px; align-items: baseline;
+    padding: 3px 0; border-bottom: 1px solid #7d8a58; font-size: 15px; }
+  .vrow:last-child { border-bottom: 0; }
+  .lab { font-size: 14px; color: #4a5a32; }
+  .val { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .code { font-size: 14px; color: #4a5a32; text-align: right; }
+  #shake-row .shake { grid-column: 1 / 3; font-size: 15px; }
+  #shake-row.flash { background: #1f2a14; color: #a3ad7e; border-color: #1f2a14; }
+  #shake-row.flash .code { color: #a3ad7e; }
+  .level { display: flex; align-items: center; gap: 8px; }
+  .track { position: relative; flex: 1; height: 16px; border: 1px solid #1f2a14; background: #a3ad7e; }
+  #level-fill { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: #1f2a14; }
+  #level-peak { position: absolute; top: 0; bottom: 0; width: 2px; left: 0; background: #4a5a32; display: none; }
+  .num { min-width: 44px; text-align: right; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .hint { margin: 0; font-size: 14px; line-height: 1.4; color: #4a5a32; }
+  pre { margin: 0; padding: 8px; border: 2px solid #1f2a14; background: #a3ad7e; color: #1f2a14;
+    font-family: inherit; font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* the page is longer than the smallest screen: say so while there is more below, and keep the
+     strip in the layout when the cue goes so the page does not jump at the end */
+  footer { flex: none; display: flex; justify-content: center; padding: 4px 0 6px; border-top: 1px solid #4a5a32; }
+  #more-cue { font-size: 14px; color: #4a5a32; letter-spacing: .1em; }
+  #more-cue.gone { visibility: hidden; }
+</style>
+</head>
+<body>
+<header><h1 id="title">传感器台</h1><span id="kicker">SENSOR DESK</span></header>
+<main>
+  <section>
+    <div class="head"><h2 id="tilt-title">倾斜</h2><span class="state" id="motion-state" aria-live="polite">没开</span></div>
+    <div class="row">
+      <button id="motion-btn" type="button">开</button>
+      <button id="zero-btn" type="button" aria-disabled="true">归零</button>
+    </div>
+    <canvas id="bubble" width="152" height="152" aria-label="水平气泡"></canvas>
+    <div class="vals">
+      <div class="vrow"><span class="lab">x</span><span class="val" id="v-x">-</span><span class="code">t.x</span></div>
+      <div class="vrow"><span class="lab">y</span><span class="val" id="v-y">-</span><span class="code">t.y</span></div>
+      <div class="vrow"><span class="lab">flat.x</span><span class="val" id="v-fx">-</span><span class="code">t.flat.x</span></div>
+      <div class="vrow"><span class="lab">flat.y</span><span class="val" id="v-fy">-</span><span class="code">t.flat.y</span></div>
+      <div class="vrow"><span class="lab">heading</span><span class="val" id="v-heading">-</span><span class="code">t.heading</span></div>
+      <div class="vrow" id="shake-row"><span class="shake" id="v-shake">摇了 0 次</span><span class="code">on("shake")</span></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head"><h2 id="sound-title">声音</h2><span class="state" id="mic-state" aria-live="polite">没开</span></div>
+    <div class="row"><button id="mic-btn" type="button">开</button></div>
+    <div class="level">
+      <div class="track"><i id="level-fill"></i><i id="level-peak"></i></div>
+      <span class="num" id="v-level">0.00</span>
+    </div>
+    <div class="vrow"><span class="lab">pitch</span><span class="val" id="v-pitch">-</span><span class="code">s.pitch</span></div>
+    <p class="hint" id="mic-hint"></p>
+  </section>
+
+  <section>
+    <h2 id="code-title">代码</h2>
+    <pre id="code">var out =
+  document.getElementById("out");
+
+// PAD.motion / PAD.mic are
+// undefined before 0.24.0: keys only
+if (PAD.motion) {
+  PAD.on("tilt", tilt);
+  start(PAD.motion);
+}
+if (PAD.mic) {
+  PAD.on("sound", sound);
+  start(PAD.mic);
+}
+
+// readings: hold the last value
+function tilt(t) {
+  out.textContent =
+    "x " + t.x.toFixed(2) + " " +
+    "y " + t.y.toFixed(2) + " " +
+    (t.heading == null ?
+      "-" : t.heading);
+}
+function sound(s) {
+  out.textContent =
+    "level " + s.level.toFixed(2) +
+    " " + (s.pitch || "-");
+}
+
+// start() asks the player, then
+// answers "on", "denied" or "none";
+// it never rejects
+function start(sensor) {
+  sensor.start().then(function (r) {
+    out.textContent = r;
+  }, function () {
+    out.textContent = "none";
+  });
+}
+// stop when done: the mic holds
+// the phone's audio session
+function stop(sensor) {
+  sensor.stop();
+}</pre>
+  </section>
+</main>
+<footer><span id="more-cue">更多 ↓</span></footer>
+<script>
+(function () {
+  "use strict";
+
+  var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
+  var T = {
+    zh: {
+      title: "传感器台", kicker: "SENSOR DESK", tilt: "倾斜", sound: "声音", code: "代码",
+      start: "开", stop: "关", zero: "归零", more: "更多 ↓",
+      state: { off: "没开", on: "开着", denied: "未允许", none: "这台手机没有", old: "系统太旧（要 0.24.0+）" },
+      noCompass: "无罗盘",
+      compass: ["北", "东北", "东", "东南", "南", "西南", "西", "西北"],
+      hint: "麦克风只在开时听着；开着时手机的静音键不起作用。"
+    },
+    en: {
+      title: "Sensor Desk", kicker: "传感器台", tilt: "Tilt", sound: "Sound", code: "Code",
+      start: "On", stop: "Off", zero: "Zero", more: "More ↓",
+      state: { off: "off", on: "on", denied: "not allowed", none: "no sensor here", old: "too old (needs 0.24.0+)" },
+      noCompass: "no compass",
+      compass: ["N", "NE", "E", "SE", "S", "SW", "W", "NW"],
+      hint: "The mic listens only while it is on; the phone's silent switch does nothing then."
+    }
+  }[LANG];
+  document.documentElement.lang = LANG === "en" ? "en" : "zh-CN";
+  function $(id) { return document.getElementById(id); }
+  function shakeText(n) {
+    if (LANG === "en") return n === 1 ? "1 shake" : n + " shakes";
+    return "摇了 " + n + " 次";
+  }
+
+  /* both sensors are optional: before runtime 0.24.0 PAD.motion / PAD.mic are undefined and the
+     app says so instead of calling into nothing (SPEC.md 6.4) */
+  var HAS_MOTION = typeof PAD !== "undefined" && !!PAD.motion;
+  var HAS_MIC = typeof PAD !== "undefined" && !!PAD.mic;
+
+  /* The state line comes from exactly two things: the player's toggle (wanted) and the result
+     the runtime resolved start() with. Nothing else may change it: when the runtime stops the
+     sensors on HOME and turns them back on, this line stays true either way. Reading events are
+     gated on wanted, not on the resolved state, because a reading may arrive while start() is
+     still in flight; it is held until the next one, as SPEC.md 6.4 asks. */
+  var motionState = HAS_MOTION ? "off" : "old";
+  var motionWanted = false, motionAsking = false;
+  var micState = HAS_MIC ? "off" : "old";
+  var micWanted = false, micAsking = false;
+
+  var tilt = null, hasFlat = false, shakes = 0, flashTimer = 0;
+  var level = 0, peak = 0, pitch = null;
+
+  /* ---- text and the state lines ---- */
+  $("title").textContent = T.title;
+  $("kicker").textContent = T.kicker;
+  $("tilt-title").textContent = T.tilt;
+  $("sound-title").textContent = T.sound;
+  $("code-title").textContent = T.code;
+  $("zero-btn").textContent = T.zero;
+  $("mic-hint").textContent = T.hint;
+  $("bubble").setAttribute("aria-label", LANG === "en" ? "Bubble level" : "水平气泡");
+  $("v-shake").textContent = shakeText(0);
+  $("more-cue").textContent = T.more;
+
+  /* the cue at the bottom edge says the page goes on; it goes away once the end is reached */
+  var mainEl = document.querySelector("main"), moreCue = $("more-cue");
+  function checkMore() {
+    var atEnd = mainEl.scrollTop + mainEl.clientHeight >= mainEl.scrollHeight - 1;
+    moreCue.classList.toggle("gone", atEnd);
+  }
+  mainEl.addEventListener("scroll", checkMore, { passive: true });   /* the only scrolling area, sdk/UI.md */
+  window.addEventListener("resize", checkMore);
+
+  function refreshMotion() {
+    $("motion-state").textContent = T.state[motionState];
+    $("motion-btn").textContent = motionState === "on" ? T.stop : T.start;
+    $("motion-btn").setAttribute("aria-disabled", (motionState === "old" || motionAsking) ? "true" : "false");
+    $("zero-btn").setAttribute("aria-disabled", (motionState === "on" && !motionAsking) ? "false" : "true");
+  }
+  function refreshMic() {
+    $("mic-state").textContent = T.state[micState];
+    $("mic-btn").textContent = micState === "on" ? T.stop : T.start;
+    $("mic-btn").setAttribute("aria-disabled", (micState === "old" || micAsking) ? "true" : "false");
+  }
+  function refresh() { refreshMotion(); refreshMic(); requestDraw(); }
+
+  function forgotTilt() {
+    tilt = null; hasFlat = false; shakes = 0;
+    $("v-shake").textContent = shakeText(0);
+    $("shake-row").classList.remove("flash");
+    if (flashTimer) { clearTimeout(flashTimer); flashTimer = 0; }
+  }
+
+  /* ---- tilt (PAD.motion, SPEC.md 6.4) ---- */
+  if (HAS_MOTION) {
+    PAD.on("tilt", function (t) {
+      if (!motionWanted) return;
+      tilt = { x: t.x, y: t.y, heading: t.heading, flat: t.flat || null };
+      hasFlat = !!t.flat;                    /* undefined before runtime 0.35.0: no ring, and "-" in the rows */
+      requestDraw();
+    });
+    PAD.on("shake", function () {
+      if (!motionWanted) return;
+      shakes++;
+      $("v-shake").textContent = shakeText(shakes);
+      $("shake-row").classList.add("flash");
+      if (flashTimer) clearTimeout(flashTimer);
+      flashTimer = setTimeout(function () {                 /* one flash per shake: 300 ms, then back to normal */
+        $("shake-row").classList.remove("flash"); flashTimer = 0;
+      }, 300);
+      requestDraw();
+    });
+  }
+
+  function startMotion() {
+    PAD.sfx("tap");
+    motionWanted = true; motionAsking = true;
+    refreshMotion();
+    /* start() asks the player and the phone if it must, then answers "on" | "denied" | "none";
+       the state line changes only when that answer is in (never before) */
+    function answered(r) {
+      motionAsking = false;
+      if (!motionWanted) { PAD.motion.stop(); return; }     /* the player turned it off while the phone asked */
+      if (r === "on") { motionState = "on"; }
+      else { motionWanted = false; motionState = r === "denied" ? "denied" : "none"; forgotTilt(); }
+      refreshMotion(); requestDraw();
+    }
+    /* SPEC.md 6.4 says start() never rejects; the second handler only keeps a runtime fault from
+       leaving the button stuck in "asking" for good, and reads it as "none" */
+    PAD.motion.start().then(answered, function () { answered("none"); });
+  }
+  function stopMotion() {
+    motionWanted = false; motionAsking = false; motionState = "off";
+    PAD.motion.stop();                                      /* always safe: a tilt sensor left on costs battery */
+    forgotTilt();
+    PAD.sfx("tap");
+    refreshMotion(); requestDraw();
+  }
+  $("motion-btn").addEventListener("click", function () {
+    if (!HAS_MOTION) { PAD.sfx("err"); return; }
+    if (motionAsking) return;
+    if (motionState === "on") stopMotion(); else startMotion();
+  });
+  $("zero-btn").addEventListener("click", function () {
+    if (motionState !== "on" || motionAsking) { PAD.sfx("err"); return; }
+    PAD.motion.zero();                                      /* now is level: y counts from here, flat does not move */
+    PAD.sfx("tap");
+  });
+
+  /* ---- the microphone (PAD.mic, SPEC.md 6.4) ---- */
+  if (HAS_MIC) {
+    PAD.on("sound", function (s) {
+      if (!micWanted) return;
+      level = s.level;
+      pitch = typeof s.pitch === "number" ? s.pitch : null;  /* null: breath, noise or silence */
+      if (level > peak) peak = level;
+      requestDraw();
+    });
+  }
+
+  function startMic() {
+    PAD.sfx("tap");
+    micWanted = true; micAsking = true;
+    refreshMic();
+    /* the same three answers; "denied" leaves the button able to ask again */
+    function answered(r) {
+      micAsking = false;
+      if (!micWanted) { PAD.mic.stop(); return; }
+      if (r === "on") { micState = "on"; }
+      else { micWanted = false; micState = r === "denied" ? "denied" : "none"; level = 0; peak = 0; pitch = null; }
+      refreshMic(); requestDraw();
+    }
+    PAD.mic.start().then(answered, function () { answered("none"); });   /* as for the tilt above */
+  }
+  function stopMic() {
+    micWanted = false; micAsking = false; micState = "off";
+    /* The microphone is a privacy matter: stop() closes the stream, puts the phone's audio session
+       back to "ambient" and lets the silent switch work again. Leaving it on would keep the
+       microphone indicator lit for nothing. */
+    PAD.mic.stop();
+    level = 0; peak = 0; pitch = null;
+    PAD.sfx("tap");
+    refreshMic(); requestDraw();
+  }
+  $("mic-btn").addEventListener("click", function () {
+    if (!HAS_MIC) { PAD.sfx("err"); return; }
+    if (micAsking) return;
+    if (micState === "on") stopMic(); else startMic();
+  });
+
+  /* ---- reading the values out (held between events; SPEC.md 6.4 sends them only on a change) ---- */
+  function headingText(h) {
+    if (h == null) return T.noCompass;
+    var deg = Math.round(((h % 360) + 360) % 360) % 360;   /* whole degrees, 360 wraps to 0 */
+    var i = Math.round(deg / 45) % 8;
+    return deg + "° " + T.compass[i];
+  }
+  var NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  function pitchText(hz) {
+    if (!(hz > 0)) return "-";                               /* null (no clear note), and never log(0) */
+    var n = Math.round(69 + 12 * Math.log(hz / 440) / Math.LN2);   /* A4 = 440 Hz is MIDI 69; keep hz exact here */
+    var i = ((n % 12) + 12) % 12;
+    return Math.round(hz) + " Hz  " + NOTES[i] + (Math.floor(n / 12) - 1);
+  }
+
+  function drawValues() {
+    var x = tilt ? tilt.x : null;
+    $("v-x").textContent = x == null ? "-" : x.toFixed(2);
+    $("v-y").textContent = tilt ? tilt.y.toFixed(2) : "-";
+    $("v-fx").textContent = hasFlat ? tilt.flat.x.toFixed(2) : "-";
+    $("v-fy").textContent = hasFlat ? tilt.flat.y.toFixed(2) : "-";
+    $("v-heading").textContent = tilt ? headingText(tilt.heading) : "-";
+  }
+  function drawSound() {
+    var steps = Math.round(level * 32);                     /* the runtime's own 1/32 steps */
+    $("level-fill").style.width = (steps / 32 * 100) + "%";
+    var psteps = Math.min(31, Math.round(peak * 32));        /* keep the mark inside the track at full scale */
+    $("level-peak").style.left = (psteps / 32 * 100) + "%";
+    $("level-peak").style.display = (micState === "on" && peak > 0.01) ? "block" : "none";
+    $("v-level").textContent = micState === "on" ? level.toFixed(2) : "0.00";
+    $("v-pitch").textContent = (micState === "on") ? pitchText(pitch) : "-";
+  }
+
+  /* ---- the bubble level: putImageData only (CLAUDE.md: no drawImage of a canvas onto a canvas) ---- */
+  var BUB = 152, CX = 76, CY = 76, REACH = 56;
+  var TONE = [[31, 42, 20], [74, 90, 50], [125, 138, 88], [163, 173, 126]];
+  var bubble = $("bubble"), bctx = bubble.getContext("2d");
+  var image = bctx.createImageData(BUB, BUB);
+
+  function bubbleDraw() {
+    var d = image.data, i, x, y;
+    for (i = 0; i < d.length; i += 4) {                      /* paper */
+      d[i] = TONE[3][0]; d[i + 1] = TONE[3][1]; d[i + 2] = TONE[3][2]; d[i + 3] = 255;
+    }
+    function px(x, y, t) {
+      if (x < 0 || y < 0 || x >= BUB || y >= BUB) return;
+      var o = (y * BUB + x) * 4, c = TONE[t];
+      d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+    }
+    function circle(cx, cy, r, t, filled) {
+      var lo = Math.floor(cx - r), hi = Math.ceil(cx + r);
+      for (y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++) {
+        for (x = lo; x <= hi; x++) {
+          var dist = Math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+          if (filled ? dist <= r : Math.abs(dist - r) < 0.8) px(x, y, t);
+        }
+      }
+    }
+    for (x = 1; x < BUB - 1; x++) { px(x, 1, 0); px(x, BUB - 2, 0); }
+    for (y = 1; y < BUB - 1; y++) { px(1, y, 0); px(BUB - 2, y, 0); }
+    circle(CX, CY, REACH, 2, false);                         /* the range: 1.0 is the ring */
+    for (x = CX - REACH; x <= CX + REACH; x++) px(x, CY, 2);
+    for (y = CY - REACH; y <= CY + REACH; y++) px(CX, y, 2);
+    /* A bubble floats to the high side, the opposite of a rolling ball. x = 1 is the right side down, so the
+       bubble goes left: -x. y = 1 is the top edge down, so the bottom is high and the bubble goes down: +y. */
+    if (hasFlat) circle(CX - tilt.flat.x * REACH, CY + tilt.flat.y * REACH, 6, 1, false);
+    if (tilt) circle(CX - tilt.x * REACH, CY + tilt.y * REACH, 4, 0, true);
+    else circle(CX, CY, 4, 1, false);                        /* no reading yet: a hollow dot at rest */
+    bctx.putImageData(image, 0, 0);
+  }
+
+  /* ---- one redraw per animation frame, however fast the events come ---- */
+  var queued = false, lastT = 0;
+  function requestDraw() { if (!queued) { queued = true; requestAnimationFrame(frame); } }
+  function frame(ts) {
+    queued = false;
+    var now = ts || Date.now();
+    if (lastT && peak > level) {
+      var dt = Math.min(0.1, (now - lastT) / 1000);
+      peak = Math.max(level, peak - dt * 0.35);              /* the peak mark falls back slowly */
+    }
+    lastT = now;
+    drawValues();
+    drawSound();
+    bubbleDraw();
+    if (peak > level + 0.002) requestDraw();
+  }
+
+  refresh();
+  checkMore();                                             /* the cue is right from the first frame */
+})();
+</script>
+</body>
+</html>
