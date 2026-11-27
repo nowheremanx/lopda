@@ -49,7 +49,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 fonts/ (DotGothic16, VT323, OFL), vendor/binjgb/ (Game Boy core, MIT), vendor/holiday-cn/ (China days off, MIT),
                 vendor/ecdict/ (abridged ECDICT in StarDict format, MIT + WordNet licence),
                 vendor/qrcode-generator/ (the share page's QR encoder, MIT)
-sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, PROMPT.md, UI.md (app layout rules),
+sdk/            MIT. pad-shim.js (PAD bridge), lo-game.js (game framework), LO-GAME.md, lo-3d.js (3D), LO-3D.md, lo-title.js (the shared title screen: cover picture over a wheel menu), LO-TITLE.md, PROMPT.md, UI.md (app layout rules),
                 dev.html (app harness), template/, template-game/, template-vn/ (visual novel),
                 examples/ (save-book, sound-board, sensor-desk, blow-candles: working examples kept out of the store, `dev.html?app=sdk/examples/<id>`; decisions.md section 72), fonts/ (lopix12, OFL)
 registry/       index.json (generated; its order is the store order inside each category, from order.json, unlisted apps after by id) + apps/<id>/{manifest.json,index.html,src/ (optional sources)}
@@ -217,7 +217,8 @@ node --test                                  # the test suite; must pass
   `tools/bundle-app.mjs` fills it, plus a `data-lo-font` block with only the glyphs the app uses.
   The checker accepts only unmodified released copies (`sdk/lo-game.versions.json`). When you change
   lo-game.js: bump its VERSION, add the new hash to versions.json, re-run the tool on apps.
-- `data-lo-3d` (`sdk/lo-3d.js`, `sdk/LO-3D.md`, `sdk/lo-3d.versions.json`) follows the same rules as lo-game.
+- `data-lo-3d` (`sdk/lo-3d.js`, `sdk/LO-3D.md`, `sdk/lo-3d.versions.json`) and `data-lo-title` (`sdk/lo-title.js`, `sdk/LO-TITLE.md`,
+  `sdk/lo-title.versions.json`; the font block follows it too) follow the same rules as lo-game.
   An app may keep sources in `src/` and include them with `<script data-src="src/x.js"></script>`;
   the checker requires index.html to match src/ (run bundle-app.mjs).
 

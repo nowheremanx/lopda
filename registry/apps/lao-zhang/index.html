@@ -25,6 +25,8 @@
   #intro[hidden] { display: none !important; }
   #ov { position: fixed; inset: 0; z-index: 20; background: #a3ad7e; color: #1f2a14; display: flex; flex-direction: column; padding: 10px 12px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #ov[hidden] { display: none !important; }
+  /* the title screen: one canvas over the whole overlay, drawn by sdk/lo-title.js */
+  #ov canvas.lotitle { flex: 1 1 auto; min-height: 0; width: 100%; display: block; }
   .sbody { flex: 1 0 auto; min-height: 0; display: flex; flex-direction: column; }
   .sbody.center { justify-content: center; align-items: center; text-align: center; gap: 9px; }
   .sbody.title { gap: 4px; }
@@ -95,6 +97,363 @@
   <footer id="foot"></footer>
 </div>
 <div id="ov" hidden></div>
+<script data-lo-title="0.1.0">
+/* lo-title.js 0.1.0: one title screen for every Lo-PDA app. MIT. See sdk/LO-TITLE.md.
+ *
+ * A title screen is the app's cover picture (its name drawn into it) above a menu that turns like a wheel: the chosen
+ * item sits big in an ink band, the items before and after it show small above and below, and a move rolls the
+ * wheel. One layout for all apps, so the store's covers and the apps' first screens look like one family.
+ *
+ * Everything is drawn into one canvas with putImageData, in the four tones, with the lopix12 pixel font (the
+ * data-lo-font block that tools/bundle-app.mjs writes after this one calls LoTitle.font). Nothing here touches PAD:
+ * the app passes its button presses in with press(), so it keeps one PAD.on("press") of its own.
+ *
+ *   var menu = LoTitle.mount(canvas, {
+ *     art: { w: 156, h: 156, px: tones },   // tone indices, 0 paper, 1 mid, 2 dark, 3 ink (row by row)
+ *     items: [{ label: "开始", sub: "第 1 关" }, { label: "随机关", sub: "通关 30 关后开放", locked: true }],
+ *     index: 0,                              // the item in the band at first
+ *     note: "最好 第 3 关",                   // optional line under the wheel (a record, a warning)
+ *     hint: "↑↓ 选 · A 确定",                // the key line at the bottom
+ *     onMove: function (i) {},               // the band reached item i (play a sound here)
+ *     onPick: function (i) {}                // A, START or a tap on the band (also for a locked item: say why)
+ *   });
+ *   PAD.on("press", function (b) { if (onTitle) menu.press(b); });   // up / down roll, a / start pick
+ *   menu.set({ items: [...], index: 1 })     // new items or text (a save was read); keeps the wheel where it is
+ *
+ * The canvas is sized by the app's CSS (give it the whole screen, or the area under a top bar); this file
+ * reads its size on mount and on every resize, and forgets it once the canvas leaves the page.
+ * Touch: a tap on the band picks, a tap on a small item rolls the wheel to it, a finger dragged up or down turns it.
+ */
+var LoTitle = (function () {
+  "use strict";
+  var VERSION = "0.1.0";
+  var TONES = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
+  var PAPER = 0, DARK = 2, INK = 3;
+  var ROLL_MS = 130;           /* one step of the wheel */
+  var FONT = null, GLYPHS = {};
+
+  function font(data) { FONT = data; GLYPHS = {}; }
+
+  /* a glyph of lopix12: "advance:base64 bits", one bit per pixel, row by row, cell rows high */
+  function glyph(ch) {
+    var g = GLYPHS[ch];
+    if (g) return g;
+    var src = FONT && (FONT.glyphs[ch] || FONT.glyphs["?"]);
+    if (!src) return (GLYPHS[ch] = { w: 6, bits: null });
+    var cut = src.indexOf(":"), w = +src.slice(0, cut), raw = atob(src.slice(cut + 1)), n = w * FONT.cell, bits = new Uint8Array(n);
+    for (var i = 0; i < n; i++) bits[i] = (raw.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+    return (GLYPHS[ch] = { w: w, bits: bits });
+  }
+  function measure(s, k) { var w = 0; Array.from(String(s)).forEach(function (c) { w += glyph(c).w; }); return w * k; }
+
+  function mount(canvas, opts) {
+    var o = {}, pos = 0, target = 0, anim = null, buf = null, img = null, W = 0, H = 0, L = null, drag = null;
+    set(opts);
+    pos = target = clampIndex(o.index || 0);
+
+    function clampIndex(i) { return Math.max(0, Math.min((o.items || []).length - 1, i | 0)); }
+    function set(p) {
+      for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) o[k] = p[k];
+      if (p && p.index !== undefined && L) { pos = target = clampIndex(p.index); }
+      if (L) draw();
+    }
+
+    /* the layout, in device pixels: u is one LCD pixel (a whole number of device pixels, so lines stay sharp) */
+    function layout() {
+      var r = canvas.getBoundingClientRect(), d = window.devicePixelRatio || 1;
+      W = Math.max(1, Math.round(r.width * d)); H = Math.max(1, Math.round(r.height * d));
+      if (canvas.width !== W) canvas.width = W;
+      if (canvas.height !== H) canvas.height = H;
+      var u = Math.max(1, Math.round(d)), cell = FONT ? FONT.cell : 13;
+      var RB = 46 * u, RS = 20 * u, GAP = 6 * u, HINT = (cell + 4) * u, NOTE = o.note ? (cell + 3) * u : 0;
+      var art = o.art, aw = art ? art.w : 0, ah = art ? art.h : 0;
+      var n = (o.items || []).length, near = 1;
+      var room = H - (RS * 2 + RB) - HINT - NOTE - GAP * 4;
+      /* the picture as big as fits, in whole device pixels per art pixel; on a very small screen it shrinks */
+      var fit = art ? Math.min((W - 16 * u) / aw, room / ah) : 0, k = fit >= 1 ? Math.floor(fit) : fit;
+      var side = Math.round(aw * k), sideH = Math.round(ah * k);
+      /* a tall screen with more than three items shows two each way; then the picture, the wheel and the note
+         stand together in the middle of what is left above the note and the key line */
+      if (n > 3 && room - sideH >= RS * 2) near = 2;
+      var wheel = RB + RS * 2 * near, block = sideH + (art ? GAP * 2 : 0) + wheel;
+      var ay = Math.max(GAP, Math.round((H - HINT - block) / 2)), ax = Math.round((W - side) / 2);
+      var cy = ay + sideH + (art ? GAP * 2 : 0) + RS * near + RB / 2;
+      /* the band is as wide as the screen allows, so a long sub line still fits */
+      var bx0 = 8 * u, bx1 = W - 8 * u;
+      L = { u: u, RB: RB, RS: RS, k: k, ax: ax, ay: ay, aw: side, ah: sideH, cy: cy, near: near,
+        b0: cy - RB / 2, b1: cy + RB / 2, bx0: bx0, bx1: bx1,
+        w0: cy - RB / 2 - RS * near, w1: cy + RB / 2 + RS * near, noteY: H - HINT - NOTE + 2 * u, hintY: H - HINT + 2 * u };
+      buf = new Uint8Array(W * H);
+      img = canvas.getContext("2d").createImageData(W, H);
+    }
+
+    function fill(x0, y0, x1, y1, t) {
+      x0 = Math.max(0, Math.round(x0)); y0 = Math.max(0, Math.round(y0)); x1 = Math.min(W, Math.round(x1)); y1 = Math.min(H, Math.round(y1));
+      for (var y = y0; y < y1; y++) buf.fill(t, y * W + x0, y * W + x1);
+    }
+    /* text at scale k (k device pixels per font pixel); tone(y) picks the colour per row, null clips the row */
+    function text(s, x, y, k, tone) {
+      var cell = FONT ? FONT.cell : 13;
+      Array.from(String(s)).forEach(function (c) {
+        var g = glyph(c);
+        if (g.bits) for (var gy = 0; gy < cell; gy++) {
+          var y0 = Math.round(y + gy * k), y1 = Math.round(y + (gy + 1) * k);
+          for (var gx = 0; gx < g.w; gx++) if (g.bits[gy * g.w + gx]) {
+            var x0 = Math.round(x + gx * k), x1 = Math.round(x + (gx + 1) * k);
+            for (var yy = y0; yy < y1; yy++) {
+              var t = tone(yy);
+              if (t === null || yy < 0 || yy >= H) continue;
+              for (var xx = Math.max(0, x0); xx < Math.min(W, x1); xx++) buf[yy * W + xx] = t;
+            }
+          }
+        }
+        x += g.w * k;
+      });
+    }
+    /* centred on the screen; a line wider than the band loses its end to an ellipsis */
+    function centred(s, y, k, tone) {
+      var max = L.bx1 - L.bx0 - 16 * L.u, chars = Array.from(String(s));
+      if (measure(s, k) > max) { while (chars.length && measure(chars.join("") + "...", k) > max) chars.pop(); s = chars.join("") + "..."; }
+      var x = Math.round((W - measure(s, k)) / 2);
+      text(s, x, y, k, tone);
+      return x;
+    }
+    /* a padlock, 7 x 9 LCD pixels, paper on the band */
+    var LOCK = ["..###..", ".#...#.", ".#...#.", "#######", "#######", "###.###", "###.###", "#######", "......."];
+    function lock(x, y, u) {
+      for (var r = 0; r < LOCK.length; r++) for (var c = 0; c < 7; c++)
+        if (LOCK[r][c] === "#") fill(x + c * u, y + r * u, x + (c + 1) * u, y + (r + 1) * u, PAPER);
+    }
+
+    /* where an item stands when it is d steps from the band (d may be a fraction while the wheel turns) */
+    function yAt(d) {
+      var a = Math.abs(d), s = d < 0 ? -1 : 1, step1 = L.RB / 2 + L.RS / 2;
+      return L.cy + s * (a <= 1 ? a * step1 : step1 + (a - 1) * L.RS);
+    }
+
+    function draw() {
+      if (!L) return;
+      var u = L.u, cell = FONT ? FONT.cell : 13, items = o.items || [], art = o.art, i;
+      buf.fill(PAPER);
+      if (art && L.aw > 0) {
+        for (var y = 0; y < L.ah; y++) {
+          var sy = Math.min(art.h - 1, Math.floor(y / L.k)), row = (L.ay + y) * W + L.ax;
+          for (var x = 0; x < L.aw; x++) buf[row + x] = art.px[sy * art.w + Math.min(art.w - 1, Math.floor(x / L.k))];
+        }
+      }
+      fill(L.bx0, L.b0, L.bx1, L.b1, INK);
+      for (i = 0; i < items.length; i++) {
+        var d = i - pos;
+        if (Math.abs(d) > L.near + 0.99) continue;
+        var t = Math.min(1, Math.abs(d)), k = u * (2 - t), it = items[i];
+        var withSub = it.sub && Math.abs(d) < 0.25;
+        var ty = yAt(d) - cell * k / 2 - (withSub ? 6 * u : 0);
+        /* inside the band: paper; outside: dark; past the wheel's ends: clipped (UI.md 11.3: small text is ink on
+           paper or paper on ink, never mid) */
+        var lx = centred(it.label, ty, k, function (yy) { return yy >= L.b0 && yy < L.b1 ? PAPER : yy < L.w0 || yy >= L.w1 ? null : DARK; });
+        /* a locked item carries a padlock in front of its name while it is in the band; its sub line says why */
+        if (it.locked && Math.abs(d) < 0.5) lock(lx - 14 * u, ty + (cell * k - 9 * u) / 2, u);
+        if (withSub) centred(it.sub, ty + cell * k + u, u, function (yy) { return yy >= L.b0 && yy < L.b1 ? PAPER : null; });
+      }
+      /* small marks in the band's right end: more items above / below */
+      var p = Math.round(target), mx = L.bx1 - 10 * u;
+      for (var j = 0; j < 4; j++) {
+        if (p > 0) fill(mx - j * u, L.b0 + (4 + j) * u, mx + (j + 1) * u, L.b0 + (5 + j) * u, PAPER);
+        if (p < items.length - 1) fill(mx - j * u, L.b1 - (5 + j) * u, mx + (j + 1) * u, L.b1 - (4 + j) * u, PAPER);
+      }
+      var all = function () { return DARK; };
+      if (o.note) centred(o.note, L.noteY, u, all);
+      if (o.hint) centred(o.hint, L.hintY, u, all);
+      var px = img.data;
+      for (var n = 0, m = W * H; n < m; n++) { var c = TONES[buf[n]], q = n * 4; px[q] = c[0]; px[q + 1] = c[1]; px[q + 2] = c[2]; px[q + 3] = 255; }
+      canvas.getContext("2d").putImageData(img, 0, 0);
+    }
+
+    /* roll to item i over ROLL_MS per step, easing out */
+    function rollTo(i) {
+      i = clampIndex(i);
+      if (i === target && !anim) return false;
+      var from = pos, t0 = null, steps = Math.max(1, Math.abs(i - from)), ms = Math.min(ROLL_MS * steps, ROLL_MS * 2.5);
+      target = i;
+      if (anim) cancelAnimationFrame(anim);
+      function frame(now) {
+        if (canvas.isConnected === false) { anim = null; return; }
+        if (t0 === null) t0 = now;
+        var f = Math.min(1, (now - t0) / ms), e = 1 - (1 - f) * (1 - f);
+        pos = from + (target - from) * e;
+        draw();
+        anim = f < 1 ? requestAnimationFrame(frame) : null;
+        if (!anim) pos = target;
+      }
+      anim = requestAnimationFrame(frame);
+      if (o.onMove) o.onMove(i);
+      return true;
+    }
+
+    function press(b) {
+      var items = o.items || [];
+      if (b === "up" || b === "down") {
+        var next = target + (b === "down" ? 1 : -1);
+        if (next >= 0 && next < items.length) rollTo(next);
+        return true;
+      }
+      if (b === "a" || b === "start") { if (o.onPick && items.length) o.onPick(target); return true; }
+      return false;
+    }
+
+    /* touch, in the canvas's own pixels */
+    function devY(e) { var r = canvas.getBoundingClientRect(); return (e.clientY - r.top) * (H / r.height); }
+    function onDown(e) { if (!L) return; drag = { y: devY(e), start: target, moved: false }; try { canvas.setPointerCapture(e.pointerId); } catch (x) {} }
+    function onMoveP(e) {
+      if (!drag) return;
+      var dy = devY(e) - drag.y;
+      if (Math.abs(dy) > L.RS * 0.6) drag.moved = true;
+      if (!drag.moved) return;
+      var steps = Math.round(-dy / L.RS);
+      if (clampIndex(drag.start + steps) !== target) rollTo(drag.start + steps);
+    }
+    function onUp(e) {
+      if (!drag) return;
+      var moved = drag.moved; drag = null;
+      if (moved) return;
+      var y = devY(e);
+      if (y >= L.b0 && y < L.b1) { if (o.onPick && (o.items || []).length) o.onPick(target); return; }
+      if (y < L.w0 || y >= L.w1) return;
+      /* which small item is under the finger: the nearest one's resting place */
+      var best = null, bd = Infinity;
+      for (var i = 0; i < (o.items || []).length; i++) { var dd = Math.abs(yAt(i - target) - y); if (dd < bd) { bd = dd; best = i; } }
+      if (best !== null && best !== target) rollTo(best);
+    }
+    function onResize() { if (canvas.isConnected === false) { removeEventListener("resize", onResize); return; } layout(); draw(); }
+
+    canvas.style.touchAction = "none";
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMoveP);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", function () { drag = null; });
+    addEventListener("resize", onResize);
+    layout();
+    draw();
+
+    return {
+      press: press,
+      set: set,
+      index: function () { return target; },
+      redraw: function () { layout(); draw(); }
+    };
+  }
+
+  return { VERSION: VERSION, font: font, mount: mount };
+})();
+if (typeof window !== "undefined") window.LoTitle = LoTitle;
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoTitle.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","×":"6:AAAAAiUIUiAAAA==","↑":"12:AABADgFQBABABABABABABABAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","东":"12:AACA/+EAJARAf8BAJIREhCHAAAA=","丢":"12:AAA8fABAf8BABA/+CAEQIIf0AAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","主":"12:AACABA/+BABABAf8BABABA/+AAA=","之":"12:AACABA/8AIAQAgBACAMATAg+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","买":"12:AA/+ACIkEgQgIg/+BACQMIwGAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","些":"12:AAEQUSXUUYUSXS4OAAP4AA/+AAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","价":"12:AAIQIoREWCxERERERERERESEAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","传":"12:AAIQL8QgQg3+RAT8QERIQwQIAAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","倍":"12:AAIQL8QASExIX+QAT8SESET8AAA=","借":"12:AAJIL8RIRI3+QAT8SET8SET8AAA=","值":"12:AAIQL+QQT8yET8SET8SESEX+AAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","六":"12:AACABAAA/+AAAAIIIEQEQCgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","写":"12:AA/+gCkCH4IAP8AEAE/0AEA4AAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","十":"12:AABABABABA/+BABABABABABAAAA=","半":"12:AABAREJIBAf8BABA/+BABABAAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","原":"12:AAf+QgX8UEX8UEX8QgUkUipiAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","周":"12:AAP+IiL6IiL6ICL6KKT6QCgOAAA=","命":"12:AABACgMY32AAe8SkSkSkesAgAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","品":"12:AAP4IIIIIIP4AA++iiiiii++AAA=","商":"12:AABA/+IIEQ/+kSoK32kSnygGAAA=","嘲":"12:AABO7qpKruqqrqqurq5KDqBWAAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","围":"12:AA/+hCv6hCnyhCv6hKhahC/+AAA=","图":"12:AA/+iCjysSji8ejCgymChi/+AAA=","圈":"12:AA/+lSv6iC/+kSvq0mlikK/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","场":"12:AAT8QIQQ4gT+QqRKaSwSAiBMAAA=","块":"12:AAQgQgT84kQkQkX+YgxQCIMGAAA=","墙":"12:AAQQT+RU4QX+QAT+aCy6CqD+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","外":"12:AAIQIQOQSQSYqUESEQIQQQgQAAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","失":"12:AAJAJAP8RAhABA/+CgEQIIwGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","宝":"12:AABA/+gCgCf8BABAf8BIBE/+AAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","少":"12:AABABAJIJERChCBIAQBgGA4AAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","岩":"12:AAREREf8AA/+CAEAP8YEoEP8AAA=","工":"12:AAf8BABABABABABABABABA/+AAA=","差":"12:AAEQ/+BAf8CA/+EAP8QgggP+AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","带":"12:AAJI/+JIAA/+hCf8RERERMBAAAA=","幸":"12:AABAf8BA/+IIEQf8BA/+BABAAAA=","店":"12:AAAgf+QAQgQ+QgQgX8UEUEn8AAA=","度":"12:AAAgf+SIf+SIT4QAX8SIRwuOAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","引":"12:AA/EBEBE/EgEgE/EBEBEBEOEAAA=","张":"12:AA5EJEJI5QhAn+5QJIJIJUxiAAA=","弹":"12:AA5EIoL+6Sj+iS7+IQL+IQwQAAA=","录":"12:AAf8AEf8AE/+BAREJoDQNIzGAAA=","往":"12:AAIgQQn+IQQQwQT8QQQQQQX+AAA=","快":"12:AAIgIgr8skokokP+IgJQKIMGAAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","才":"12:AAAQAQ/+AQAwBQCQMQwQAQBwAAA=","抢":"12:AAQQQo5EWCR8ZExERcRARCw+AAA=","抬":"12:AAQgQg5ESEX6YCz8SESESEz8AAA=","拉":"12:AAQgQQ7+QAREZEwkQkQoQIz+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挖":"12:AAQQT+6qREQAb8wIQwRASCx+AAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","摆":"12:AAT+Sq6qT+QQZ8wQT+QgREz6AAA=","收":"12:AAEgkgk+lEmkkkkoso0QEoFGAAA=","故":"12:AAIgIg++JEIkIk+oioiQio/GAAA=","效":"12:AAEQ/QAeSkhUSUSUKUEIKUxiAAA=","数":"12:AAlQWQ/eMkWUlUIU/UJIOUxiAAA=","整":"12:AAEQ/+VUfUOIVU/+BAJ8JA/+AAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","无":"12:AAf8BABABA/+CgCgEgEiIiw+AAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","普":"12:AAEQ/+SkKo/+AAf8QEf8QEf8AAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","本":"12:AABABA/+FQFQFQJIJIX0hCBAAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","束":"12:AABA/+BAf8REREf8FQJIxGBAAAA=","条":"12:AAEAH4II0QDg8eBAf8BAJIzGAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","样":"12:AAJEIo/+IQIQZ8cQoQL+IQIQAAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","涨":"12:AAnSRSBUnYUQE+HYRURUhSmaAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","炸":"12:AAIgIgo+tQqQIeIQIQUeUQgQAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","爆":"12:AAJ8JEp8tEr+IoL+JUW6VUiyAAA=","片":"12:AAIQIQIQP+IAIAP4IIQIQIgIAAA=","版":"12:AAUGV4VAfAR+RCdiVUVIVUmiAAA=","物":"12:AAJApA9+qqIqMq5KJSKSIiJMAAA=","王":"12:AA/+BABABABAf8BABABABA/+AAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","盖":"12:AAEQ/+BAf8BA/+AAf8SkSk/+AAA=","目":"12:AAf8QEQEf8QEQEQEf8QEQEf8AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","矿":"12:AA8IJ+JARAdA1AVAVAVAdACAAAA=","确":"12:AA8gI8JET+dS1+VSV+VSdSCWAAA=","碰":"12:AA9EIoL+Qoco0oWqVsUocoD+AAA=","秒":"12:AAEQ4QJUJS9SKQYScEoIIwLAAAA=","笑":"12:AAQge+lIAAA8fABA/+CgMYwGAAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","箍":"12:AAQge+lIAAL++IK+Oq6uKIb+AAA=","精":"12:AAIQt8YQJ88QL+ZEd8pEJ8JEAAA=","纪":"12:AAT8QEgEoEwET8iA6ACCKCx+AAA=","结":"12:AAIQIQT+kQ4QJ8QA98BENEx8AAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","绳":"12:AAT4SIj4og38Ukn88kH8IiweAAA=","老":"12:AACEfoCQCg/+CAME0YHgECD+AAA=","者":"12:AACCf0CICQ/+EAP8YEv8IEP8AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","草":"12:AAEQ/+EQf8QEf8QEf8BA/+BAAAA=","药":"12:AAEQ/+JQRA9+JCQC+iASGC4MAAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","补":"12:AAQQIQ8QEQIYKUcSqQIQIQIQAAA=","袋":"12:AAEkI+7gISIOBA/+Eg4ULIMGAAA=","西":"12:AA/+EQEQ/+kSkSkSoewCgC/+AAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","贝":"12:AAf8QERERERERERERECgMYwGAAA=","货":"12:AAEiIs7wIiIef8QEREREGw4OAAA=","购":"12:AA+gi+rCqSqSqSqqqqJ2UCiMAAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","越":"12:AAEKe+EoEq+qEkUsW2UqsAj+AAA=","跟":"12:AA9+lCl+9CJCJ+tIpKpEtUxiAAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","躲":"12:AAJ4dIVIdIWOcQUQ/+M4VUuSAAA=","轰":"12:AAEA/+JAf8BA/+BA++iicciiAAA=","轻":"12:AAJ88EQIoQpo+GJ8MQ4QIQL+AAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","达":"12:AAgQQQAQH+wQQoQoRESCoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","运":"12:AAj8QAAAH+xARESESaXioAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","远":"12:AAj8QAAAH+xIRISISKUOoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","通":"12:AAj8QoAQD+yST+SST+SSoAn+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","量":"12:AAf8QEf8QE/+REf8REf8BA/+AAA=","金":"12:AABACgMYwGP4BABAf8JIFQ/+AAA=","鉴":"12:AAEgk+lQkIkEHwJIf8pKFQ/+AAA=","钩":"12:AARAd+iC8iQiQi9KRKT2YCQMAAA=","钱":"12:AAQUcSge9wQQQe9wQSUMYaTmAAA=","钻":"12:AAQQcQge8QQQR+9CRCVCZCR+AAA=","铁":"12:AASQaQj86QUQQQ7+QQQoZEWCAAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","限":"12:AA78qEr8qEyEr8qSqU6IikjCAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","雷":"12:AAf8BA/+hCtaAAf8REf8REf8AAA=","颗":"12:AA++qI++qi+qIq+qIqcIqUIiAAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","骨":"12:AAP4IIPIJI/+oKP4IIP4IIIYAAA=","高":"12:AABA/+IIP4AA/+gCnykSnygGAAA=","鼓":"12:AAII/II++IAI++ii+iUUWI52AAA=","鼠":"12:AAe8QEe8QEf8AAVUTMVUTMdyAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA=","；":"12:AAAAAAMAMAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+</script>
 <script data-src="src/00-data.js">
 /* 矿工老张 / Lao Zhang: data, levels, shop and both languages.
    The game is a four-tone hook-and-haul mine; the picture is 160x144 logical pixels. */
@@ -3145,7 +3504,6 @@ GM.ui = (function () {
     cv.addEventListener("pointerdown", onCanvas);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
-    addEventListener("resize", function () { if (lastScreen === "title") paintTitle(); });
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
@@ -3208,29 +3566,35 @@ GM.ui = (function () {
     return '<div class="sbody ' + cls + '">' + body + '</div><div class="ofoot">' + esc(footer) + "</div>";
   }
 
+  /* what the title wheel shows: continue (locked with no run in progress), new run, the codex; the record or a
+     save warning on the line under it */
+  function titleSpec() {
+    /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
+    var best = state.best.level > 0
+      ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
+      : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
+      : T.noBest;
+    var runSub = state.run
+      ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
+      : T.menuNoRun;
+    return {
+      items: [
+        { label: T.menuContinue, sub: runSub, locked: !state.run },
+        { label: T.menuNew, sub: T.menuNewSub },
+        { label: T.menuCodex, sub: T.menuCodexSub }
+      ],
+      index: state.menuCursor,
+      note: state.saveMsg || state.runMsg || best,
+      hint: T.menuFoot
+    };
+  }
+
   function render(screen) {
     var i, item, have, can, sel, price, rows, best, warn, extra, rec, next, target, short;
     if (screen === "title") {
-      /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
-      best = state.best.level > 0
-        ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
-        : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
-        : T.noBest;
-      warn = (state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "") +
-             (state.runMsg ? '<p class="warn">' + esc(state.runMsg) + "</p>" : "");
-      var runSub = state.run
-        ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
-        : T.menuNoRun;
-      return shell("title center",
-        '<canvas id="logo" aria-hidden="true"></canvas>' +
-        '<h1 class="vh">' + esc(T.title) + "</h1>" +
-        '<div class="menu">' +
-          row(state.menuCursor === 0, "continue", T.menuContinue, runSub, !state.run) +
-          row(state.menuCursor === 1, "new", T.menuNew, T.menuNewSub, false) +
-          row(state.menuCursor === 2, "codex", T.menuCodex, T.menuCodexSub, false) +
-        "</div>" +
-        '<p class="best">' + esc(best) + "</p>" + warn,
-        T.menuFoot);
+      /* the shared title screen (sdk/lo-title.js): post("title") mounts it on this canvas; the wheel turns by
+         itself, so a cursor move no longer redraws the screen */
+      return '<canvas id="tt" class="lotitle"></canvas><h1 class="vh">' + esc(T.title) + "</h1>";
     }
     if (screen === "paused") {
       return shell("center",
@@ -3341,7 +3705,7 @@ GM.ui = (function () {
   function post(screen) {
     var i, c, spr;
     if (screen === "title") {
-      paintTitle();
+      mountTitle();
       return;
     }
     if (screen === "shop") {
@@ -3365,33 +3729,17 @@ GM.ui = (function () {
     }
   }
 
-  /* The title picture (the name is written in it), as large as the room above the menu allows, at most 3x, in
-     whole device pixels so every pixel stays square; on a screen too short for 1x it shrinks rather than push the
-     menu off. Written with putImageData only; the pixels for one size are kept, as every cursor move redraws. */
-  var titleImg = null;
-  function paintTitle() {
-    var logo = $("logo");
-    if (!logo || !ov) return;
-    var A = GM.titleArt, W = A.W, H = A.H, body = logo.parentNode, kids = body.children, used = 20, n = 0, i;
-    for (i = 0; i < kids.length; i++) if (kids[i] !== logo && kids[i].offsetHeight) { used += kids[i].offsetHeight; n++; }
-    used += n * 4 + (ov.lastElementChild && ov.lastElementChild !== body ? ov.lastElementChild.offsetHeight : 0);
-    var room = ov.clientHeight - used;
-    var d = window.devicePixelRatio || 1;
-    var fit = Math.max(0.25, Math.min((ov.clientWidth - 24) / W, room / H, 3)) * d, k = Math.max(1, Math.floor(fit));
-    logo.style.width = (W * (fit < 1 ? fit : k) / d) + "px";
-    logo.style.height = (H * (fit < 1 ? fit : k) / d) + "px";
-    if (!titleImg || titleImg.width !== W * k) {
-      var px = A.draw(LANG), tones = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
-      titleImg = new ImageData(W * k, H * k);
-      var o = titleImg.data;
-      for (var y = 0; y < H * k; y++) for (var x = 0; x < W * k; x++) {
-        var t = tones[px[((y / k) | 0) * W + ((x / k) | 0)]], j = (y * W * k + x) * 4;
-        o[j] = t[0]; o[j + 1] = t[1]; o[j + 2] = t[2]; o[j + 3] = 255;
-      }
-    }
-    logo.width = W * k;
-    logo.height = H * k;
-    logo.getContext("2d").putImageData(titleImg, 0, 0);
+  /* The title screen: the picture (the name is written in it) and the wheel, both drawn by sdk/lo-title.js */
+  var titleMenu = null, titleArt = null;
+  function mountTitle() {
+    var c = $("tt");
+    if (!c || typeof LoTitle === "undefined") return;
+    if (!titleArt) titleArt = { w: GM.titleArt.W, h: GM.titleArt.H, px: GM.titleArt.draw(LANG) };
+    var spec = titleSpec();
+    spec.art = titleArt;
+    spec.onMove = function (i) { state.menuCursor = i; sfx("move"); };
+    spec.onPick = function (i) { state.menuCursor = i; chooseMenu(); };
+    titleMenu = LoTitle.mount(c, spec);
   }
 
   function enter(screen) {
@@ -3631,13 +3979,7 @@ GM.ui = (function () {
   function onPad(btn) {
     var s = state.screen;
     if (s === "title") {
-      if (btn === "up" || btn === "down") {
-        state.menuCursor = (state.menuCursor + (btn === "down" ? 1 : 2) + 3) % 3;
-        sfx("move");
-        enter("title");
-        return;
-      }
-      if (btn === "a" || btn === "start") chooseMenu();
+      if (titleMenu) titleMenu.press(btn);
       return;
     }
     if (s === "confirm") {

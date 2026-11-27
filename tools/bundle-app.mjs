@@ -3,13 +3,14 @@
 //   <script data-src="src/x.js"></script>   the app's own source files (src/ folder), verbatim
 //   <script data-lo-3d="1.0.0"></script>    sdk/lo-3d.js
 //   <script data-lo-game="1.2.0"></script>  sdk/lo-game.js, then a pixel-font block with only the glyphs used
+//   <script data-lo-title="0.1.0"></script> sdk/lo-title.js (the shared title screen; the font block follows it too)
 // Run it again whenever src/ or the app's text changes. Re-running is safe (filled blocks are replaced).
 // Usage: node tools/bundle-app.mjs registry/apps/<id> [more dirs...]
 //        node tools/bundle-app.mjs --hash     (print the version and hash of sdk/lo-3d.js and sdk/lo-game.js)
 // tools/lo-game.mjs is the same tool under its old name.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { LIB, LIB_VERSION, LIB3D, LIB3D_VERSION, LIB_BLOCK, LIB3D_BLOCK, SRC_BLOCK, build, sha } from "./lo-game-lib.mjs";
+import { LIB, LIB_VERSION, LIB3D, LIB3D_VERSION, LIBT, LIBT_VERSION, LIB_BLOCK, LIB3D_BLOCK, LIBT_BLOCK, SRC_BLOCK, build, sha } from "./lo-game-lib.mjs";
 
 const name = process.argv[1].replace(/^.*[\\/]/, "");
 if (!LIB_VERSION) { console.error("sdk/lo-game.js has no VERSION"); process.exit(2); }
@@ -20,6 +21,7 @@ const args = process.argv.slice(2);
 if (args[0] === "--hash") {
   console.log("lo-game", LIB_VERSION, sha(LIB));
   console.log("lo-3d", LIB3D_VERSION, sha(LIB3D));
+  console.log("lo-title", LIBT_VERSION, sha(LIBT));
   process.exit(0);
 }
 if (!args.length) { console.error(`usage: node tools/${name} registry/apps/<id> [...]`); process.exit(2); }
@@ -35,9 +37,11 @@ for (const dir of args) {
   const nSrc = (html.match(new RegExp(SRC_BLOCK.source, "g")) || []).length;
   if (nSrc) did.push(`${nSrc} src file${nSrc > 1 ? "s" : ""}`);
   if (LIB3D_BLOCK.test(html)) did.push(`lo-3d ${LIB3D_VERSION}`);
-  if (LIB_BLOCK.test(html)) {
-    const n = (out.match(/LoGame\.font\((.*)\);/) || [])[1];
-    did.push(`lo-game ${LIB_VERSION}`, `${n ? Object.keys(JSON.parse(n).glyphs).length : 0} glyphs`);
+  if (LIB_BLOCK.test(html)) did.push(`lo-game ${LIB_VERSION}`);
+  if (LIBT_BLOCK.test(html)) did.push(`lo-title ${LIBT_VERSION}`);
+  if (LIB_BLOCK.test(html) || LIBT_BLOCK.test(html)) {
+    const n = (out.match(/(?:LoGame\.font\(|LO_FONT = |LoTitle\.font\()(\{.*\})\)?;/) || [])[1];
+    did.push(`${n ? Object.keys(JSON.parse(n).glyphs).length : 0} glyphs`);
   }
   console.log(`ok    ${dir}: ${did.join(", ")}`);
 }
