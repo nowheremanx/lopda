@@ -8646,7 +8646,7 @@ test("photo puzzle: a 2×2 main menu, a four-item game menu that fits 331×359, 
   /* four buttons in two rows, all inside the fixed screen, all 44 px tall */
   await press(p, "start");
   await until(p, async () => (await ppState(f)).screen === "menu", "the game menu");
-  assert.deepEqual(await ppLabels(f), ["继续", "难度 3×3", "看它解", "主菜单"]);
+  assert.deepEqual(await ppLabels(f), ["继续", "重开 4×4", "看它解", "主菜单"]);
   const layout = await f.evaluate(() => {
     const m = document.querySelector("main"), menu = document.getElementById("menu"), mb = m.getBoundingClientRect(), nb = menu.getBoundingClientRect();
     return { w: innerWidth, h: innerHeight, scrollH: m.scrollHeight, clientH: m.clientHeight, menuBottom: nb.bottom, mainBottom: mb.bottom,
@@ -8752,7 +8752,7 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   assert.equal((await ppState(f)).n, 4);
   await press(p, "start");
   await until(p, async () => (await ppState(f)).screen === "menu", "the 4×4 menu");
-  assert.deepEqual(await ppLabels(f), ["继续", "难度 4×4", "看它解", "主菜单"]);
+  assert.deepEqual(await ppLabels(f), ["继续", "重开 3×3", "看它解", "主菜单"]);
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
