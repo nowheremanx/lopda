@@ -779,3 +779,10 @@ test("no question about notes: after a slip or a cast A and the arrows write not
   assert.equal(gua.appends.length, 1);
   assert.equal(gua.appends[0].title, "八卦");
 });
+
+test("scrolled to the end, the last line has 16 px of paper under it; content that fits does not scroll", () => {
+  const { app } = bootApp("zh", false), scrollMax = app.ctx.get("scrollMax");
+  assert.equal(scrollMax(300, 171), 300 - 171 + 16);
+  assert.equal(scrollMax(171, 171), 0);
+  assert.equal(scrollMax(100, 171), 0);
+});
