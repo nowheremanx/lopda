@@ -71,11 +71,19 @@
   document.addEventListener("visibilitychange",function(){ if(document.hidden){ running=false; letGo(); } else if(Object.keys(seen).length) start(); });
   window.addEventListener("blur",letGo);
 
-  /* keyboard-type remotes (page turners, selfie shutters): log what reaches the page */
+  /* keyboard-type remotes (page turners, selfie shutters): log what reaches the page. The readout opens by itself only
+     for keys a typing keyboard rarely sends (and with ?padtest in the address), so a desk keyboard and the e2e tests
+     never get a strip over the screen; once it is open every key is logged. */
+  var REMOTE=/^(PageUp|PageDown|AudioVolume|Media|MediaTrack|Camera|BrowserBack|BrowserForward)/;
   document.addEventListener("keydown",function(e){
     keylog.unshift((e.key||"?")+"/"+(e.code||"?")); keylog.length=Math.min(keylog.length,6);
-    ensureBar(); draw(navigator.getGamepads()||[]);
+    if(REMOTE.test(e.key||"")) ensureBar();
+    draw(navigator.getGamepads()||[]);
   },true);
+  if(/[?&]padtest\b/.test(location.search)){
+    var open=function(){ ensureBar(); draw(navigator.getGamepads()||[]); };
+    if(document.body) open(); else document.addEventListener("DOMContentLoaded",open);
+  }
 
   /* ---------- the test readout ---------- */
   function mode(){
