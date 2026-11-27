@@ -3852,6 +3852,33 @@ test("studio: the tape library renames, opens, copies and deletes tapes", { skip
   assert.deepEqual(errors, []);
 });
 
+test("studio: on a question sheet the keyboard's A answers it and START does not start the music", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await rtPage(t);
+  await studioOpen(p);
+  await skipTour(p);
+  await openMyTapes(p);
+  await p.locator("#studio-sheet .st-proj-actions li", { hasText: "复制这一盘" }).click();
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await openMyTapes(p);
+  assert.equal(await p.locator("#studio-sheet .st-proj-list li").count(), 2);
+  await p.locator("#studio-sheet .st-proj-list li", { hasText: "副本" }).locator(".st-row-del").click();
+  await p.waitForSelector("#studio-sheet .st-ask");
+  await p.keyboard.press("Enter");
+  await p.waitForTimeout(150);
+  assert.equal(await p.getAttribute("#v-studio", "data-playing"), "false", "START under the question plays nothing (issue #452)");
+  assert.equal(await p.locator("#studio-sheet .st-ask").count(), 1, "the question is still there");
+  await p.keyboard.press("x");
+  await p.waitForFunction(() => document.querySelectorAll("#studio-sheet .st-proj-list li").length === 1);
+  assert.doesNotMatch(await p.textContent("#studio-sheet .st-proj-list"), /副本/, "A was the question's yes");
+  /* B steps back through the library (folder, folders) until the sheet closes */
+  for (let i = 0; i < 4 && !(await p.isHidden("#studio-sheet")); i++) { await p.keyboard.press("z"); await p.waitForTimeout(80); }
+  await p.waitForSelector("#studio-sheet", { state: "hidden" });
+  await p.keyboard.press("Enter");
+  await p.waitForFunction(() => document.querySelector("#v-studio").getAttribute("data-playing") === "true");
+  await p.keyboard.press("Enter");
+  assert.deepEqual(errors, []);
+});
+
 test("studio: a version saves the tape and restores it after a change, across a reload", { skip, timeout: 90000 }, async (t) => {
   const { p, errors } = await rtPage(t);
   await studioOpen(p);

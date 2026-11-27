@@ -358,7 +358,9 @@ function buildScale(){
   sc.style.width=(Math.max(1,T.list.length)-1)*GAP+"px";
   T.list.forEach(function(s,i){
     var m=el("span","tn-mark"+(i%2?" low":"")); m.style.left=i*GAP+"px";
-    var lab=button("tn-label",s.name,function(){ if(T.dragged) return; glideTo(i,on()); });
+    /* the button is the 44 px tap area (sdk/UI.md 3); the name inside it keeps the small print of the scale */
+    var lab=button("tn-label",null,function(){ if(T.dragged) return; glideTo(i,on()); });
+    lab.appendChild(el("span","tn-label-t",s.name));
     lab.setAttribute("aria-label",tr("tuner.dial.tune",{name:s.name}));
     var num=el("i","tn-num",LP.pad2(i+1));
     m.appendChild(lab); m.appendChild(num);
@@ -651,7 +653,8 @@ function saveEdit(){
 }
 function moveEdit(d){
   var i=idx(T.editId), j=i+d; if(i<0 || j<0 || j>=T.list.length) return;
-  T.list=ST.move(T.list,i,j); T.sel=j; T.scaleKey="";
+  /* moving is another action: the next 删除 asks again (issue #456) */
+  T.list=ST.move(T.list,i,j); T.sel=j; T.scaleKey=""; T.delArm=false;
   syncPos(); save(); sfx("move"); renderEdit();
 }
 function delEdit(){
