@@ -12,20 +12,21 @@
   #hud span { border: 2px solid #1f2a14; background: #7d8a58; padding: 2px 6px; white-space: nowrap; }
   #stage { position: relative; }
   canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #1f2a14; touch-action: none; }
-  #ov { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: #a3ad7e; border: 3px solid #1f2a14; text-align: center; padding: 10px; box-sizing: border-box; overflow-y: auto; }
+  #ov { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; justify-content: safe center; gap: 8px; background: #a3ad7e; border: 3px solid #1f2a14; text-align: center; padding: 10px; box-sizing: border-box; overflow-y: auto; }
   #ov.title-view { gap: 4px; }
   #ov h1 { margin: 0; font-size: 26px; letter-spacing: 2px; }
   #op { margin: 0; font-size: 15px; line-height: 1.45; white-space: pre-line; }
   #title-slot { width: 160px; height: 160px; flex: none; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; letter-spacing: 3px; }
   #btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 280px; flex: none; }
+  #btns.level-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   #btns button { min-height: 44px; padding: 8px 6px; font-size: 15px; }
   #btns button.wide { grid-column: 1 / -1; }
+  #btns button.level-cell { white-space: pre-line; line-height: 15px; padding: 4px 2px; font-size: 15px; }
   #btns button.locked { background: #4a5a32; color: #a3ad7e; }
-  #btns button.selected { outline: 3px solid #1f2a14; outline-offset: 2px; }
   #wipe { position: absolute; z-index: 4; inset: 0; pointer-events: none; background: #1f2a14; transform: translateX(-105%); }
   #wipe.go { animation: wipe 300ms linear; }
   @keyframes wipe { 0% { transform: translateX(-105%); } 100% { transform: translateX(105%); } }
-  #bests { font-size: 13px; }
+  #bests { margin: 0; font-size: 13px; }
   button { font: inherit; font-weight: bold; min-height: 44px; padding: 8px 20px; background: #1f2a14; color: #a3ad7e; border: 0; box-shadow: 3px 3px 0 #4a5a32; }
   .hide { display: none !important; }
 </style>
@@ -54,32 +55,28 @@
   var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
   var TXT = {
     zh: { title: "打地鼠", score: "分 {n}", combo: "连 {n}", time: "{n} 秒", best: "最高 {n}", bestTime: "最长 {n}",
-      menu: "头盔砸两下，雷别碰。", mode60: "60 秒", modeEndless: "无尽", modeLevels: "闯关",
+      mode60: "60 秒", modeEndless: "无尽", modeLevels: "闯关", startLevel: "开始",
+      targetHud: "目标 {n}",
       bests: "60 秒 {s} · 无尽 {t}", noRecords: "还没有记录",
       again: "再来一局", modes: "选模式", record: "新纪录", over: "时间到", boom: "踩雷",
       got: "砸中 {n} 分。", endlessGot: "坚持 {t}，砸中 {s} 分。",
       result: "命中 {h}/{t} · 最高连击 {c}<br>踩雷 {m} · 评价 {r}",
       bestline: "<br>最高 {n} 分。", bestlineEndless: "<br>最长 {t} · 最高 {s}",
-      levelTitle: "第 {n} 关", levelTarget: "目标 {n} 分", levelHint: "普通地鼠，砸就对了",
-      levelList: "关卡", back: "返回", next: "下一关", levels: "关卡", stars: "星",
-      levelResult: "得分 {s} · {n} 星", newStars: "新纪录：星数增加", levelDone: "过关", levelAgain: "再来",
-      locked: "未解锁", thiefHint: "小偷没砸到会换洞跑", helmetHint: "戴头盔的要砸两下",
-      goldHint: "金地鼠：快，+3", mineHint: "冒火花的雷别碰", allHint: "全部来了，更快",
-      levelHints: ["普通地鼠，砸就对了", "", "戴头盔的要砸两下", "", "金地鼠：快，+3", "", "小偷没砸到会换洞跑", "冒火花的雷别碰", "", "全部来了，更快"] },
+      levelTitle: "第 {n} 关", levelTarget: "目标 {n} 分",
+      levelList: "关卡", back: "返回", next: "下一关", levels: "关卡",
+      levelResult: "得分 {s} · {n} 星", newStars: "新纪录：星数增加", levelDone: "过关", levelAgain: "再来" },
     en: { title: "MOLE BOP", score: "PTS {n}", combo: "CMB {n}", time: "{n} S", best: "TOP {n}", bestTime: "BEST {n}",
-      menu: "Helmets take two hits. Avoid the mines.", mode60: "60s", modeEndless: "ENDLESS", modeLevels: "LEVELS",
+      mode60: "60s", modeEndless: "ENDLESS", modeLevels: "LEVELS", startLevel: "START",
+      targetHud: "TGT {n}",
       bests: "60s {s} · ENDLESS {t}", noRecords: "No records yet",
       again: "AGAIN", modes: "MODES", record: "NEW RECORD", over: "TIME UP", boom: "BOOM",
       got: "{n} points.", endlessGot: "Lasted {t}, {s} points.",
       result: "{h}/{t} hits · best combo {c}<br>mines {m} · rank {r}",
       bestline: "<br>Best: {n}.", bestlineEndless: "<br>Best: {t} · {s} pts",
-      levelTitle: "LEVEL {n}", levelTarget: "TARGET {n} PTS", levelHint: "Bonk the plain moles.",
-      levelList: "LEVELS", back: "BACK", next: "NEXT", levels: "LEVELS", stars: "STARS",
+      levelTitle: "LEVEL {n}", levelTarget: "TARGET {n} PTS",
+      levelList: "LEVELS", back: "BACK", next: "NEXT", levels: "LEVELS",
       levelResult: "SCORE {s} · {n} STARS", newStars: "NEW BEST: MORE STARS", levelDone: "CLEAR",
-      levelAgain: "AGAIN", locked: "LOCKED", thiefHint: "Missed thieves run to a new hole",
-      helmetHint: "Helmets take two hits", goldHint: "Gold moles are fast: +3",
-      mineHint: "Avoid the sparking mines", allHint: "Everything, faster",
-      levelHints: ["Bonk the plain moles.", "", "Helmets take two hits", "", "Gold moles: fast, +3", "", "Missed thieves run to a new hole", "Avoid the sparking mines", "", "Everything, faster"] }
+      levelAgain: "AGAIN" }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
   function tf(key, o) { return TXT[key].replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
@@ -127,7 +124,7 @@
     { target: 26, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.30, p1: 0.45, hint: null },
     { target: 30, cap: 3, helmet: true, gold: true, thief: false, mines: false, p0: 0.35, p1: 0.50, hint: { zh: "金地鼠：快，+3", en: "Gold moles: fast, +3" } },
     { target: 33, cap: 4, helmet: true, gold: true, thief: false, mines: false, p0: 0.45, p1: 0.60, hint: null },
-    { target: 35, cap: 3, helmet: true, gold: true, thief: true, mines: false, p0: 0.50, p1: 0.65, hint: { zh: "小偷没砸到会换洞跑", en: "Missed thieves run to a new hole" } },
+    { target: 42, cap: 3, helmet: true, gold: true, thief: true, mines: false, p0: 0.50, p1: 0.65, hint: { zh: "小偷没砸到会换洞跑", en: "Missed thieves change holes" } },
     { target: 45, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.55, p1: 0.75, hint: { zh: "冒火花的雷别碰", en: "Avoid the sparking mines" } },
     { target: 55, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.70, p1: 0.90, hint: null },
     { target: 65, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.85, p1: 1.00, hint: { zh: "全部来了，更快", en: "Everything, faster" } }
@@ -177,16 +174,19 @@
   function setBest() {
     if (MODE === "60") $t("bs", "best", best60);
     else if (MODE === "level") document.getElementById("bs").textContent =
-      (LANG === "zh" ? "目标 " : "TGT ") + LEVELS[levelNo - 1].target;
+      tf("targetHud", { n: LEVELS[levelNo - 1].target });
     else $t("bs", "bestTime", bestEndlessTime ? fmtTime(bestEndlessTime) : "--");
   }
   function setButtons(items) {
     var box = document.getElementById("btns");
     box.innerHTML = "";
+    box.classList.remove("level-grid");
+    if (items.length && items[0].levelCell) box.classList.add("level-grid");
     items.forEach(function (it) {
       var b = document.createElement("button");
       b.type = "button"; b.textContent = it.label;
       if (it.wide) b.className = "wide";
+      if (it.levelCell) b.className += (b.className ? " " : "") + "level-cell";
       if (it.locked) b.className += (b.className ? " " : "") + "locked";
       b.addEventListener("click", function () {
         if (transitionBusy) return;
@@ -207,13 +207,15 @@
   function starsFor(n, target) { return n >= Math.ceil(target * 1.4) ? 3 : n >= Math.ceil(target * 1.2) ? 2 : n >= target ? 1 : 0; }
   function transition(fn) {
     if (transitionBusy) return;
-    transitionBusy = true;
-    fn();
-    var wipe = document.getElementById("wipe");
-    wipe.classList.remove("go");
-    void wipe.offsetWidth;
-    wipe.classList.add("go");
-    setTimeout(function () { wipe.classList.remove("go"); transitionBusy = false; }, 300);
+    try { fn(); }
+    finally {
+      transitionBusy = true;
+      var wipe = document.getElementById("wipe");
+      wipe.classList.remove("go");
+      void wipe.offsetWidth;
+      wipe.classList.add("go");
+      setTimeout(function () { wipe.classList.remove("go"); transitionBusy = false; }, 300);
+    }
   }
   function labelStars(n) {
     var s = "";
@@ -241,13 +243,14 @@
     playing = false; dying = false; screen = "levels";
     document.getElementById("ov").classList.remove("title-view");
     document.getElementById("ot").classList.remove("hide");
-    document.getElementById("op").classList.remove("hide");
+    document.getElementById("op").classList.add("hide");
     document.getElementById("title-slot").classList.add("hide");
     $t("ot", "levelList"); document.getElementById("op").textContent = "";
     document.getElementById("bests").classList.add("hide");
+    resetOverlayHud();
     var items = LEVELS.map(function (_, i) {
       var open = i === 0 || stars[i - 1] > 0;
-      return { label: (i + 1) + "  " + labelStars(stars[i]), locked: !open,
+      return { label: (i + 1) + "\n" + labelStars(stars[i]), levelCell: true, locked: !open,
         fn: function () { levelNo = i + 1; transition(showLevelCard); } };
     });
     items.push({ label: TXT.back, fn: function () { transition(showTitle); }, wide: true });
@@ -266,13 +269,19 @@
     document.getElementById("op").textContent = tf("levelTarget", { n: data.target }) +
       (data.hint ? "\n" + data.hint[LANG] : "");
     document.getElementById("bests").classList.add("hide");
+    resetOverlayHud();
     setButtons([
-      { label: LANG === "zh" ? "开始" : "START", fn: function () { transition(function () { start("level"); }); }, wide: true },
+      { label: TXT.startLevel, fn: function () { transition(function () { start("level"); }); }, wide: true },
       { label: TXT.back, fn: function () { transition(showLevels); }, wide: true }
     ]);
     document.getElementById("ov").classList.remove("hide");
   }
   function showMenu() { transition(showTitle); }
+  function resetOverlayHud() {
+    score = 0; combo = 0;
+    $t("sc", "score", 0); showCombo(); setClock(0);
+    document.getElementById("bs").textContent = "";
+  }
 
   /* the triangle blip climbs with the combo; older runtimes get the named sounds */
   function hitSound(add) {
@@ -365,7 +374,7 @@
         } else {
           blit(h.s === "hit" ? SP.dizzy : SP.mole, cx - 16, top - 2);
           if (h.helmet && h.s !== "hit") blit(SP.helmet, cx - 16, top - 2);
-          if (h.thief && h.s !== "hit") { g.fillStyle = DARK; g.fillRect(cx - 8, top + 13, 16, 2); }
+          if (h.thief && h.s !== "hit") { g.fillStyle = DARK; g.fillRect(cx - 8, top + 9, 16, 2); }
           if (h.gold && h.s !== "hit") {
             blit(SP.crown, cx - 8, top - 8);
             if (Math.floor(now / 150) % 2) blit(SP.spark, cx + 8, top - 6, 1);
@@ -392,7 +401,7 @@
         g.fillRect(Math.round(x1 + (x2 - x1) * u), Math.round(y1 + (y2 - y1) * u), 3, 2);
       }
       blit(SP.mole, x1 + (x2 - x1) * q - 16, y1 + (y2 - y1) * q - 16);
-      g.fillStyle = DARK; g.fillRect(Math.round(x1 + (x2 - x1) * q - 8), Math.round(y1 + (y2 - y1) * q - 3), 16, 2);
+      g.fillStyle = DARK; g.fillRect(Math.round(x1 + (x2 - x1) * q - 8), Math.round(y1 + (y2 - y1) * q - 7), 16, 2);
     });
     hammers = hammers.filter(function (m) { return now - m.t < 260; });
     hammers.forEach(function (m) {
@@ -451,7 +460,7 @@
     var free = holes.filter(function (h) { return h.s === "down" && now - h.lastTap > 300; });
     if (!free.length) return;
     var h = free[Math.floor(Math.random() * free.length)];
-    h.kind = "mine"; h.helmet = false; h.gold = false;
+    h.kind = "mine"; h.helmet = false; h.gold = false; h.thief = false; h.escaped = false; h.runStay = 0;
     h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at; h.stay = 900;
     if (h.s === "rise") fuseSound();
   }
@@ -483,7 +492,7 @@
         if (h.kind === "mole") { combo = 0; showCombo(); }
       }
       else if (h.s === "sink" && now - h.t >= upMs) {
-        if (h.thief && !h.escaped) beginThiefRun(h, holes.indexOf(h), now);
+        if (h.kind === "mole" && h.thief && !h.escaped) beginThiefRun(h, holes.indexOf(h), now);
         else h.s = "down";
       }
       else if (h.s === "hit" && now - h.t >= 420) { h.s = "down"; }
@@ -578,7 +587,7 @@
     if (MODE === "level") {
       screen = "tally";
       var data = LEVELS[levelNo - 1], earned = starsFor(score, data.target), old = stars[levelNo - 1];
-      record = earned > old;
+      record = !levelSaveProtected && earned > old;
       if (!levelSaveProtected && record) {
         stars[levelNo - 1] = earned;
         PAD.save("levels", { v: 1, stars: stars.slice() });

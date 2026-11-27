@@ -37,8 +37,8 @@ after(async () => { await browser?.close(); server?.close(); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* one dev harness tab on the app in its own context, so one test's save never reaches the next */
-async function tab(t, { lang, clock } = {}) {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+async function tab(t, { lang, clock, viewport } = {}) {
+  const context = await browser.newContext({ viewport: viewport || { width: 390, height: 844 }, hasTouch: true });
   t.after(() => context.close());
   const p = await context.newPage();
   const errors = [];
@@ -101,6 +101,36 @@ test("whack-a-mole: level stars use the three score thresholds", { skip }, async
     return [f(0, 10), f(9, 10), f(10, 10), f(11, 10), f(12, 10), f(13, 10), f(14, 10)];
   });
   assert.deepEqual(values, [0, 0, 1, 1, 2, 2, 3]);
+});
+
+test("whack-a-mole: every overlay fits or scrolls safely at 331 x 359", { skip, timeout: 60000 }, async (t) => {
+  const { p } = await tab(t, { clock: new Date(2026, 10, 24, 12, 0), viewport: { width: 331, height: 359 } });
+  const frame = await appFrame(p);
+  await p.evaluate(() => {
+    const app = document.getElementById("app");
+    app.style.width = "331px"; app.style.height = "359px";
+  });
+  await frame.waitForFunction(() => innerWidth === 331 && innerHeight === 359);
+  const measure = () => frame.evaluate(() => {
+    const ov = document.getElementById("ov");
+    return { screen: window.__mole().screen, scrollHeight: ov.scrollHeight, clientHeight: ov.clientHeight };
+  });
+  const measurements = [await measure()];
+  await frame.locator("#btns button").first().click();
+  await frame.waitForFunction(() => window.__mole().screen === "levels");
+  await settled(frame);
+  measurements.push(await measure());
+  await frame.locator("#btns button").first().click();
+  await frame.waitForFunction(() => window.__mole().screen === "card");
+  await settled(frame);
+  measurements.push(await measure());
+  await frame.locator("#btns button").first().click();
+  await frame.waitForFunction(() => window.__mole().playing);
+  await p.clock.runFor(31000);
+  measurements.push(await measure());
+  assert.deepEqual(measurements.map((m) => m.screen), ["title", "levels", "card", "tally"]);
+  assert.ok(measurements.every((m) => m.scrollHeight <= m.clientHeight), JSON.stringify(measurements));
+  console.log("overlay 331x359 scrollHeight/clientHeight:", JSON.stringify(measurements));
 });
 
 test("whack-a-mole: one star unlocks the next level, but not the one after", { skip, timeout: 30000 }, async (t) => {
