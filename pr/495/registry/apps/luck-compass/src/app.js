@@ -530,7 +530,7 @@ var SECTIONS = [
   { id: "almanac", name: T({ zh: "老黄历", en: "Almanac" }) },
   { id: "fortune", name: T({ zh: "每日一签", en: "Fortune" }) },
   { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) },
-  { id: "hexagram", name: T({ zh: "八卦", en: "Hexagram" }) },
+  { id: "hexagram", name: T({ zh: "八卦", en: "I Ching" }) },
   { id: "bazi", name: T({ zh: "八字", en: "Chart" }) }
 ];
 var baziState = { loaded: false, failed: false, saved: null, chart: null, picker: false,
@@ -722,10 +722,10 @@ function sectionSummary(id) {
     var yi = a.yi, ji = a.ji, zh = game.lang !== "en";
     var full = (zh ? "宜 " : "Do ") + yi.slice(0, 2).join(" ") +
       (zh ? " · 忌 " : " · Avoid ") + ji.slice(0, 2).join(" ");
-    if (game.g.measure(full) <= 134) return full;
+    if (game.g.measure(full) <= 128) return full;
     var shortLine = (zh ? "宜 " : "Do ") + (yi[0] || "无") +
       (zh ? " · 忌 " : " · Avoid ") + (ji[0] || "无");
-    return game.g.measure(shortLine) <= 134 ? shortLine : fitSummary(shortLine, 134);
+    return game.g.measure(shortLine) <= 128 ? shortLine : fitSummary(shortLine, 128);
   }
   if (id === "fortune") {
     if (!loadComplete) return "…";
@@ -756,40 +756,38 @@ function fitSummary(text, max) {
   while (value.length > 1 && game.g.measure(value) > max) value = value.substring(0, value.length - 2) + "…";
   return value;
 }
+/* the counter: the shopfront banner with the name on its signboard, then one 32 px row per section */
+var COUNTER_TOP = 50, COUNTER_ROW = 32;
+var BANNER_ART = LoGame.sprite(ART.BANNER);
+var SECTION_ICONS = {};
+for (var si = 0; si < SECTIONS.length; si++) SECTION_ICONS[SECTIONS[si].id] = LoGame.sprite(ART.ICONS[SECTIONS[si].id]);
+var INVERT = [3, 2, 1, 0];   /* the highlighted row is ink, so its icon is drawn in reverse */
+
 function updateCounter() {
   var p = game.pointer, i;
   if (game.pressed("up")) { counterCursor = (counterCursor + SECTIONS.length - 1) % SECTIONS.length; sfx("move"); }
   if (game.pressed("down")) { counterCursor = (counterCursor + 1) % SECTIONS.length; sfx("move"); }
-  if (p.pressed) {
-    i = Math.floor((p.y - 43) / 34);
+  if (p.pressed && p.y >= COUNTER_TOP) {
+    i = Math.floor((p.y - COUNTER_TOP) / COUNTER_ROW);
     if (i >= 0 && i < SECTIONS.length) { counterCursor = i; openSection(SECTIONS[i].id); sfx("tap"); return; }
   }
   if (game.pressed("a")) { sfx("tap"); openSection(SECTIONS[counterCursor].id); }
 }
 function drawCounter(g) {
   g.clear(g.PAPER);
-  g.rect(0, 0, W, 38, g.INK);
-  g.text(T({ zh: "玄机阁", en: "Oracle" }), CX, 9, { align: "center", color: g.PAPER });
-  var entries = SECTIONS.slice(), hexIndex = -1;
-  for (var n = 0; n < entries.length; n++) if (entries[n].id === "hexagram") hexIndex = n;
-  if (entries.length > 5) {
-    var regular = entries.filter(function (entry) { return entry.id !== "hexagram" && entry.id !== "bazi"; });
-    var hex = entries.filter(function (entry) { return entry.id === "hexagram"; })[0];
-    var bazi = entries.filter(function (entry) { return entry.id === "bazi"; })[0];
-    entries = regular.concat(hex ? [hex] : [], bazi ? [bazi] : []);
-  } else if (hexIndex >= 0 && entries[entries.length - 1].id !== "bazi" && hexIndex < entries.length - 1) {
-    entries.push(entries.splice(hexIndex, 1)[0]);
+  g.sprite(BANNER_ART, 0, 0);
+  /* the signboard spans about x 47-178, y 14-36 of the banner */
+  g.text(T({ zh: "玄机阁", en: "Oracle" }), CX + 4, 19, { align: "center", color: g.INK });
+  for (var i = 0; i < SECTIONS.length; i++) {
+    var y = COUNTER_TOP + i * COUNTER_ROW, on = i === counterCursor, ink = on ? g.PAPER : g.INK;
+    var summary = fitSummary(sectionSummary(SECTIONS[i].id), 128);
+    if (on) g.rect(4, y + 1, 208, COUNTER_ROW - 2, g.INK);
+    g.sprite(SECTION_ICONS[SECTIONS[i].id], 8, y + 8, on ? { map: INVERT } : undefined);
+    g.text(SECTIONS[i].name, 28, y + 9, { color: ink });
+    g.text(summary, 84, y + 9, { color: ink });
+    if (!on && i < SECTIONS.length - 1) g.line(8, y + COUNTER_ROW - 1, 208, y + COUNTER_ROW - 1, g.MID);
   }
-  for (var i = 0; i < entries.length; i++) {
-    var y = 43 + i * 34, summary = fitSummary(sectionSummary(entries[i].id), 134);
-    if (i === counterCursor) g.rect(6, y - 2, 204, 31, g.INK);
-    g.text(i === counterCursor ? "›" : " ", 8, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
-    g.text(entries[i].name, 21, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
-    g.text(summary, 74, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
-    g.line(8, y + 31, 208, y + 31, g.DARK);
-  }
-  g.text(T({ zh: "↑↓ 选 · A 进入", en: "↑↓ pick · A open" }), CX, 218,
-    { align: "center", color: g.INK });
+  g.text(T({ zh: "↑↓ 选 · A 进入", en: "↑↓ pick · A open" }), CX, 216, { align: "center", color: g.DARK });
 }
 
 function almanacDate() {
