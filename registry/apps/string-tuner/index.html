@@ -123,7 +123,8 @@ var Tuner = (function () {
     }
     return r.i;
   }
-  /* a median of the last five readings. A reading more than 70 cents from it is held back: one alone is a glitch and is
+  /* a median of the last three readings (owner: the needle should live and tremble, not settle on a verdict; three only
+     drops single spikes). A reading more than 70 cents from it is held back: one alone is a glitch and is
      dropped, two in a row that agree are a new note, and the median starts afresh from them */
   function smoother() {
     var a = [], pend = null;
@@ -136,7 +137,7 @@ var Tuner = (function () {
           return a.length < 2 ? null : median();
         }
         pend = null;
-        a.push(f); if (a.length > 5) a.shift();
+        a.push(f); if (a.length > 3) a.shift();
         return a.length < 2 ? null : median();
       },
       reset: function () { a = []; pend = null; }
@@ -275,7 +276,7 @@ var Tuner = (function () {
       if (on && shown && shown.i >= 0) tuned[shown.i] = true;
     }
     var moved = Math.abs(needleTo - needle) > 0.05;
-    if (moved) needle += (needleTo - needle) * 0.35;
+    if (moved) needle += (needleTo - needle) * 0.5;   /* quick, so each reading's wobble shows */
     if (!dirty && !moved) return;
     dirty = false;
     draw();

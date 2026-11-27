@@ -58,5 +58,5 @@ test("string-tuner: the smoother waits for two readings, drops a lone glitch, an
   s.reset();
   assert.equal(s.push(82.4), null);
   for (const f of [82.5, 82.3, 82.6, 82.2]) s.push(f);
-  assert.equal(s.push(82.4), 82.4, "the median of the last five");
+  assert.equal(s.push(82.4), 82.4, "the median of the last three");
 });
