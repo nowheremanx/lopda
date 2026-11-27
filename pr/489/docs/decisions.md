@@ -226,6 +226,8 @@
     - 解锁：收到 `play` 时如果页面还没有过用户激活（`navigator.userActivation.hasBeenActive`）就先记下，外层页面第一次 pointerdown / touchend / keydown 时
       建 AudioContext、在手势里放一个空样本（iOS 的老办法）再开始。沙盒 iframe 里的触屏不会传到外层页面；Chrome 和 Safari 16.4 以后的用户激活会传给外层，
       所以 app 在触屏后调用 `play` 也能直接开始。没有这个 API 的旧 Safari 上，要等下巴按键或外层页面的一次触屏。
+      外层页面的第一次触屏总会建好并启动 AudioContext（按键声关着也一样；runtime 1.6.7，#393）：打开 app 那一下就把声音解了锁，
+      只靠点画布的 app（雨站）从第一句起就有声音。
     - 暂停：页面隐藏而且正在放音乐时 suspend AudioContext（不放音乐时不动，卡带机照旧），回来 resume；iOS 不许无手势 resume 时，下一次触屏恢复。
       时钟如果跳了，错过的音符跳过，不会一起补放。
     - 声音开关关着时音乐照样排（master gain 为 0），打开后从当前位置听到。音量在播放开始时设一次；设置页只能在 app 外打开，打开时音乐已经停了。

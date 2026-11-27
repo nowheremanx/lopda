@@ -249,7 +249,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.6.7+80df491";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.6.8+4d9c76a";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -373,6 +373,12 @@ function onGesture(){
   if(ac){
     if(SND.stale || ac.state==="interrupted") rebuild();
     else wake();
+  }else if((ac=audio())){
+    /* the first touch makes the context and starts it inside the touch (iOS: an empty sample), even with the key clicks
+       off. An app opened later can then sound at once: a tap inside its sandbox never reaches this page as a gesture,
+       so a touch-only app (雨站) would otherwise wait for the chin pad (#393) */
+    wake();
+    try{ var b=ac.createBufferSource(); b.buffer=ac.createBuffer(1,1,22050); b.connect(ac.destination); b.start(0); }catch(e){}
   }
   /* a song or ambience asked for before the first touch starts on the first touch or key (iPhone keeps audio locked until then) */
   chip.unlock();
