@@ -14,8 +14,9 @@ canvas{display:block}
 /* six rows of 44 px or more with 8 px between keys (UI.md section 3), the memory row too; on the smallest screen
    the LCD gives way (fitCanvas) */
 #keys{flex:1;min-height:0;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(6,minmax(44px,1fr));gap:8px}
-button{font-family:monospace;font-size:20px;font-weight:bold;min-height:0;padding:0;color:#a3ad7e;background:#4a5a32;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
-button.n{background:#1f2a14;box-shadow:3px 3px 0 #4a5a32}
+/* operators are ink on paper (the dark tone under paper text was 3.2:1), digits paper on ink, memory ink on mid */
+button{font-family:monospace;font-size:20px;font-weight:bold;min-height:0;padding:0;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
+button.n{background:#1f2a14;color:#a3ad7e;box-shadow:3px 3px 0 #4a5a32}
 button.m{background:#7d8a58;color:#1f2a14;font-size:15px}
 button.dn{transform:translate(2px,2px);box-shadow:1px 1px 0 #1f2a14;background:#7d8a58;color:#1f2a14}
 </style>
@@ -291,7 +292,7 @@ window.addEventListener('pointerup',release);
 window.addEventListener('pointercancel',release);
 
 /* physical keyboard: typing digits and operators works here; the hat's arrow keys map to buttons only */
-var KMAP={'.':'.','+':'+','-':'-','*':'*','/':'/','%':'%','=':'=','c':'C','C':'C','Escape':'C','Backspace':'<',',':'.'};
+var KMAP={'Enter':'=','.':'.','+':'+','-':'-','*':'*','/':'/','%':'%','=':'=','c':'C','C':'C','Escape':'C','Backspace':'<',',':'.'};
 window.addEventListener('keydown',function(e){
   if(e.ctrlKey||e.metaKey||e.altKey)return;
   var k=e.key,m=null;
