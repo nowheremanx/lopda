@@ -868,6 +868,8 @@ function openAsk(req){
   var ok=document.createElement("button"); ok.className="btn"; ok.type="button"; ok.id="file-ok"; ok.textContent=req.okLabel;
   var no=document.createElement("button"); no.className="btn ghost"; no.type="button"; no.id="file-no"; no.textContent=req.noLabel||tr("common.cancel");
   row.appendChild(ok); row.appendChild(no); box.appendChild(row);
+  /* Left / Right pick a button, A presses the picked one; it starts on OK, so A alone does what it always did */
+  req.pick=0; req.okBtn=ok; req.noBtn=no;
   if(S.running && S.running.buttons){ var k=document.createElement("small"); k.textContent=tr("file.keys"); box.appendChild(k); }
   scrim.appendChild(box); $("screen").appendChild(scrim);
   req.focusWas=document.activeElement;
@@ -1333,11 +1335,20 @@ LP.onData("apps",function(){ if(!$("v-store").hidden) renderStore(true); });
 /* the chin pad reaches a running app only when its manifest asks for buttons */
 /* while the file dialog is open it has the pad: a fresh A press confirms on release, B cancels */
 var askA=false;
+function askPick(i){
+  var req=ask; if(!req || !req.okBtn) return;
+  req.pick=i;
+  /* the picked button is drawn solid, the other as an outline */
+  req.okBtn.classList.toggle("ghost",i!==0); req.noBtn.classList.toggle("ghost",i!==1);
+  sfx("move");
+}
 LP.padRoute("file",function(b,down){
   if(!ask){ askA=false; return false; }
   if(ask.bar && b!=="a" && b!=="b") return false;   /* the bar takes A and B only */
-  if(b==="a"){ if(down) askA=true; else if(askA){ askA=false; askOk(); } }
+  if(b==="a"){ if(down) askA=true; else if(askA){ askA=false; if(ask.pick===1) closeAsk(true); else askOk(); } }
   else if(b==="b" && !down) closeAsk(true);
+  else if(b==="left" && down) askPick(0);
+  else if(b==="right" && down) askPick(1);
   return true;
 });
 LP.padRoute("run",function(b,down){
