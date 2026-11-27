@@ -349,6 +349,8 @@ test("removing an app keeps its save; Settings clears it; a damaged save is repo
   await p.click("#set-saves-open");
   await p.waitForSelector("#set-saves-list li");
   await p.click("#set-saves-del-btn-0");
+  /* the armed row names the program and the size, and says it cannot be undone (issue #281) */
+  assert.match(await p.textContent("#set-saves-list"), /清除「probe」的 .+ 存档？不能撤销。/);
   await p.click("#set-saves-del-0 .btn:not(.ghost)");
   await until(async () => (await getDoc(SAVE)) === null, "the save to be cleared");
   assert.match(await p.textContent("#toast"), /存档已清除/);
@@ -369,6 +371,7 @@ test("removing an app keeps its save; Settings clears it; a damaged save is repo
   await p.waitForSelector("#set-saves-list li");
   assert.match(await p.textContent("#set-saves-list"), /读不出来/);
   await p.click("#set-saves-all");
+  assert.match(await p.textContent("#set-saves-all-wrap .btn:not(.ghost)"), /^清除全部 1 个（.+），不能撤销$/);
   await p.click("#set-saves-all-wrap .btn:not(.ghost)");
   await until(async () => (await getDoc(SAVE)) === null, "the damaged save to be cleared");
   assert.match(await p.textContent("#toast"), /全部程序存档已清除/);
@@ -424,6 +427,67 @@ test("store: category filters split the catalogue, and one button updates every 
   await p.waitForFunction(() => [...document.querySelectorAll("#store-list .store-item")]
     .some((x) => x.textContent.includes("纸塔") && x.querySelector("button").textContent === "打开"), null, { timeout: 15000 });
   assert.equal(await p.evaluate(() => document.getElementById("v-store").scrollTop), scrolled, "the list stays where it was");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("store: 停止 ends an update that never answers, and an app removed while its update downloads stays removed", { skip, timeout: 90000 }, async (t) => {
+  /* no service worker, so the route below sees the store's download */
+  const { p, errors } = await page(t, { locale: "zh-CN", serviceWorkers: "block" });
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
+  const doc = (path) => p.evaluate((path) => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => { const get = req.result.transaction("docs").objectStore("docs").get(path);
+      get.onsuccess = () => { req.result.close(); resolve(get.result ? get.result.data : null); }; get.onerror = () => reject(get.error); };
+  }), path);
+  /* paint looks like an older build, so the store offers its update */
+  await p.evaluate(() => new Promise((resolve, reject) => {
+    const req = indexedDB.open("lopda");
+    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result, tx = db.transaction("docs", "readwrite"), store = tx.objectStore("docs");
+      const get = store.get("data/users/local/apps/items/paint");
+      get.onsuccess = () => { const v = get.result; v.data.sha256 = "old-paint"; store.put(v); };
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => reject(tx.error);
+    };
+  }));
+  /* paint's file never answers until released */
+  let release = null;
+  await p.route("**/registry/apps/paint/index.html*", (r) => new Promise((go) => { release = () => { go(); return r.continue(); }; }));
+  await p.reload({ waitUntil: "domcontentloaded" });
+  await p.waitForFunction(() => document.querySelectorAll("#home .app:not(.builtin)").length === 2);
+  await p.locator("#home .app.builtin", { hasText: "应用商店" }).click();
+  await p.waitForSelector("#store-list .store-item");
+  await p.waitForFunction(() => /1 个程序有新版本/.test(document.getElementById("store-updates").textContent));
+
+  /* issue #442: 全部更新 hangs on paint; 停止 gives it up and the store works again */
+  await p.locator("#store-updates .btn").click();
+  await p.waitForFunction(() => /更新中 1\/1/.test(document.getElementById("store-updates").textContent));
+  assert.equal(await p.locator("#store-updates .btn").innerText(), "停止");
+  await p.locator("#store-updates .btn").click();
+  await p.waitForFunction(() => /停了，更新了 0 个/.test(document.getElementById("toast").textContent));
+  await p.waitForFunction(() => { const b = document.querySelector("#store-updates .btn"); return b && b.textContent === "全部更新" && !b.disabled; });
+  assert.equal(await p.locator("#store-list .store-item button:disabled").count(), 0, "no entry stays grey");
+
+  /* issue #441: update paint from its entry, remove it while the file is on its way, then let the file arrive */
+  release = null;
+  await p.evaluate(() => {
+    const li = [...document.querySelectorAll("#store-list .store-item")].find((x) => x.textContent.includes("点阵画板"));
+    li.querySelector("button").click();
+  });
+  await until(p, async () => !!release, "the update's request");
+  await p.click("#home-key");
+  await p.locator("#home .app", { hasText: "点阵画板" }).click();
+  await p.click("#run-more"); await p.click("#run-del"); await p.click("#run-del-wrap .btn:not(.ghost)");
+  await until(p, async () => !(await doc("data/users/local/apps/items/paint")), "paint's removal");
+  await release();
+  await p.waitForFunction(() => /点阵画板 已卸载，这次更新没有装回去/.test(document.getElementById("toast").textContent), null, { timeout: 15000 });
+  await p.waitForTimeout(300);
+  assert.equal(await doc("data/users/local/apps/items/paint"), null, "the removal stands");
+  assert.equal(await doc("data/users/local/code/items/paint"), null, "no code was written back");
+  assert.equal(await p.locator("#home .app:not(.builtin)").count(), 1, "the home screen keeps it removed");
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -11080,6 +11144,21 @@ test("AI line: the model lists: search narrows OpenRouter's list; a DeepSeek lin
   await p.click("#set-ai-save");
   await p.waitForFunction((path) => LopdaPlatform.db.doc(path).get().then((s) => s.data().lines[0].model === "x/see-two"), AIDOC);
   assert.equal((await aiDoc(p)).lines[0].key, "sk-or-2222");
+
+  /* a new line: a key pasted before picking a model is still in its field after the pick (issue #415) */
+  await p.click("#set-ai-line-back");
+  await p.waitForFunction(() => !document.getElementById("set-ai-main").hidden);
+  await p.click("#set-ai-add-open");
+  await p.click("#set-ai-providers li[data-provider=openrouter]");
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  await p.fill("#set-ai-key", "sk-or-pasted-7777");
+  await p.click("#set-ai-model-pick");
+  await p.waitForFunction(() => document.querySelectorAll("#set-ai-model-list li").length === 4);
+  await p.locator("#set-ai-model-list li", { hasText: "See One" }).click();
+  await p.waitForFunction(() => !document.getElementById("set-ai-line").hidden);
+  assert.equal(await p.inputValue("#set-ai-model"), "x/see-one");
+  assert.equal(await p.inputValue("#set-ai-key"), "sk-or-pasted-7777", "the pasted key survives the pick");
+  assert.deepEqual((await aiDoc(p)).lines.length, 2, "nothing is added before 保存");
 
   /* DeepSeek: the rows are there but greyed until this line has a saved key */
   await p.click("#set-ai-line-back");

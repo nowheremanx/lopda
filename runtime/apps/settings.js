@@ -81,7 +81,7 @@ function renderSavesRow(){
     var total=0;
     list.forEach(function(x){ total+=x.size||0; });
     el.textContent=list.length?tr("set.saves.state",{n:list.length,size:sizeBytes(total)}):tr("set.saves.none");
-  },function(){ el.textContent=""; });
+  },function(e){ el.textContent=e && e.code==="nodb" ? tr("set.saves.nodb") : ""; });
 }
 function renderSaves(){
   var seq=++savesSeq, ul=$("set-saves-list"), sum=$("set-saves-summary"), wrap=$("set-saves-all-wrap");
@@ -103,21 +103,23 @@ function renderSaves(){
       t.appendChild(name); t.appendChild(tag); t.appendChild(meta); li.appendChild(t);
       var w=document.createElement("span"); w.id="set-saves-del-"+i; li.appendChild(w);
       ul.appendChild(li);
+      /* the armed row says which program, how much, and that it cannot be undone (issue #281) */
+      var plain=meta.textContent, ask=tr("saves.clearask",{name:x.name,size:sizeBytes(x.size)});
       LP.resetConfirm(w.id,"set-saves-del-btn-"+i,tr("saves.clear"),function(){
         LP.appSaves.clear(x.id).then(function(ok){
           if(ok){ toast(tr("saves.cleared")); sfx("ok"); renderSaves(); renderSavesRow(); }
           else { toast(tr("saves.clearfail")); sfx("err"); }
         },function(e){ toast(tr(e && e.code==="running"?"saves.running":"saves.clearfail")); sfx("err"); });
-      });
+      },null,function(on){ meta.textContent=on ? ask : plain; });
     });
     LP.resetConfirm("set-saves-all-wrap","set-saves-all",tr("saves.clearall"),function(){
       LP.appSaves.clearAll().then(function(ok){
         toast(tr(ok?"saves.clearedall":"saves.clearallfail")); sfx(ok?"ok":"err"); renderSaves(); renderSavesRow();
       },function(e){ toast(tr(e && e.code==="running"?"saves.running":"saves.clearallfail")); sfx("err"); });
-    });
-  },function(){
+    },tr("saves.clearallask",{n:list.length,size:sizeBytes(total)}));
+  },function(e){
     if(seq!==savesSeq) return;
-    sum.textContent=tr("saves.readfail"); ul.textContent=""; wrap.textContent="";
+    sum.textContent=tr(e && e.code==="nodb" ? "saves.nodb" : "saves.readfail"); ul.textContent=""; wrap.textContent="";
   });
 }
 
@@ -137,6 +139,9 @@ var AIFOCUS=0, AIFOCUSABLES=[];
 /* the line page's two model fields as typed (or picked) before 保存, and the line they belong to: a render must not
    throw an unsaved choice away, but opening another line must not keep it either */
 var AIM="", AIMIN=null, AIVM="", AIVMIN=null;
+/* the key field as typed before 保存, for the same line (or new line) only: picking a model from the list redraws the
+   line page, and a pasted key must survive that (issue #415). It lives in memory only, like the field itself. */
+var AIK=null, AIKIN=null;
 /* the model list page, which serves both fields: the provider's models, the search and the ring. OpenRouter's list is
    cached in a document of its own; the other providers' lists hold no prices and stay in memory for this session. */
 var SCORE_MODELS_CACHE=null, MODEL_MAX_ROWS=200;
@@ -449,14 +454,14 @@ function toggleAiLine(id,on){
 }
 function openAiLine(id){
   if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
-  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null;
+  AILINE=id; AIPROV=""; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null; AIK=AIKIN=null;
   aiPage("line"); renderAi(); sfx("tap");
 }
 /* a new line: nothing is added until 保存 */
 function openAiProvider(id){
   var p=window.LopdaAI.provider(id); if(!p) return;
   if(document.activeElement && /^(INPUT|TEXTAREA)$/.test(document.activeElement.nodeName)) document.activeElement.blur();
-  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null;
+  AILINE=""; AIPROV=id; AILINEMSG=""; AIDELARMED=false; AIMIN=null; AIVMIN=null; AIK=AIKIN=null;
   aiPage("line"); renderAi(); sfx("tap");
 }
 function openAiUse(use){ AIUSE=use; aiPage("use"); renderAi(); sfx("tap"); }
@@ -526,7 +531,8 @@ function renderAiLine(){
   var l=curLine(), prov=l ? lineProvider(l) : (AIPROV ? window.LopdaAI.provider(AIPROV) : null);
   $("set-ai-line-title").textContent=l ? lineName(l) : (prov ? (prov.name[aiLang()] || prov.name.en) : "");
   $("set-ai-key").placeholder=(l && l.key) ? tr("ai.key.saved",{key:l.key.slice(-4)}) : tr("ai.key.ph");
-  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=(l && l.key) ? KEPT : "";
+  if(AIKIN!==aiDraftOwner()) AIK=AIKIN=null;
+  if(document.activeElement!==$("set-ai-key")) $("set-ai-key").value=AIK ? AIK : (l && l.key) ? KEPT : "";
   if(AIMIN!==AILINE){ AIMIN=AILINE; AIM=l ? l.model : ""; }
   if(document.activeElement!==$("set-ai-model")) $("set-ai-model").value=AIM;
   $("set-ai-model").placeholder=prov ? prov.model : "";
@@ -640,13 +646,13 @@ function saveAi(){
   var vmodel=prov && prov.vision ? $("set-ai-vmodel").value.trim() : undefined;
   if(l){
     AL.edit(AI.st,l.id,key,model,vmodel); saveAiDoc(); AILINEMSG="";
-    AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id;
+    AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id; AIK=AIKIN=null;
     $("set-ai-key").blur(); aiChanged(); sfx("ok"); return;
   }
   if(!prov){ renderAi(); sfx("err"); return; }
   if(!key){ renderAi(tr("ai.nokey")); sfx("err"); return; }
   l=AL.add(AI.st,prov.id,key,model,Date.now(),vmodel || "");
-  AILINE=l.id; AIPROV=""; AILINEMSG=""; AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id;
+  AILINE=l.id; AIPROV=""; AILINEMSG=""; AIM=l.model || ""; AIMIN=l.id; AIVM=l.visionModel || ""; AIVMIN=l.id; AIK=AIKIN=null;
   $("set-ai-key").blur();
   saveAiDoc();
   aiChanged(); sfx("ok");
@@ -656,6 +662,12 @@ function saveAi(){
 $("set-ai-save").onclick=saveAi;
 $("set-ai-key").addEventListener("focus",function(){ if(this.value===KEPT) this.value=""; });
 $("set-ai-key").addEventListener("blur",function(){ var l=curLine(); if(!this.value && l && l.key) this.value=KEPT; });
+/* the line page's owner of a key draft: the saved line, or the provider of a line not yet added */
+function aiDraftOwner(){ return AILINE ? "line:"+AILINE : "new:"+AIPROV; }
+$("set-ai-key").addEventListener("input",function(){
+  var v=this.value.trim();
+  if(v && v!==KEPT){ AIK=this.value; AIKIN=aiDraftOwner(); } else AIK=AIKIN=null;
+});
 /* what is typed stays a draft until 保存, even when the line's status redraws the page; the pick rows follow it */
 $("set-ai-vmodel").addEventListener("input",function(){
   AIVM=this.value; AIVMIN=AILINE;
@@ -955,14 +967,21 @@ function closeBox(){ BS.busy=false; BS.backup=null; BS.file=null; $("set-backup-
 function okBox(msg,then){ BS.busy=false; box(msg,[{label:tr("bk.ok"), main:true, go:function(){ sfx("tap"); (then||closeBox)(); }}]); }
 
 /* a backup of `dump` (the current data unless given); `after(saved)` runs once it is saved (true) or cancelled or failed (false) */
+/* Gathering everything has no time limit (a big backup takes long), so the box offers 取消 meanwhile: a read that never
+   answers (iOS can leave IndexedDB requests unanswered, platform.js) must not leave 备份 and 恢复 grey for the session.
+   A cancelled read that answers late is ignored (issue #279). */
+var backupSeq=0;
 function startBackup(after,dump){
-  var done=after||closeBox, now=Date.now();
-  BS.busy=true; box(tr("bk.reading"));
+  var done=after||closeBox, now=Date.now(), seq=++backupSeq;
+  function live(){ return seq===backupSeq; }
+  BS.busy=true; box(tr("bk.reading"),[{label:tr("common.cancel"), go:function(){ sfx("tap"); backupSeq++; done(false); }}]);
   (dump ? Promise.resolve(dump) : P.dumpAll()).then(function(d){
+    if(!live()) return null;
     /* the backup carries its own time, so a restored handheld says when its data was saved */
     var docs=d.docs.filter(function(x){ return x.path!==BMETA && x.path!==AIP && x.path!==SCORE_MODELS_PATH && x.path!==P.restorePath; }).concat([{path:BMETA, data:{last:now}}]);
     return BK.pack({docs:docs, files:d.files},{runtime:RUNTIME_VERSION, now:now});
   }).then(function(pk){
+    if(!pk || !live()) return;
     box(tr("bk.ready",{size:sizeText(pk.size)}),[
       {label:tr("bk.save"), main:true, go:function(){
         var blob=new Blob(ZIP.writeParts(pk.entries),{type:"application/zip"});
@@ -974,13 +993,16 @@ function startBackup(after,dump){
       {label:tr("common.cancel"), go:function(){ sfx("tap"); done(false); }}
     ],pk.size>BIG ? tr("bk.big") : "");
   }).catch(function(e){
+    if(!live()) return;
     if(window.console) console.error("Lo-PDA backup failed", e);
     sfx("err"); okBox(tr(e && e.code==="toolarge" ? "bk.toolarge" : "bk.failed"),after ? function(){ after(false); } : null);
   });
 }
-$("set-backup-go").onclick=function(){ if(!BS.busy && S.db){ sfx("tap"); startBackup(); } };
+/* without storage there is nothing to back up and nowhere to restore to: say so instead of doing nothing (issue #280) */
+function noStore(){ if(S.db) return false; sfx("err"); okBox(tr("bk.nodb")); return true; }
+$("set-backup-go").onclick=function(){ if(BS.busy || noStore()) return; sfx("tap"); startBackup(); };
 
-$("set-restore-go").onclick=function(){ if(!BS.busy && S.db){ sfx("tap"); $("set-restore-file").click(); } };
+$("set-restore-go").onclick=function(){ if(BS.busy || noStore()) return; sfx("tap"); $("set-restore-file").click(); };
 $("set-restore-file").onchange=function(){
   var f=this.files && this.files[0]; this.value="";
   if(!f || BS.busy) return;
