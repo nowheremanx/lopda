@@ -201,7 +201,8 @@ function gbShowLib(){
 }
 function cartLayout(){
   var cv=$("cart-cv"), box=$("cart-play"); if(box.hidden) return;
-  var msg=$("cart-msg"), knob=$("cart-speed"), w=box.clientWidth-16,
+  /* the 3 px frame is outside the picture (content-box), so the picture itself keeps whole pixels */
+  var msg=$("cart-msg"), knob=$("cart-speed"), w=box.clientWidth-16-6,
     h=box.clientHeight-16-(msg.offsetHeight ? msg.offsetHeight+8 : 0)-(knob.offsetHeight ? knob.offsetHeight+8 : 0)-6;
   /* every game pixel gets the same whole number of screen pixels, so the picture stays crisp */
   var dpr=window.devicePixelRatio||1, fit=Math.min(w/160,h/144), k=Math.floor(fit*dpr)/dpr;
@@ -249,7 +250,7 @@ function gbStart(c,rom,save){
   GB.timer=setInterval(function(){ if(gbRamDue()) gbSaveSram(); },1500);
   $("cart-lib").hidden=true; $("cart-play").hidden=false; $("cart-tools").hidden=false; $("v-cart").classList.add("locked"); $("v-cart").scrollTop=0;
   $("cart-title").textContent=c.name; $("cart-state").textContent="";
-  resetCartLoad(); showPad(true); cartLayout();
+  resetCartLoad(); resetCartEject(); showPad(true); cartLayout();
   c.played=Date.now(); if(S.db) put(S.refs.carts.doc(c.id),(function(){ var o={}; for(var k in c) if(k!=="id"&&k!=="mem") o[k]=c[k]; return o; })());
   GB.raf=requestAnimationFrame(gbFrame);
   LP.claimAudio("cart");   /* the radio stops for a game's sound */
@@ -323,7 +324,13 @@ function gbSpeed(t){
 $("cart-slower").onclick=function(){ if(GB.e) gbSpeed(GB.tenths-1); };
 $("cart-faster").onclick=function(){ if(GB.e) gbSpeed(GB.tenths+1); };
 $("cart-rate").onclick=function(){ if(GB.e) gbSpeed(10); };
-$("cart-eject").onclick=function(){ GB.launch++; gbStop(); gbShowLib(); renderCarts(); };
+/* ejecting ends the game: everything since the last save inside the game goes, so it asks first, like 读档 (issue #299) */
+function resetCartEject(){ var b=$("cart-eject"); delete b.dataset.armed; b.textContent=tr("cart.eject"); }
+$("cart-eject").onclick=function(){
+  var b=this;
+  if(GB.e && !b.dataset.armed){ b.dataset.armed="1"; b.textContent=tr("cart.ejectgo"); sfx("tap"); setTimeout(function(){ if(b.dataset.armed) resetCartEject(); },3000); return; }
+  resetCartEject(); GB.launch++; gbStop(); gbShowLib(); renderCarts();
+};
 $("cart-save").onclick=function(){
   if(!GB.e) return;
   var m=GB.mod, s=gbWithFile(m._state_file_data_new(GB.e),function(fd,buf){ m._emulator_write_state(GB.e,fd); return b64(buf); });
