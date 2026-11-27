@@ -1,9 +1,9 @@
 /*
- * lo-3d.js 1.1.0, a small software 3D renderer for Lo-PDA apps.
+ * lo-3d.js 1.2.0, a small software 3D renderer for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library, like lo-game.js: an app carries its own copy inside a script tag
- * marked data-lo-3d="1.1.0", and `node tools/bundle-app.mjs registry/apps/<id>` fills it in.
+ * marked data-lo-3d="1.2.0", and `node tools/bundle-app.mjs registry/apps/<id>` fills it in.
  * Do not edit the copy inside an app; the checker verifies it.
  *
  * Pipeline: triangles and billboard sprites are rasterised into a luminance buffer with a
@@ -12,12 +12,14 @@
  * ({w, h, px}), so a lo-game app draws it with g.sprite(r.image, 0, 0).
  * 1.1.0 adds fixed tones and screen-door transparency (draw and sprite options tone, alpha), the mesh
  * builder (tri, quad, box, cone, roof, tube, ribbon), ground shadows, R.lookAt and whole-number sprite scales.
+ * 1.2.0 adds r.band: surfaces shade in flat tone bands, dithered only near each band's edge; the
+ * background (pixels no surface covered) keeps the full dither.
  * Reference: sdk/LO-3D.md
  */
 var Lo3D = (function () {
   "use strict";
 
-  var VERSION = "1.1.0";
+  var VERSION = "1.2.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   /* screen-door transparency: the same 16 levels as BAYER with the 2x2 levels swapped, so the pixels a
@@ -208,6 +210,8 @@ var Lo3D = (function () {
       lights: [],        /* point lights: {x, y, z, radius, power} */
       fog: null,         /* {near, far, lum}: surfaces fade to lum between the two view depths */
       focus: null,       /* {near, far}: outside these view depths the dither is twice as coarse */
+      band: 1,           /* surfaces only: 1 dithers the whole ramp between two tones; 0.25 shades flat bands and
+                            dithers only a quarter of each step, at its edge (less grain); 0 is no dither at all */
       stats: { tris: 0 }
     };
     var cam, cy, sy, cp, sp, F, near, fog, fNear, fSpan, fLum;
@@ -406,7 +410,7 @@ var Lo3D = (function () {
     var acc = new Float32Array(N);
     r.present = function () {
       begin();
-      var i, x, y, k, foc = r.focus, lit = false, hw = W / 2, hh = H / 2;
+      var i, x, y, k, foc = r.focus, band = r.band == null ? 1 : Math.max(0, Math.min(1, r.band)), lit = false, hw = W / 2, hh = H / 2;
       /* each point light only visits the pixels inside its sphere's screen rectangle */
       if (alb && r.lights.length) {
         acc.fill(0);
@@ -436,7 +440,9 @@ var Lo3D = (function () {
         var l = lum[k], z = depth[k];
         if (lit && acc[k]) l += alb[k] * acc[k] * (fog ? 1 - Math.min(1, Math.max(0, (z - fNear) / fSpan)) : 1);
         var coarse = foc && z < FAR && (z < foc.near || z > foc.far);
-        var lv = coarse ? l * 3 + THR[((y >> 1) & 3) * 4 + ((x >> 1) & 3)] - 0.5 : l * 3 + THR[(y & 3) * 4 + (x & 3)] - 0.5;
+        var th = coarse ? THR[((y >> 1) & 3) * 4 + ((x >> 1) & 3)] : THR[(y & 3) * 4 + (x & 3)];
+        if (band !== 1 && z < FAR) th = 0.5 + (th - 0.5) * band;
+        var lv = l * 3 + th - 0.5;
         px[k] = lv < 0.5 ? 0 : lv < 1.5 ? 1 : lv < 2.5 ? 2 : 3;
       }
       return r.image;

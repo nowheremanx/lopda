@@ -9,7 +9,7 @@
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:monospace;color:#1f2a14;touch-action:none;user-select:none;-webkit-user-select:none}
 /* tight, even spacing: the fixed tool rows leave 202 px of canvas at 331x359, in both languages */
-#app{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:4px 8px;gap:4px}
+#app{position:relative;display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:4px 8px;gap:4px}
 #bar{display:flex;justify-content:space-between;align-items:baseline;font-size:15px;line-height:1.2;font-weight:bold}
 #state{font-size:13px;font-weight:normal}
 #stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
@@ -29,11 +29,19 @@ button{box-sizing:border-box;font-family:monospace;font-size:13px;font-weight:bo
 button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
 button.ghost{background:transparent;color:#1f2a14;box-shadow:none}
 button.sw{width:100%;height:44px;padding:0;box-shadow:none}
-button.sw[aria-checked="true"],#t0 button[aria-pressed="true"]{outline:3px solid #1f2a14;outline-offset:2px}
+button.sw[aria-checked="true"]{outline:3px solid #1f2a14;outline-offset:2px}
 #sw0{background:#1f2a14}#sw1{background:#4a5a32}#sw2{background:#7d8a58}#sw3{background:#a3ad7e}
-/* the confirmation takes its own two cells, while Undo and Redo stay where they were */
-#ask{display:contents}
-#yes{grid-column:span 2}
+#tool{grid-column:span 2}
+#more{font-size:20px}
+/* the two pop-up menus: a column of 44 px rows that opens just above the bottom row, over the canvas.
+   A tap anywhere outside closes it (the clear layer under it catches that tap, so it draws nothing). */
+#scrim{position:absolute;inset:0;z-index:1}
+.pop{position:absolute;z-index:2;display:flex;flex-direction:column;gap:8px;padding:8px;background:#a3ad7e;border:2px solid #1f2a14;box-shadow:4px 4px 0 #1f2a14}
+.pop button{text-align:left;padding:0 10px}
+/* the tool menu is two columns, so it covers less of the picture; the mirror switch takes a whole row */
+#toolpop{left:8px;width:220px;display:grid;grid-template-columns:1fr 1fr}
+#tmir{grid-column:span 2}
+#morepop{right:8px;width:150px}
 #msg{min-height:15px;font-size:13px;line-height:15px;text-align:center}
 .hide{display:none!important}
 </style>
@@ -43,14 +51,6 @@ button.sw[aria-checked="true"],#t0 button[aria-pressed="true"]{outline:3px solid
 <div id="bar"><span><span id="title">点阵画板</span> · <button id="sheet">1/6</button></span><span id="state">96×96 · 4 色</span></div>
 <div id="stage"><div id="wrap"><canvas id="cv" width="96" height="96"></canvas><div id="guide" class="hide"></div></div></div>
 <div id="msg"></div>
-<!-- the tool row takes the colour row's place while it is open -->
-<div class="tools hide" id="t0">
-<button class="ghost" id="tpen" aria-pressed="true"></button>
-<button class="ghost" id="tline" aria-pressed="false"></button>
-<button class="ghost" id="tbox" aria-pressed="false"></button>
-<button class="ghost" id="tfill" aria-pressed="false"></button>
-<button class="ghost" id="tmir" aria-pressed="false"></button>
-</div>
 <div class="tools" id="t1">
 <button class="sw" id="sw0" data-c="0" role="radio" aria-checked="true"></button>
 <button class="sw" id="sw1" data-c="1" role="radio" aria-checked="false"></button>
@@ -59,12 +59,25 @@ button.sw[aria-checked="true"],#t0 button[aria-pressed="true"]{outline:3px solid
 <button class="ghost" id="size"></button>
 </div>
 <div class="tools" id="t2">
+<button class="ghost" id="tool" aria-haspopup="true"></button>
 <button class="ghost" id="undo"></button>
 <button class="ghost" id="redo"></button>
+<button class="ghost" id="more" aria-haspopup="true">⋯</button>
+</div>
+<div id="scrim" class="hide"></div>
+<!-- the tool menu: four tools (the one in hand is filled) and the mirror switch -->
+<div class="pop hide" id="toolpop">
+<button class="ghost" id="tpen"></button>
+<button class="ghost" id="tline"></button>
+<button class="ghost" id="tbox"></button>
+<button class="ghost" id="tfill"></button>
+<button class="ghost" id="tmir"></button>
+</div>
+<!-- the rarer actions: files and clear (clear asks for a second tap, in place) -->
+<div class="pop hide" id="morepop">
 <button class="ghost" id="imp"></button>
-<button id="exp"></button>
+<button class="ghost" id="exp"></button>
 <button class="ghost" id="clr"></button>
-<span id="ask" class="hide"><button id="yes"></button><button class="ghost" id="no"></button></span>
 </div>
 </div>
 <script>
@@ -73,15 +86,15 @@ button.sw[aria-checked="true"],#t0 button[aria-pressed="true"]{outline:3px solid
 /* two languages from PAD.lang; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=="undefined"&&PAD.lang==="en")?"en":"zh";
 var TXT={
-  zh:{title:"点阵画板",fine:"细",bold:"粗",undo:"撤销",redo:"重做",imp:"导入",exp:"导出",clr:"清空",yes:"确认清空",no:"取消",
+  zh:{title:"点阵画板",fine:"细",bold:"粗",undo:"撤销",redo:"重做",imp:"导入",exp:"导出",clr:"清空",yes:"确认清空",
       noundo:"没有可以撤销的了。",noredo:"没有可以重做的了。",imported:"已转成 96×96 四色点阵。",badimg:"这张图读不出来，换一张试试。",
       exported:"导出好了。",fail:"文件操作失败。",saving:"保存中…",saved:"96×96 · 已保存",ink:"墨",dark:"深",mid:"浅",paper:"底色（橡皮）",
-      pen:"笔",line:"线",box:"框",fill:"桶",mirror:"镜",mirOn:"镜像开：左右两边一起画。",mirOff:"镜像关了。",
+      pen:"笔",line:"直线",box:"方框",fill:"油漆桶",mirOnL:"镜像：开",mirOffL:"镜像：关",more:"更多",mirOn:"镜像开：左右两边一起画。",mirOff:"镜像关了。",
       sheetAria:"换下一张",sheetN:"第 {n} 张",readFail:"这张读不出来，先画别的几张。"},
-  en:{title:"Paint",fine:"Fine",bold:"Bold",undo:"Undo",redo:"Redo",imp:"Import",exp:"Export",clr:"Clear",yes:"Clear it",no:"Cancel",
+  en:{title:"Paint",fine:"Fine",bold:"Bold",undo:"Undo",redo:"Redo",imp:"Import",exp:"Export",clr:"Clear",yes:"Clear it",
       noundo:"Nothing to undo.",noredo:"Nothing to redo.",imported:"Turned into 96×96, four tones.",badimg:"Can't read that image. Try another.",
       exported:"Exported.",fail:"File action failed.",saving:"Saving…",saved:"96×96 · saved",ink:"Ink",dark:"Dark",mid:"Light",paper:"Paper (eraser)",
-      pen:"Pen",line:"Line",box:"Box",fill:"Fill",mirror:"Mirror",mirOn:"Mirror on: both halves at once.",mirOff:"Mirror off.",
+      pen:"Pen",line:"Line",box:"Box",fill:"Fill",mirOnL:"Mirror: on",mirOffL:"Mirror: off",more:"More",mirOn:"Mirror on: both halves at once.",mirOff:"Mirror off.",
       sheetAria:"Next sheet",sheetN:"Sheet {n}",readFail:"Can't read this sheet. Draw on another one."}
 }[LANG];
 function $(id){return document.getElementById(id);}
@@ -104,24 +117,20 @@ var cv=$("cv"), ctx=cv.getContext("2d"), img=ctx.createImageData(W,W);
 document.title=TXT.title; document.documentElement.lang=LANG;
 $("title").textContent=TXT.title; $("undo").textContent=TXT.undo; $("redo").textContent=TXT.redo;
 $("imp").textContent=TXT.imp; $("exp").textContent=TXT.exp; $("clr").textContent=TXT.clr;
-$("yes").textContent=TXT.yes; $("no").textContent=TXT.no;
-$("tline").textContent=TXT.line; $("tbox").textContent=TXT.box; $("tfill").textContent=TXT.fill; $("tmir").textContent=TXT.mirror;
+$("tpen").textContent=TXT.pen; $("tline").textContent=TXT.line; $("tbox").textContent=TXT.box; $("tfill").textContent=TXT.fill;
+$("more").setAttribute("aria-label",TXT.more);
 $("sheet").setAttribute("aria-label",TXT.sheetAria);
 ["ink","dark","mid","paper"].forEach(function(k,i){ $("sw"+i).setAttribute("aria-label",TXT[k]); });
 $("state").textContent="96×96 · 4 "+(LANG==="en"?"tones":"色");
 
-/* the pen's name carries its width; line and box take the same width, so their names do too.
-   zh: 细笔 粗笔 细线 粗框 ...; en: Pen 1, Box 3 ... (fits the 5-column cell at 331 px) */
-function toolName(t){
-  if(t==="fill") return TXT.fill;
-  if(LANG==="en") return TXT[t]+" "+size;
-  return (size===1?TXT.fine:TXT.bold)+TXT[t];
-}
+/* the bottom-left button names the tool in hand; the triangle says it opens a menu.
+   The width button (细 / 粗) sits with the colours and serves the pen, the line and the box. */
 function toolLabels(){
-  $("size").textContent=toolName(tool);
-  $("tpen").textContent=LANG==="en"?TXT.pen+" "+size:(size===1?TXT.fine:TXT.bold)+TXT.pen;
-  ["pen","line","box","fill"].forEach(function(t){ $("t"+t).setAttribute("aria-pressed",t===tool?"true":"false"); });
-  $("tmir").setAttribute("aria-pressed",mirror?"true":"false");
+  $("tool").textContent=TXT[tool]+" \u25B2";
+  $("size").textContent=size===1?TXT.fine:TXT.bold;
+  ["pen","line","box","fill"].forEach(function(t){ $("t"+t).classList.toggle("ghost",t!==tool); });
+  $("tmir").textContent=mirror?TXT.mirOnL:TXT.mirOffL;
+  $("tmir").classList.toggle("ghost",!mirror);
   $("guide").classList.toggle("hide",!mirror);
 }
 toolLabels();
@@ -192,7 +201,6 @@ function shape(p){
 }
 cv.addEventListener("pointerdown",function(ev){
   ev.preventDefault();
-  showTools(false);
   if(!ready || drawing) return;
   try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
   var p=pos(ev);
@@ -223,17 +231,27 @@ Array.prototype.forEach.call(document.querySelectorAll(".sw"),function(b){
     Array.prototype.forEach.call(document.querySelectorAll(".sw"),function(o){ o.setAttribute("aria-checked",o===b?"true":"false"); });
   };
 });
-/* the tool button swaps the colour row for the tool row; picking a tool swaps it back */
-function showTools(on){ $("t0").classList.toggle("hide",!on); $("t1").classList.toggle("hide",on); }
-$("size").onclick=function(){ showTools(true); };
+$("size").onclick=function(){ size=size===1?3:1; toolLabels(); };
+
+/* ---------- the two menus ---------- */
+function closeMenus(){
+  ["toolpop","morepop","scrim"].forEach(function(id){ $(id).classList.add("hide"); });
+  $("clr").textContent=TXT.clr; clearArmed=false;
+}
+function openMenu(id){
+  closeMenus();
+  /* open just above the bottom row, whatever the screen's height */
+  var t2=$("t2"), app=$("app");
+  $(id).style.bottom=(app.clientHeight-t2.offsetTop+8)+"px";
+  $("scrim").classList.remove("hide"); $(id).classList.remove("hide");
+}
+$("scrim").addEventListener("pointerdown",function(ev){ ev.preventDefault(); closeMenus(); });
+$("tool").onclick=function(){ if($("toolpop").classList.contains("hide")) openMenu("toolpop"); else closeMenus(); };
+$("more").onclick=function(){ if($("morepop").classList.contains("hide")) openMenu("morepop"); else closeMenus(); };
 ["pen","line","box","fill"].forEach(function(t){
-  $("t"+t).onclick=function(){
-    /* the tool already in hand: tap it again for the other width */
-    if(t===tool && t!=="fill") size=size===1?3:1;
-    tool=t; toolLabels(); showTools(false);
-  };
+  $("t"+t).onclick=function(){ tool=t; toolLabels(); closeMenus(); };
 });
-$("tmir").onclick=function(){ mirror=!mirror; toolLabels(); showTools(false); say(mirror?TXT.mirOn:TXT.mirOff); };
+$("tmir").onclick=function(){ mirror=!mirror; toolLabels(); closeMenus(); say(mirror?TXT.mirOn:TXT.mirOff); };
 
 $("undo").onclick=function(){
   var prev=undo.pop();
@@ -245,11 +263,14 @@ $("redo").onclick=function(){
   if(!next){ say(TXT.noredo); return; }
   capPush(undo,px.slice()); px=next; render(); saveSoon();
 };
-/* clear needs two taps and no confirm(), which sandboxed apps cannot call */
-function asking(on){ $("clr").classList.toggle("hide",on); $("imp").classList.toggle("hide",on); $("exp").classList.toggle("hide",on); $("ask").classList.toggle("hide",!on); }
-$("clr").onclick=function(){ asking(true); };
-$("no").onclick=function(){ asking(false); };
-$("yes").onclick=function(){ asking(false); if(!ready) return; pushUndo(); px=new Uint8Array(W*W).fill(3); render(); saveSoon(); };
+/* clear needs two taps and no confirm(), which sandboxed apps cannot call: the first turns the row into
+   the question, the second clears; closing the menu takes the question back */
+var clearArmed=false;
+$("clr").onclick=function(){
+  if(!clearArmed){ clearArmed=true; $("clr").textContent=TXT.yes; return; }
+  closeMenus(); if(!ready) return;
+  pushUndo(); px=new Uint8Array(W*W).fill(3); render(); saveSoon();
+};
 
 /* ---------- persistence ----------
    Each sheet is its 9216 pixels as a digit string under one PAD key: sheet 1 is "px" (the key every
@@ -336,7 +357,7 @@ function fromImage(im){
   }
   render(); saveSoon(); say(TXT.imported);
 }
-$("imp").onclick=importImage;
+$("imp").onclick=function(){ closeMenus(); importImage(); };
 
 /* PAD.exportFile({name, type, data}) -> Promise<"saved" | "cancelled">
    data is a data: URL (binary files such as this PNG) or plain text. Say nothing on "cancelled". */
@@ -355,7 +376,7 @@ function exportPng(){
     if(r==="saved") say(TXT.exported);
   }).catch(function(){ say(TXT.fail); });
 }
-$("exp").onclick=exportPng;
+$("exp").onclick=function(){ closeMenus(); exportPng(); };
 
 })();
 </script>

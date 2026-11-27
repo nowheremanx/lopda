@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-26",
+  "generated": "2026-11-27",
   "apps": [
     {
       "spec": "lopda/1",
@@ -143,8 +143,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "c7f113b2f1c0250ffe547f56e4041251aa9327d3ee8c92c3da01f472a023d1f8",
-      "bytes": 299676
+      "sha256": "79134c20f32ffdf172e68de36b3bbc90ff502be32768b7a6f0fa4a19910ea94d",
+      "bytes": 300203
     },
     {
       "spec": "lopda/1",
@@ -567,18 +567,18 @@
         "0333112033333330",
         "0000000000000000"
       ],
-      "version": "1.2.0",
+      "version": "2.0.0",
       "released": "2026-10-16",
-      "updated": "2026-11-24",
-      "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。",
+      "updated": "2026-11-26",
+      "description": "倾斜机身让小钢珠滚过花园、地窖和钟楼十二关：捡宝石、点亮存档点、绕开慢吞吞的甲虫，别掉进洞。也能用方向键推。",
       "i18n": {
         "zh": {
           "name": "滚珠迷宫",
-          "description": "倾斜机身让小钢珠滚到终点，别掉进洞。也能用方向键推。倾斜感应的示范。"
+          "description": "倾斜机身让小钢珠滚过花园、地窖和钟楼十二关：捡宝石、点亮存档点、绕开慢吞吞的甲虫，别掉进洞。也能用方向键推。"
         },
         "en": {
           "name": "Marble",
-          "description": "Tilt to roll the ball home past the holes, or push it with the D-pad."
+          "description": "Roll the ball through garden, cellar and clock tower: gems, holes, slow beetles."
         }
       },
       "author": "Haowei Wu",
@@ -587,8 +587,8 @@
         "motion"
       ],
       "path": "apps/tilt-maze/index.html",
-      "sha256": "4881df9acef3c933aa92700b48686eff546ae779f615407693870e38ffdd2198",
-      "bytes": 67313
+      "sha256": "405259f27e6f956383d159bdc779d84532fe20e5a68aafb59bce1e64b5d0af68",
+      "bytes": 96662
     },
     {
       "spec": "lopda/1",
@@ -763,8 +763,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "eb29838dc7ba485620993940a71bdde3ab482127d70c5498a0e694f185e4222d",
-      "bytes": 18918
+      "sha256": "ddf6c0452f9757e1419ab65ed94f791891fa2026fd3bf0c954a22c2c3bbb4d74",
+      "bytes": 20003
     },
     {
       "spec": "lopda/1",
@@ -791,9 +791,9 @@
         "................",
         "................"
       ],
-      "version": "0.3.0",
+      "version": "0.4.1",
       "released": "2026-10-08",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "手写的软件三维渲染：环结、飞越山地、晶体。方向键转视角，A 换场景，B 线框。",
       "i18n": {
         "en": {
@@ -804,8 +804,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "c11d5a0949676d87d4b2747c62eb459a7050eafb65a3b2628051bf178ab13265",
-      "bytes": 44312
+      "sha256": "fa860ba9cdc13b03fc6d11a1cae61fc24fe655de1ab0c2aaba34bd3bd417fdd8",
+      "bytes": 45214
     },
     {
       "spec": "lopda/1",
