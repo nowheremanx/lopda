@@ -524,13 +524,18 @@ var loadComplete = false, loadFailed = false, slipScroll = 0, appendBusy = false
 var REDUCED_MOTION = typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 var SECTIONS = [
+  { id: "almanac", name: T({ zh: "老黄历", en: "Almanac" }) },
   { id: "fortune", name: T({ zh: "每日一签", en: "Fortune" }) },
   { id: "compass", name: T({ zh: "罗盘", en: "Compass" }) }
 ];
 var counterCursor = 0;
+var almanacOffset = 0, almanacScroll = 0, almanacTear = 0, almanacTearDir = 1;
+var almanacGodsLine = -1, almanacGodsLineCount = 0, almanacGodsFocused = false;
+var almanacRowIndents = [];
 var WEEK_ZH = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 var WEEK_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 var MONTH_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+var ZODIAC_EN = ["Rat", "Ox", "Tiger", "Rabbit", "Dragon", "Snake", "Horse", "Goat", "Monkey", "Rooster", "Dog", "Pig"];
 
 function pad2(n) { return n < 10 ? "0" + n : String(n); }
 function todayKey() {
@@ -633,12 +638,22 @@ function appendSlip() {
   });
 }
 function openSection(id) {
-  if (id !== "counter" && id !== "compass" && id !== "fortune") return;
+  if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac") return;
   game.go(id, null, { fade: false });
 }
 function backToCounter() { openSection("counter"); }
 function sectionSummary(id) {
   syncSlipDate();
+  if (id === "almanac") {
+    var today = new Date(), a = ALMANAC.day(today.getFullYear(), today.getMonth() + 1, today.getDate());
+    var yi = a.yi, ji = a.ji, zh = game.lang !== "en";
+    var full = (zh ? "宜 " : "Do ") + yi.slice(0, 2).join(" ") +
+      (zh ? " · 忌 " : " · Avoid ") + ji.slice(0, 2).join(" ");
+    if (game.g.measure(full) <= 134) return full;
+    var shortLine = (zh ? "宜 " : "Do ") + (yi[0] || "无") +
+      (zh ? " · 忌 " : " · Avoid ") + (ji[0] || "无");
+    return game.g.measure(shortLine) <= 134 ? shortLine : fitSummary(shortLine, 134);
+  }
   if (id === "fortune") {
     if (!loadComplete) return "…";
     if (slipState.slip === null) return T({ zh: "未抽", en: "Not drawn" });
@@ -650,32 +665,204 @@ function sectionSummary(id) {
   var now = new Date(), p = LUCK.pillar(now.getFullYear(), now.getMonth() + 1, now.getDate()), gods = LUCK.gods(p.stem);
   return GODS[0].name + " " + dirName(gods.xi);
 }
+function fitSummary(text, max) {
+  max = max || 200;
+  var value = String(text);
+  while (value.length > 1 && game.g.measure(value) > max) value = value.substring(0, value.length - 2) + "…";
+  return value;
+}
 function updateCounter() {
   var p = game.pointer, i;
   if (game.pressed("up")) { counterCursor = (counterCursor + SECTIONS.length - 1) % SECTIONS.length; sfx("move"); }
   if (game.pressed("down")) { counterCursor = (counterCursor + 1) % SECTIONS.length; sfx("move"); }
   if (p.pressed) {
-    i = Math.floor((p.y - 58) / 55);
+    i = Math.floor((p.y - 43) / 34);
     if (i >= 0 && i < SECTIONS.length) { counterCursor = i; openSection(SECTIONS[i].id); sfx("tap"); return; }
   }
   if (game.pressed("a")) { sfx("tap"); openSection(SECTIONS[counterCursor].id); }
 }
 function drawCounter(g) {
   g.clear(g.PAPER);
-  g.rect(0, 0, W, 42, g.INK);
-  g.text(T({ zh: "玄机阁", en: "Oracle" }), CX, 3, { align: "center", color: g.PAPER });
-  g.text(T({ zh: "旧历书上的说法，图个吉利", en: "Old almanac lore, just for luck." }),
-    CX, 23, { align: "center", color: g.PAPER });
+  g.rect(0, 0, W, 38, g.INK);
+  g.text(T({ zh: "玄机阁", en: "Oracle" }), CX, 9, { align: "center", color: g.PAPER });
   for (var i = 0; i < SECTIONS.length; i++) {
-    var y = 58 + i * 55;
-    if (i === counterCursor) g.rect(7, y - 5, 202, 43, g.MID);
-    g.text(i === counterCursor ? "›" : " ", 11, y + 1, { color: g.INK });
-    g.text(SECTIONS[i].name, 27, y + 1, { color: g.INK });
-    g.text(sectionSummary(SECTIONS[i].id), 27, y + 20, { color: g.DARK });
-    g.line(8, y + 45, 208, y + 45, g.DARK);
+    var y = 43 + i * 34, summary = fitSummary(sectionSummary(SECTIONS[i].id), 134);
+    if (i === counterCursor) g.rect(6, y - 2, 204, 31, g.INK);
+    g.text(i === counterCursor ? "›" : " ", 8, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
+    g.text(SECTIONS[i].name, 21, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
+    g.text(summary, 74, y + 7, { color: i === counterCursor ? g.PAPER : g.INK });
+    g.line(8, y + 31, 208, y + 31, g.DARK);
   }
   g.text(T({ zh: "↑↓ 选 · A 进入", en: "↑↓ pick · A open" }), CX, 218,
     { align: "center", color: g.INK });
+}
+
+function almanacDate() {
+  var now = new Date(), d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + almanacOffset, 12);
+  return { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), week: d.getDay() };
+}
+function almanacLunarText(lunar) {
+  if (!lunar) return "农历日期不可用";
+  var months = ["正", "二", "三", "四", "五", "六", "七", "八", "九", "十", "冬", "腊"];
+  var day = lunar.day, days = ["初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十"];
+  var dayText;
+  if (day <= 10) dayText = days[day - 1];
+  else if (day <= 19) dayText = "十" + "一二三四五六七八九".charAt(day - 11);
+  else if (day === 20) dayText = "二十";
+  else if (day < 30) dayText = "廿" + "一二三四五六七八九".charAt(day - 21);
+  else dayText = "三十";
+  return "农历" + (lunar.leap ? "闰" : "") + months[lunar.month - 1] + "月" + dayText;
+}
+function fitPageText(g, text, width) {
+  var out = String(text), max = width || 192;
+  while (out.length > 1 && g.measure(out) > max) out = out.substring(0, out.length - 2) + "…";
+  return out;
+}
+function pageLines(g, dt, info) {
+  var lunar = info.lunar, p = info.pillars, monthName = ALMANAC.name(p.month), dayName = ALMANAC.name(p.day);
+  var rows = [], rowIndents = [], keepWhole = [], i, lines, line;
+  function addRow(text, indent, keep) {
+    rows.push(text);
+    rowIndents.push(indent || 0);
+    keepWhole.push(!!keep);
+  }
+  function addActivities(label, terms) {
+    var indent = g.measure(label + " "), current = label + " ", hasTerm = false, offset = 0, term, candidate;
+    if (!terms.length) terms = ["无"];
+    for (var k = 0; k < terms.length; k++) {
+      term = terms[k];
+      candidate = current + (hasTerm ? " " : "") + term;
+      if (g.measure(candidate) <= 192 - offset) {
+        current = candidate;
+        hasTerm = true;
+      } else {
+        if (hasTerm) addRow(current, offset, true);
+        current = term;
+        offset = indent;
+        hasTerm = true;
+      }
+    }
+    addRow(current, offset, true);
+  }
+  if (game.lang === "en") {
+    addRow(lunar ? "Lunar " + (lunar.leap ? "leap " : "") + lunar.month + "/" + lunar.day : "Lunar date unavailable");
+    addRow("Pillars " + ALMANAC.name(p.year) + "年 " + monthName + "月 " + dayName + "日");
+    addRow("Zodiac " + ZODIAC_EN[p.year % 12]);
+    addRow(info.term >= 0 ? ALMANAC.TERM_NAMES[info.term] :
+      info.nextTerm.days + " days to " + (info.nextTerm.j >= 0 ? ALMANAC.TERM_NAMES[info.nextTerm.j] : "冬至"));
+    addRow("Jianchu " + info.jianchu + " · " + info.god + " " + (info.huangdao ? "黄道" : "黑道"));
+    addRow("Clash (" + info.chong.pillar + ")" + info.chong.zodiac + " · Sha " + info.sha);
+    addRow("Pengzu " + info.pengzu[0]);
+    addRow("Pengzu " + info.pengzu[1]);
+    addActivities("Do", info.yi);
+    addActivities("Avoid", info.ji);
+  } else {
+    addRow(almanacLunarText(lunar));
+    addRow("干支 " + ALMANAC.name(p.year) + "年 " + monthName + "月 " + dayName + "日");
+    addRow("生肖 属" + info.zodiac);
+    addRow(info.term >= 0 ? ALMANAC.TERM_NAMES[info.term] :
+      "距 " + (info.nextTerm.j >= 0 ? ALMANAC.TERM_NAMES[info.nextTerm.j] : "冬至") + " 还有 " + info.nextTerm.days + " 天");
+    addRow("建除 " + info.jianchu + "日 · " + info.god + " " + (info.huangdao ? "黄道" : "黑道"));
+    addRow("冲 (" + info.chong.pillar + ")" + info.chong.zodiac + " 煞" + info.sha);
+    addRow(info.pengzu[0]);
+    addRow(info.pengzu[1]);
+    addActivities("宜", info.yi);
+    addActivities("忌", info.ji);
+  }
+  var gods = LUCK.gods(p.day % 10);
+  var godItems = ["喜神 " + dirName(gods.xi), "财神 " + dirName(gods.cai), "福神 " + dirName(gods.fu)];
+  almanacGodsLine = rows.length;
+  almanacGodsLineCount = 2;
+  addRow(godItems[0] + " · " + godItems[1], 0, true);
+  addRow(godItems[2], 0, true);
+  for (i = 0; i < rows.length; i++) if (!keepWhole[i]) rows[i] = fitPageText(g, rows[i], 192 - rowIndents[i]);
+  almanacRowIndents = rowIndents;
+  return rows;
+}
+function openAlmanacCompass() {
+  if (almanacGodsLine + almanacGodsLineCount <= almanacScroll ||
+      almanacGodsLine >= almanacScroll + 10) return;
+  offset = almanacOffset;
+  openSection("compass");
+}
+function moveAlmanac(days) {
+  var dt = almanacDate(), candidate = new Date(dt.y, dt.m - 1, dt.d + days, 12);
+  if (candidate.getFullYear() < 1900 || candidate.getFullYear() > 2100) { sfx("err"); return; }
+  almanacOffset += days;
+  almanacScroll = 0;
+  almanacGodsFocused = false;
+  almanacTear = REDUCED_MOTION ? 0.08 : 0.25;
+  almanacTearDir = days > 0 ? -1 : 1;
+  sfx("move");
+}
+function updateAlmanac(dt) {
+  if (almanacTear > 0) almanacTear = Math.max(0, almanacTear - dt);
+  if (game.pressed("b")) { backToCounter(); return; }
+  if (game.pressed("left")) moveAlmanac(-1);
+  if (game.pressed("right")) moveAlmanac(1);
+  if (game.pressed("start")) {
+    if (almanacOffset !== 0) { almanacOffset = 0; almanacScroll = 0; almanacGodsFocused = false; sfx("ok"); }
+  } else if (game.pressed("up")) { almanacScroll = Math.max(0, almanacScroll - 1); almanacGodsFocused = false; sfx("move"); }
+  else if (game.pressed("down")) { almanacScroll++; almanacGodsFocused = true; sfx("move"); }
+  if (game.pressed("a") && almanacGodsFocused) openAlmanacCompass();
+  var pointer = game.pointer;
+  if (pointer.pressed && pointer.y >= 56 && pointer.y < 200) {
+    var line = almanacScroll + Math.floor((pointer.y - 56) / 14);
+    if (line >= almanacGodsLine && line < almanacGodsLine + almanacGodsLineCount) {
+      almanacGodsFocused = true; openAlmanacCompass();
+    }
+  }
+  if (almanacGodsLine >= 0 && almanacGodsLine + almanacGodsLineCount > almanacScroll &&
+      almanacGodsLine < almanacScroll + 10) {
+    /* Once the final row scrolls into view it is the A-key target. */
+    if (game.pressed("down")) almanacGodsFocused = true;
+  }
+}
+function drawAlmanac(g) {
+  var dt = almanacDate();
+  if (dt.y < 1900 || dt.y > 2100) {
+    g.clear(g.PAPER);
+    g.rect(0, 0, W, 19, g.INK);
+    g.text(T({ zh: "老黄历", en: "Almanac" }), CX, 2, { align: "center", color: g.PAPER });
+    g.window(7, 25, 202, 178);
+    g.text(T({ zh: "仅收 1900—2100 年", en: "Dates: 1900–2100" }), CX, 94, { align: "center", color: g.INK });
+    g.text(fitPageText(g, T({ zh: "←→ 回到历书范围", en: "←→ return to range" }), 216), CX, 211,
+      { align: "center", color: g.INK });
+    g.text(fitPageText(g, HINT, 216), CX, 226, { align: "center", color: g.DARK });
+    return;
+  }
+  dt.week = new Date(dt.y, dt.m - 1, dt.d).getDay();
+  var info = ALMANAC.day(dt.y, dt.m, dt.d), rows = pageLines(g, dt, info);
+  var shift = almanacTear > 0 ? Math.round(-almanacTearDir * (REDUCED_MOTION ? 8 : 24) *
+    (almanacTear / (REDUCED_MOTION ? 0.08 : 0.25))) : 0;
+  g.clear(g.PAPER);
+  g.rect(0, 0, W, 19, g.INK);
+  g.text(T({ zh: "老黄历", en: "Almanac" }), CX, 2, { align: "center", color: g.PAPER });
+  g.origin(shift, 0);
+  g.rect(7, 19, 202, 188, g.PAPER);
+  g.frame(7, 19, 202, 188, g.INK);
+  g.rect(8, 20, 200, 15, g.MID);
+  for (var pin = 17; pin < 204; pin += 12) g.circle(pin, 27, 1, g.INK, true);
+  g.rect(12, 35, 25, 18, g.INK);
+  g.text(String(dt.d), 24, 37, { align: "center", color: g.PAPER });
+  var dateLine = game.lang === "en" ? MONTH_EN[dt.m - 1] + " " + dt.y + " · " + WEEK_EN[dt.week] :
+    dt.y + "年 " + dt.m + "月 · " + WEEK_ZH[dt.week];
+  g.text(fitPageText(g, dateLine), 43, 36, { color: g.INK });
+  g.clip(10, 54, 196, 150);
+  var lineH = 14, max = Math.floor(150 / lineH);
+  almanacScroll = Math.min(almanacScroll, Math.max(0, rows.length - max));
+  for (var i = almanacScroll; i < rows.length && i < almanacScroll + max; i++) {
+    var y = 56 + (i - almanacScroll) * lineH;
+    if (i >= almanacGodsLine && i < almanacGodsLine + almanacGodsLineCount && almanacGodsFocused) {
+      g.rect(10, y - 1, 196, 14, g.MID);
+    }
+    g.text(rows[i], 12 + almanacRowIndents[i], y, { color: g.INK });
+  }
+  g.clip();
+  g.origin(0, 0);
+  var key = T({ zh: "←→翻页 · START今天 · A神位", en: "←→ page · START today · A gods" });
+  g.text(fitPageText(g, key, 216), CX, 211, { align: "center", color: g.INK });
+  g.text(fitPageText(g, HINT, 216), CX, 226, { align: "center", color: g.DARK });
 }
 
 function updateFortune() {
@@ -769,6 +956,11 @@ game.scene("fortune", {
   enter: function () { section = "fortune"; slipScroll = 0; syncMotion(); },
   update: updateFortune,
   draw: drawFortune
+});
+game.scene("almanac", {
+  enter: function () { section = "almanac"; almanacScroll = 0; almanacGodsFocused = false; syncMotion(); },
+  update: updateAlmanac,
+  draw: drawAlmanac
 });
 game.scene("compass", {
   enter: function () { section = "compass"; syncMotion(); },

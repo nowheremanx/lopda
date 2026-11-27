@@ -928,7 +928,7 @@
       ],
       "version": "2.0.0",
       "released": "2026-10-24",
-      "updated": "2026-11-24",
+      "updated": "2026-11-27",
       "description": "平放手机当罗盘，看今天喜神、财神、福神和贵神在哪个方向。旧历书上的说法，图个吉利。指南针的示范。",
       "i18n": {
         "en": {
@@ -943,8 +943,8 @@
         "notes"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "5aabccf2dbdb06a11d2a4ca056caadfa3e715bb7e6b12ff2e6359cb9a417f7ee",
-      "bytes": 149825
+      "sha256": "b886788051a0c4b2c59f37b8002987fd85a0ce8959020a01a660892df228d3e7",
+      "bytes": 219650
     }
   ]
 }

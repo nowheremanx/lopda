@@ -11,7 +11,97 @@ import { boot } from "./app-vm.mjs";
 
 const ctx = vm.createContext({ console });
 vm.runInContext(read("registry/apps/luck-compass/src/luck.js"), ctx, { filename: "luck.js" });
+vm.runInContext(read("registry/apps/luck-compass/src/almanac.js"), ctx, { filename: "almanac.js" });
 const L = ctx.LUCK;
+const A = ctx.ALMANAC;
+
+test("almanac lunar dates and solar terms match the runtime tables", () => {
+  const runtime = vm.createContext({ console });
+  runtime.window = runtime;
+  vm.runInContext(read("runtime/lunar.js"), runtime, { filename: "runtime/lunar.js" });
+  const calendar = runtime.LopdaLunar;
+  function check(y, m, d) {
+    const got = A.lunar(y, m, d), expected = calendar.fromSolar(y, m, d);
+    assert.deepEqual(got && { year: got.year, month: got.month, day: got.day, leap: got.leap },
+      expected && { year: expected.year, month: expected.month, day: expected.day, leap: expected.leap },
+      `${y}-${m}-${d} lunar`);
+    assert.equal(A.term(y, m, d), calendar.term(y, m, d), `${y}-${m}-${d} term`);
+  }
+  for (let y = 2020; y <= 2030; y++) {
+    const end = new Date(Date.UTC(y, 11, 31));
+    for (let d = new Date(Date.UTC(y, 0, 1)); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      check(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    }
+  }
+  for (const y of [1901, 1950, 2099]) {
+    for (let d = new Date(Date.UTC(y, 0, 1)); d.getUTCFullYear() === y; d.setUTCDate(d.getUTCDate() + 1)) {
+      check(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    }
+  }
+});
+
+test("almanac pillars follow 立春 and 节 boundaries", () => {
+  assert.equal(A.name(A.pillars(2000, 1, 1).day), "戊午");
+  assert.equal(A.name(A.pillars(2026, 2, 3).year), "乙巳");
+  assert.equal(A.name(A.pillars(2026, 2, 3).month), "己丑");
+  assert.equal(A.name(A.pillars(2026, 2, 4).year), "丙午");
+  assert.equal(A.name(A.pillars(2026, 2, 4).month), "庚寅");
+  assert.equal(A.name(A.pillars(2026, 3, 5).month), "辛卯");
+  assert.equal(A.name(A.pillars(2026, 3, 4).month), "庚寅");
+  const p = A.pillars(2026, 11, 27);
+  assert.deepEqual({ year: A.name(p.year), month: A.name(p.month), day: A.name(p.day) },
+    { year: "丙午", month: "己亥", day: "乙巳" });
+});
+
+test("Chinese almanac lunar dates use printed month and day names", () => {
+  const { app } = bootApp("zh", false), format = app.ctx.get("almanacLunarText");
+  const current = A.lunar(2026, 11, 27);
+  assert.deepEqual({ month: current.month, day: current.day, leap: current.leap },
+    { month: 10, day: 19, leap: false });
+  assert.equal(format(current), "农历十月十九");
+  assert.equal(format(A.lunar(2026, 2, 17)), "农历正月初一");
+  const leap = A.lunar(2025, 8, 1);
+  assert.equal(leap.leap, true);
+  assert.equal(leap.month, 6);
+  assert.equal(format(leap), "农历闰六月初八");
+});
+
+test("almanac day rules and lunar-javascript 宜忌 match reference dates", () => {
+  const cases = [
+    [2026, 11, 27, "破", "勾陈", false, "己亥", "猪", "东",
+      ["乙不栽植千株不长", "巳不远行财物伏藏"],
+      ["祭祀", "解除", "破屋", "坏垣", "求医", "治病", "馀事勿取"], ["嫁娶", "安葬"]],
+    [2026, 2, 3, "危", "司命", true, "壬寅", "虎", "南", null,
+      ["沐浴", "开仓", "出货财", "开市", "交易", "立券", "纳财", "栽种", "纳畜", "牧养", "畋猎", "入殓", "破土", "安葬"],
+      ["祈福", "嫁娶", "安床", "入宅", "造船"]],
+    [2026, 2, 4, "危", "玄武", false, "癸卯", "兔", "东", null,
+      ["祭祀", "祈福", "求嗣", "开光", "出火", "出行", "拆卸", "修造", "动土", "入宅", "移徙", "上梁", "挂匾", "开池", "入殓", "安葬", "破土", "启钻"],
+      ["嫁娶", "作灶", "安床"]],
+    [2000, 1, 1, "破", "司命", true, "壬子", "鼠", "北", null,
+      ["破屋", "坏垣", "祭祀", "沐浴", "馀事勿取"], ["诸事不宜"]],
+    [2024, 6, 15, "定", "天刑", false, "甲辰", "龙", "北", null,
+      ["嫁娶", "祭祀", "开光", "祈福", "求嗣", "出行", "出火", "拆卸", "动土", "修造", "进人口", "入宅", "移徙", "安床", "挂匾", "交易", "立券", "栽种", "纳畜", "入殓", "破土", "启钻", "安葬"],
+      ["无"]],
+    [2030, 12, 31, "建", "金匮", true, "甲午", "马", "南", null,
+      ["教牛马", "馀事勿取"], ["入宅", "动土", "破土"]]
+  ];
+  for (const [y, m, d, jianchu, god, huangdao, chong, zodiac, sha, pengzu, yi, ji] of cases) {
+    const actual = A.day(y, m, d);
+    assert.equal(actual.jianchu, jianchu);
+    assert.equal(actual.god, god);
+    assert.equal(actual.huangdao, huangdao);
+    assert.deepEqual({ ...actual.chong }, { pillar: chong, zodiac });
+    assert.equal(actual.sha, sha);
+    if (pengzu) assert.deepEqual([...actual.pengzu], pengzu);
+    assert.deepEqual([...actual.yi], yi);
+    assert.deepEqual([...actual.ji], ji);
+  }
+  const boundary = A.day(2026, 3, 5);
+  assert.equal(boundary.jianchu, "闭");
+  assert.equal(boundary.god, "青龙");
+  assert.equal(boundary.huangdao, true);
+  assert.deepEqual([...boundary.ji], ["祭祀", "开光", "嫁娶", "入宅"]);
+});
 
 test("the 60-day cycle starts at 甲子 and matches known printed days", () => {
   assert.equal(L.dayIndex(2000, 1, 1), 54);
@@ -234,4 +324,87 @@ test("a rejected slip load is never overwritten, and B returns from both section
   env.app.ctx.get("openSection")("compass");
   env.press("b");
   assert.equal(env.app.ctx.get("section"), "counter");
+});
+
+test("the counter starts with the almanac, and its day links to the same compass day", async () => {
+  const env = bootStored("zh");
+  await settle();
+  const first = drawnLines(env.app);
+  assert.ok(first.includes("老黄历"));
+  assert.ok(first.some((line) => line.startsWith("宜 ")), "today's almanac summary starts with 宜");
+  assert.ok(first.includes("每日一签"));
+  assert.ok(first.includes("罗盘"));
+  env.press("a");
+  assert.equal(env.app.ctx.get("section"), "almanac");
+  env.press("right");
+  assert.equal(env.app.ctx.get("almanacOffset"), 1);
+  env.press("start");
+  assert.equal(env.app.ctx.get("almanacOffset"), 0);
+  for (let i = 0; i < 20; i++) env.press("down");
+  env.press("a");
+  assert.equal(env.app.ctx.get("section"), "compass");
+  assert.equal(env.app.ctx.get("offset"), env.app.ctx.get("almanacOffset"));
+  env.press("b");
+  env.press("a");
+  for (let i = 0; i < 20; i++) env.press("down");
+  const godsY = 56 + (env.app.ctx.get("almanacGodsLine") - env.app.ctx.get("almanacScroll")) * 14 + 4;
+  env.app.pointer("pointerdown", 100, godsY, 216, 240);
+  env.app.frame();
+  assert.equal(env.app.ctx.get("section"), "compass", "tapping the visible gods row opens its matching compass");
+});
+
+test("all drawn almanac strings for 2026-11-27 fit the 216px canvas in both languages", () => {
+  for (const lang of ["zh", "en"]) {
+    const { app } = bootApp(lang, false);
+    app.ctx.get("openSection")("almanac");
+    const today = new Date();
+    const target = new Date(2026, 10, 27, 12);
+    const delta = Math.round((target - new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12)) / 86400000);
+    for (let i = 0; i < delta; i++) app.ctx.get("moveAlmanac")(1);
+    for (let i = 0; i > delta; i--) app.ctx.get("moveAlmanac")(-1);
+    const g = app.ctx.get("game").g, lines = drawnLines(app);
+    for (const line of lines) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
+    const allRows = app.ctx.get("pageLines")(g, { y: 2026, m: 11, d: 27, week: 5 },
+      app.ctx.get("ALMANAC").day(2026, 11, 27));
+    for (const line of allRows) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
+    if (lang === "en") assert.ok(allRows.some((line) => line.includes("Horse")));
+    else assert.ok(allRows.includes("农历十月十九"));
+    const godsAt = app.ctx.get("almanacGodsLine"), godsCount = app.ctx.get("almanacGodsLineCount");
+    assert.equal(godsCount, 2);
+    assert.ok(!allRows[godsAt].includes("…") && !allRows[godsAt + 1].includes("…"));
+    assert.ok(allRows[godsAt].includes("喜神") && allRows[godsAt].includes("财神"));
+    assert.ok(allRows[godsAt + 1].includes("福神"));
+    assert.ok(allRows.some((line) => line.includes("治病")), "the activity remains an unbroken term");
+    assert.ok(!allRows.some((line) => /治$/.test(line) || /^病/.test(line)), "activity terms do not split");
+    const continuation = app.ctx.get("almanacRowIndents");
+    assert.ok(continuation.some((indent) => indent > 0), "continued activity rows indent beneath their terms");
+  }
+});
+
+test("almanac counter summary keeps 忌/Avoid visible with one term of each kind", () => {
+  for (const lang of ["zh", "en"]) {
+    const { app } = bootApp(lang, false), summary = app.ctx.get("sectionSummary")("almanac");
+    assert.ok(summary.includes(lang === "zh" ? "忌" : "Avoid"));
+    assert.ok(summary.includes("祭祀"));
+    assert.ok(summary.includes("嫁娶"));
+    assert.ok(app.ctx.get("game").g.measure(summary) <= 134, `${lang}: ${summary} is too wide`);
+  }
+});
+
+test("the counter's 32px rows leave room for all five sections", () => {
+  const { app } = bootApp("zh", false), sections = app.ctx.get("SECTIONS");
+  const g = app.ctx.get("game").g, real = g.text, placed = [];
+  sections.push({ id: "dummy-4", name: "测试四" }, { id: "dummy-5", name: "测试五" });
+  g.text = function (text, x, y, options) { placed.push({ text: String(text), y }); return real.call(g, text, x, y, options); };
+  try {
+    app.ctx.get("drawCounter")(g);
+    const last = placed.find((item) => item.text === "测试五");
+    assert.ok(last);
+    assert.equal(last.y, 43 + 4 * 34 + 7);
+    assert.ok(last.y + 12 < 210, "fifth row and divider fit above the footer");
+  } finally {
+    g.text = real;
+    sections.pop();
+    sections.pop();
+  }
 });
