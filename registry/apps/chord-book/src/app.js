@@ -10,14 +10,14 @@
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
     listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
-    bassLab: "bass", held: "hold for arpeggio"
+    bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"]
   } : {
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
     listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
-    bassLab: "低音", held: "长按是分解"
+    bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"]
   };
   function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
@@ -69,18 +69,17 @@
     var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    $("sort").textContent = set.sort === "pos" ? t("pos") : t("common");
     $("view").textContent = set.view === "neck" ? t("neck") : t("box");
-    $("sort").classList.toggle("on", set.sort === "pos");
     $("view").classList.toggle("on", set.view === "neck");
     $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
       (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
     var tones = Chords.tones(c), row = $("tones");
     row.innerHTML = "";
     tones.forEach(function (x) {
-      var cell = el("div", "tone");
+      var cell = el("button", "tone");
       cell.appendChild(el("b", "", Chords.NAMES[x.pc]));
       cell.appendChild(el("span", "", x.lab === "/" ? t("bassLab") : x.lab));
+      cell.addEventListener("click", function () { playTone(x); });
       row.appendChild(cell);
     });
     paint();
@@ -104,6 +103,20 @@
     sfx("tick");
   }
   function notesOf(v) { return Chords.midiOf(v.frets); }
+  /* one chord tone on its own, so the intervals can be heard: every tone is counted up from the root as the voicing plays
+     it (its lowest root, or the first root above the bass when the voicing leaves the root out), so R, 3, 5, b7, 9 climb
+     in order; a slash chord's extra bass is the voicing's lowest note */
+  function toneMidi(v, x) {
+    var notes = notesOf(v), low = Math.min.apply(null, notes), root = set.cur.root, r = null;
+    if (x.iv === null) return low;
+    notes.forEach(function (n) { if (Chords.mod12(n) === root && (r === null || n < r)) r = n; });
+    if (r === null) r = low + Chords.mod12(root - low);
+    return r + x.iv;
+  }
+  function playTone(x) {
+    var v = current().v;
+    if (!v || !Guitar.play([toneMidi(v, x)], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+  }
   function strum(arp) {
     var v = current().v;
     if (!v) return;
@@ -145,15 +158,15 @@
   })();
   $("prev").addEventListener("click", function () { step(-1); });
   $("next").addEventListener("click", function () { step(1); });
-  function toggleSort() {
+  function toggleSort() { setSort(set.sort === "pos" ? "common" : "pos"); }
+  function setSort(to) {
     var v = current().v;
-    set.sort = set.sort === "pos" ? "common" : "pos";
+    set.sort = to;
     /* stay on the same voicing in the new order */
     var l = list(), id = v ? v.frets.join(",") : "";
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("tick"); store(); show();
   }
-  $("sort").addEventListener("click", toggleSort);
   $("view").addEventListener("click", function () { set.view = set.view === "neck" ? "box" : "neck"; sfx("tick"); store(); show(); });
   $("cname").parentNode.addEventListener("click", function () { openPicker(); });
 
@@ -205,6 +218,10 @@
       rec.appendChild(choice(n, false, function () { var c = Chords.parse(n); if (!c) return; sfx("ok"); go(c, 0); closePicker(); }));
     });
     $("recentH").style.display = set.recent.length ? "" : "none";
+    var ord = $("sorts"); ord.innerHTML = "";
+    ["common", "pos"].forEach(function (id, i) {
+      ord.appendChild(choice(T.orders[i], set.sort === id, function () { if (set.sort !== id) setSort(id); else sfx("tick"); buildPicker(); }));
+    });
     var vol = $("vol"); vol.innerHTML = "";
     T.vol.forEach(function (label, i) {
       vol.appendChild(choice(label, set.vol === i, function () {
@@ -335,6 +352,7 @@
   $("pback").textContent = t("back"); $("pok").textContent = t("ok"); $("qgo").textContent = t("find");
   $("q").placeholder = t("search"); $("rootH").textContent = t("root"); $("bassH").textContent = t("bass");
   $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
+  $("sortH").textContent = t("order");
   $("fback").textContent = t("back");
   $("fplay").textContent = t("listen"); $("fsee").textContent = t("see");
   document.documentElement.lang = EN ? "en" : "zh";

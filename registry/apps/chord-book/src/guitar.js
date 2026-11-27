@@ -47,20 +47,26 @@ var Guitar = (function () {
     return cache[midi];
   }
 
-  function stop() {
-    if (!ctx) return;
+  function hush(list) {
     var t = ctx.currentTime;
-    playing.forEach(function (p) {
+    list.forEach(function (p) {
       try { p.g.gain.cancelScheduledValues(t); p.g.gain.setTargetAtTime(0, t, 0.02); p.src.stop(t + 0.1); } catch (e) {}
     });
+  }
+  function stop() {
+    if (!ctx) return;
+    hush(playing);
     playing = [];
   }
 
-  /* notes: midi numbers, low string first; gap: seconds between strings (0.012 for a strum, 0.18 for an arpeggio) */
-  function play(notes, gap) {
+  /* notes: midi numbers, low string first; gap: seconds between strings (0.012 for a strum, 0.18 for an arpeggio).
+     ring: leave what is sounding alone (single tones tapped one after another ring together, so an interval is heard
+     both ways); at most 8 notes ring, the oldest go first */
+  function play(notes, gap, ring) {
     if (!level || !notes.length || !ensure()) return false;
     if (ctx.state === "suspended" && ctx.resume) ctx.resume();
-    stop();
+    if (!ring) stop();
+    else if (playing.length + notes.length > 8) hush(playing.splice(0, playing.length + notes.length - 8));
     var t0 = ctx.currentTime + 0.02;
     notes.forEach(function (m, k) {
       var b = bufferFor(m), src = ctx.createBufferSource(), g = ctx.createGain();

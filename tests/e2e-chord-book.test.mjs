@@ -1,5 +1,6 @@
-// Chords (和弦大全) 1.0.0: the main screen, the picker and the finder at the smallest and largest LCD, a search that
-// lands on C#m7b5, turning through voicings, the two sorts and the two views, naming a chord from the frets, and the save.
+// Chords (和弦大全) 1.1.0: the main screen, the picker and the finder at the smallest and largest LCD, a search that
+// lands on C#m7b5, turning through voicings, the two orders (in the picker) and the two views, a chord tone played on its
+// own, naming a chord from the frets, and the save.
 // The app is plain HTML with no runtime around it here: a fake PAD is injected before the app's own script.
 // Needs Playwright, which the repo does not depend on, so the test skips without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-chord-book.test.mjs
@@ -93,6 +94,7 @@ test("chord-book: opens on C x32010; the box, the notes and the footer fit the s
     assert.equal(await text(p, "#tones"), "CRE3G5");
     await fits(p, "body > header", size, "header");
     await fits(p, "body > footer", size, "footer");
+    await fits(p, "#tones", size, "the chord tones");
     for (const sel of ["#pic", "#line", "#tones", "#strum"]) await inside(p, sel, size, "main screen");
     const w = await p.locator("#pic").evaluate((c) => parseInt(c.style.width, 10));
     assert.ok(w >= 208 && w % 104 === 0, `the box is drawn at a whole scale: ${w}px`);
@@ -118,8 +120,14 @@ test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch,
   await tap(p, "#prev");
   assert.match(await text(p, "#line"), / · (\d+) \/ \1 · /, "Prev from the first wraps to the last");
   await tap(p, "#next");
-  await tap(p, "#sort");
-  assert.equal(await text(p, "#sort"), "把位");
+  /* the order is a setting in the picker, not a header button */
+  assert.equal(await p.locator("#sort").count(), 0);
+  await tap(p, "#chord");
+  assert.equal(await text(p, "#sortH"), "按法顺序");
+  await tap(p, p.locator("#sorts button", { hasText: "按把位" }));
+  assert.ok(await p.locator("#sorts button", { hasText: "按把位" }).evaluate((b) => b.classList.contains("sel")));
+  await tap(p, "#pback");
+  assert.equal(await text(p, "#cname"), "C#m7b5", "Back keeps the chord");
   assert.match(await text(p, "#line"), /^x4545x · /, "the same voicing stays in view when the order changes");
   await tap(p, "#view");
   await p.waitForTimeout(400);
@@ -142,7 +150,9 @@ test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch,
   /* a second start comes back to the same place */
   const again = await open(t, { saved: s });
   assert.equal(await text(again.p, "#cname"), "C#m7b5");
-  assert.equal(await text(again.p, "#sort"), "把位");
+  await tap(again.p, "#chord");
+  assert.ok(await again.p.locator("#sorts button", { hasText: "按把位" }).evaluate((b) => b.classList.contains("sel")));
+  await tap(again.p, "#pback");
   assert.equal(await again.p.locator("#pic").evaluate((c) => c.width), 150);
 });
 
@@ -201,12 +211,42 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
 test("chord-book: English words, and the strum plays without an error", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t, { lang: "en", size: LARGE });
   assert.equal(await text(p, "#strum"), "Strum");
-  assert.equal(await text(p, "#sort"), "Common");
+
   assert.equal(await text(p, "#qname"), "major");
   assert.match(await text(p, "#line"), /^x32010 · 1 \/ \d+ · open$/);
   await tap(p, "#strum");
   await tap(p, "#pwrap");
   await tap(p, "#chord");
   assert.equal(await text(p, "#tofind"), "Find by frets");
+  assert.equal(await text(p, "#sortH"), "Shape order");
+  assert.equal(await text(p, "#sorts"), "Common firstBy fret");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book: each chord tone is a button that plays it alone, counted up from the voicing's root", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  /* Guitar is the app's own global; record what it is asked to play */
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push({ notes, ring: !!ring }); return play(notes, gap, ring); };
+  });
+  const tones = p.locator("#tones button");
+  assert.equal(await tones.count(), 3);
+  for (let i = 0; i < 3; i++) await tap(p, tones.nth(i));
+  /* C x32010: the root is C3 (48) on the A string, so R, 3, 5 are 48, 52, 55, and they ring together */
+  assert.deepEqual(await p.evaluate(() => window.__notes), [
+    { notes: [48], ring: true }, { notes: [52], ring: true }, { notes: [55], ring: true }
+  ]);
+  /* a slash chord's extra bass is the voicing's lowest note: Am/G 3x2210 has G2 (43) on the low E string, then the
+     root A3 (57) on the G string and C4 (60) a minor third above it */
+  await tap(p, "#chord");
+  await p.locator("#q").fill("Am/G");
+  await tap(p, "#qgo");
+  assert.match(await text(p, "#line"), /^3x2210 · /);
+  assert.equal(await text(p, "#tones"), "G低音ARCb3E5");
+  await p.evaluate(() => { window.__notes = []; });
+  for (let i = 0; i < 3; i++) await tap(p, p.locator("#tones button").nth(i));
+  assert.deepEqual(await p.evaluate(() => window.__notes.map((x) => x.notes[0])), [43, 57, 60]);
   assert.deepEqual(errors, []);
 });
