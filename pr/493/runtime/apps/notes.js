@@ -71,9 +71,9 @@ function save(n){
   pending.notes[n.id]=true;
   return put(S.refs.notes.doc(n.id),docOf(n)).then(function(ok){ if(ok) delete pending.notes[n.id]; return ok; });
 }
-function firstLine(body){ return NT.title(body); }
+function firstLine(body){ return NT.title(NT.dropEmoji(body)); }
 /* the line under a title in the list: the text after the first line, on one line */
-function rest(body){ return String(body||"").split("\n").slice(1).join(" ").replace(/\s+/g," ").trim(); }
+function rest(body){ return NT.dropEmoji(body).split("\n").slice(1).join(" ").replace(/\s+/g," ").trim(); }
 function label(n){ return firstLine(n.body) || tr("notes.blank"); }
 
 /* ---------- the list ---------- */
@@ -416,9 +416,11 @@ function freshDiary(k){
 }
 function startEditor(write){
   var e=S.editing, ta=$("note-body");
-  N.opts=false; N.ecur=-1;
+  N.opts=false; N.ecur=-1; N.emojiSaid=false;
+  e.body=NT.dropEmoji(e.body);   /* a note written before 1.6.10 may hold some: shown without, saved without once edited */
   ta.value=e.body;
   setState(e.fresh?"notes.fresh":"notes.saved");
+  backLabel();
   show("note");
   renderYears(); renderOpts();
   if(write){ writeAt(e.body.length); ta.scrollTop=e.body.length ? ta.scrollHeight : 0; }
@@ -492,7 +494,16 @@ function renderYears(){
 var noteTimer;
 $("note-body").addEventListener("input",function(){
   if(!S.editing) return;
-  S.editing.body=$("note-body").value; S.editing.dirty=true;
+  var ta=$("note-body"), v=ta.value, clean=NT.dropEmoji(v);
+  /* an emoji key or a paste: the screen has no such glyph, so it is not taken, like a key the device does not have. The
+     caret stays where it was; the first time in a note, a word says why */
+  if(clean!==v){
+    var at=NT.dropEmoji(v.slice(0,ta.selectionEnd)).length;
+    ta.value=clean; try{ ta.setSelectionRange(at,at); }catch(x){}
+    if(!N.emojiSaid){ N.emojiSaid=true; toast(tr("notes.noemoji")); }
+    if(clean===S.editing.body) return;
+  }
+  S.editing.body=clean; S.editing.dirty=true;
   setState("notes.editing");
   clearTimeout(noteTimer); noteTimer=setTimeout(flushNote,700);
 });
@@ -516,6 +527,11 @@ function closeEditor(){ flushNote(); S.editing=null; N.opts=false; N.reading=fal
 function leaveEditor(){
   var back=N.back; N.back=null;
   if(back) back(); else show("notes");
+}
+/* the bar's back key says where it goes: ◂ 列表, or ◂ 返回 for a diary another program opened (it goes back there) */
+function backLabel(){
+  var b=$("note-back"), k=N.back ? "notes.backto" : "notes.back";
+  b.setAttribute("data-i18n",k); b.textContent=tr(k);
 }
 $("note-back").onclick=function(){ closeEditor(); };
 $("note-opts").onclick=function(){ toggleOpts(true); };
@@ -562,9 +578,10 @@ function optAct(){
     toast(tr(n.pinned?"notes.pinned":"notes.unpinned")); sfx("ok");
     N.opts=false; renderOpts();
   } else if(r.k==="delete"){
-    if(n){ n=Object.assign({},n,{deleted:Date.now()}); save(n); }
+    /* a fresh note with nothing typed was never stored: it is simply gone, with no word about a trash it is not in */
+    if(n){ n=Object.assign({},n,{deleted:Date.now()}); save(n); toast(tr("notes.trashed")); }
     S.editing=null; N.opts=false;
-    toast(tr("notes.trashed")); sfx("ok");
+    sfx("ok");
     leaveEditor();
   }
 }
@@ -673,6 +690,7 @@ function addTo(find,fresh,text,sep){
   var job=appending.then(function(){
     if(!S.db) throw new Error(tr("notes.nodb"));
     flushNote();
+    text=NT.dropEmoji(text); fresh.body=NT.dropEmoji(fresh.body);
     return S.refs.notes.get().then(function(q){
       var hit=find(q.docs.map(function(d){ return {id:d.id, o:own(d.data())||{}}; }));
       var now=Date.now(), n;
@@ -750,7 +768,7 @@ function readFiles(files,stats){
             return q.then(function(){
               if(out.length>=MAX_IMPORT){ stats.more++; return; }
               if(en.size>MAX_NOTE){ stats.big++; return; }
-              return Z.read(u8,en,inflate).then(function(d){ out.push({name:en.name, text:decode(d)}); });
+              return Z.read(u8,en,inflate).then(function(d){ out.push({name:en.name, text:decode(d), time:en.time||0}); });
             });
           },Promise.resolve());
         });
@@ -758,24 +776,27 @@ function readFiles(files,stats){
       if(!TEXT_EXT.test(f.name) || f.name.charAt(0)===".") return;
       if(out.length>=MAX_IMPORT){ stats.more++; return; }
       if(f.size>MAX_NOTE){ stats.big++; return; }
-      return f.arrayBuffer().then(function(b){ out.push({name:f.name, text:decode(new Uint8Array(b))}); });
+      return f.arrayBuffer().then(function(b){ out.push({name:f.name, text:decode(new Uint8Array(b)), time:f.lastModified||0}); });
     });
   },Promise.resolve()).then(function(){ return out; });
 }
 function importFiles(files){
-  var stats={dup:0, big:0, more:0, file:0}, now=Date.now(), added=[];
+  var stats={dup:0, big:0, more:0, file:0, emoji:0}, now=Date.now(), added=[];
   N.busy=true; toast(tr("notes.importing")); if(N.sheet) renderSheet();
   return readFiles(files,stats).then(function(items){
     var have={};
     live().forEach(function(n){ have[String(n.body||"").trim()]=true; });
-    items.forEach(function(it){
-      var fm=NT.parseFront(it.text), body=fm.body.replace(/\r\n?/g,"\n");
+    items.forEach(function(it,i){
+      var fm=NT.parseFront(it.text), body=fm.body.replace(/\r\n?/g,"\n"), clean=NT.dropEmoji(body);
+      if(clean!==body){ stats.emoji++; body=clean; }
       if(!firstLine(body)) body=NT.stem(it.name)+"\n"+body;
       if(new Blob([body]).size>MAX_NOTE){ stats.big++; return; }
       var k=body.trim();
       if(have[k]){ stats.dup++; return; }
       have[k]=true;
-      var created=fm.meta.created || fm.meta.updated || now;
+      /* the dates in its front matter, else the file's own time (a .md from another notes program, a zip entry), else
+         now; a millisecond apart in the order they came, so a batch with no dates keeps that order after a restart */
+      var created=fm.meta.created || fm.meta.updated || (it.time>0 && it.time<=now ? it.time : now-i);
       var n={id:S.refs.notes.doc().id, body:body, created:created, updated:fm.meta.updated || created};
       if(fm.meta.pinned) n.pinned=true;
       if(fm.meta.date) n.day=fm.meta.date;
@@ -790,7 +811,9 @@ function importFiles(files){
     if(stats.big) msg+=tr("notes.skipbig",{n:stats.big});
     if(stats.file) msg+=tr("notes.skipfile",{n:stats.file});
     if(stats.more) msg+=tr("notes.skipmore",{n:stats.more});
-    toast(msg); sfx(added.length?"ok":"err");
+    if(stats.emoji) msg+=tr("notes.emojiout",{n:stats.emoji});
+    /* a summary with several parts stays up long enough to be read */
+    toast(msg,Math.max(2600,Math.min(8000,msg.length*110))); sfx(added.length?"ok":"err");
   },function(e){
     toast(tr("notes.importfail",{msg:String((e&&e.message)||e).slice(0,100)})); sfx("err");
   }).then(function(){
@@ -829,7 +852,7 @@ function diaryDays(year,month){
 /* every year's diary of that month and day, newest first: [{day:"2025-10-01", year, title, snippet}] */
 function diariesOn(month,day){
   return (index().md[LP.pad2(month)+"-"+LP.pad2(day)]||[]).map(function(n){
-    return {day:n.day, year:+n.day.slice(0,4), title:firstLine(n.body), snippet:NT.snippet(n.body)};
+    return {day:n.day, year:+n.day.slice(0,4), title:firstLine(n.body), snippet:NT.snippet(NT.dropEmoji(n.body))};
   });
 }
 /* opens the diary of a day ("2026-10-01", today or earlier) as 今天 does: today's to write, an earlier one to read, and a day
@@ -842,6 +865,7 @@ function openDiary(day,onBack){
   if(n) openNote(n,day===today());
   else freshDiary(day);
   N.back=typeof onBack==="function" ? onBack : null;
+  backLabel();
   return true;
 }
 

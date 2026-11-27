@@ -81,7 +81,14 @@ function decodeName(b,flagged){
   var s=""; for(var i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
   return s;
 }
-/* the central directory: [{name, dir, method, flags, crc, size, csize, offset}]; throws a badzip error on anything it cannot follow */
+/* an entry's MS-DOS time and date back to ms, local time; 0 for none: no date, or the 1980-01-01 00:00 that dosTime writes
+   for an earlier one */
+function fromDos(time,date){
+  if(!date || (date===((1<<5)|1) && !time)) return 0;
+  var d=new Date(1980+(date>>9),((date>>5)&15)-1,date&31,time>>11,(time>>5)&63,(time&31)*2).getTime();
+  return isNaN(d) ? 0 : d;
+}
+/* the central directory: [{name, dir, method, flags, crc, size, csize, offset, time}] (time: ms, 0 when unknown); throws a badzip error on anything it cannot follow */
 function list(u8){
   if(!u8 || !u8.buffer || u8.BYTES_PER_ELEMENT!==1) throw fail("zip: not bytes");
   var v=new DataView(u8.buffer,u8.byteOffset,u8.byteLength), n=u8.length, at=-1;
@@ -97,7 +104,8 @@ function list(u8){
     if(p+46+nl>at) throw fail("zip: bad central directory entry");
     var name=decodeName(u8.subarray(p+46,p+46+nl),!!(flags&0x0800));
     out.push({name:name, dir:/\/$/.test(name), method:v.getUint16(p+10,true), flags:flags, crc:v.getUint32(p+16,true),
-      csize:v.getUint32(p+20,true), size:v.getUint32(p+24,true), offset:v.getUint32(p+42,true)});
+      csize:v.getUint32(p+20,true), size:v.getUint32(p+24,true), offset:v.getUint32(p+42,true),
+      time:fromDos(v.getUint16(p+12,true),v.getUint16(p+14,true))});
     p+=46+nl+xl+cl;
   }
   return out;
@@ -130,5 +138,5 @@ function read(u8,entry,inflate,crc32){
   });
 }
 
-window.LopdaZip={write:write, writeParts:writeParts, list:list, read:read, dosTime:dosTime};
+window.LopdaZip={write:write, writeParts:writeParts, list:list, read:read, dosTime:dosTime, fromDos:fromDos};
 })();
