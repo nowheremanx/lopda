@@ -1577,6 +1577,7 @@ function build(){
 }
 function layout(){
   if(!visible()) return;
+  fitBar();
   var board=$("studio-board"), grid=$("studio-grid"), view=$("v-studio");
   if(!board || !grid || board.hidden){ if(T.tour) tourPlace(); return; }
   /* below the normal 523 px there is not room for the bars, the pitch keys and four 56 px cells: tighten the
@@ -1620,9 +1621,25 @@ function layout(){
   if(T.tour) tourPlace();
 }
 function renderBar(){
-  var bpm=T.song ? T.song.bpm : SONGS.BPM_DEFAULT;
-  $("studio-bpm").textContent=tr("studio.bpm",{n:bpm});
+  var bpm=T.song ? T.song.bpm : SONGS.BPM_DEFAULT, el=$("studio-bpm");
+  /* the number and its unit in two spans: a narrow screen drops the unit (fitBar), the text stays "82 BPM" */
+  var num=document.createElement("span"), unit=document.createElement("span");
+  num.textContent=String(bpm);
+  unit.className="st-bpm-u";
+  unit.textContent=tr("studio.bpm",{n:bpm}).replace(String(bpm),"");
+  el.textContent="";
+  el.appendChild(num); el.appendChild(unit);
+  el.setAttribute("aria-label",tr("studio.bpm",{n:bpm}));
+  fitBar();
   renderPlay();
+}
+/* a 320 px window leaves the top bar about 276 px: tighter gaps and the bare number, so the menu key
+   (the only way to the library, the guide and the AI) stays whole on screen (#334) */
+function fitBar(){
+  var v=$("v-studio"), bar=v && v.querySelector(".st-bar");
+  if(!bar || !bar.clientWidth) return;
+  v.classList.remove("st-narrow");
+  if(bar.scrollWidth>bar.clientWidth+1) v.classList.add("st-narrow");
 }
 function renderPlay(){
   var v=$("v-studio"), b=$("studio-play");

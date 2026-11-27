@@ -841,6 +841,11 @@ textarea::placeholder{color:var(--ink-2)}
 .st-rec.count.lit .st-rec-dot{opacity:1}
 .st-rec:disabled{color:var(--ink-2);border-color:var(--ink-2);cursor:default}
 .st-gap{flex:1;min-width:0}
+/* #334: a 320 px window: the bar's gaps tighten and the BPM loses its unit (fitBar in apps/studio.js) */
+.studio.st-narrow .st-bar{gap:2px;padding-left:4px;padding-right:4px}
+.studio.st-narrow .st-tempo{gap:2px}
+.studio.st-narrow .st-bpm{min-width:36px}
+.studio.st-narrow .st-bpm-u{display:none}
 .st-tabs{flex:none;display:flex;gap:4px;padding:4px 6px;border-bottom:2px solid var(--ink)}
 .st-tab{flex:1;min-width:0;min-height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:2px;background:transparent;color:var(--ink);border:2px solid var(--ink);font-family:var(--f-lcd);font-size:14px;line-height:1.1;cursor:pointer;white-space:nowrap;overflow:hidden}
 .st-tab.on{background:var(--ink);color:var(--lcd)}
@@ -1053,7 +1058,7 @@ textarea::placeholder{color:var(--ink-2)}
 .radio-guide-page{gap:6px;padding:8px}
 .radio-guide-body{flex:1;min-height:0;display:flex;flex-direction:column;justify-content:center;gap:10px;padding:4px 2px}
 .radio-guide-text{margin:0;font-size:15px;line-height:1.5}
-.radio-guide-page{margin:0;text-align:right;font-family:var(--f-pix);font-size:16px}
+.radio-guide-num{margin:0;text-align:right;font-family:var(--f-pix);font-size:16px}
 .radio-tones{display:flex;gap:4px;height:20px}
 .radio-tones i{flex:1;display:block}
 .radio-link-page{gap:4px;padding:4px 8px 6px}
@@ -1114,11 +1119,14 @@ html.kb .radio-write-page>.radio-field,html.kb .radio-write-page>.hint{display:n
 html.kb .radio-write-actions{margin-top:0}
 .radio-draw-page{gap:4px;padding:4px}
 #radio-draw-cv{display:block;width:260px;height:260px;flex:none;margin:0 auto;border:2px solid var(--ink);image-rendering:pixelated;touch-action:none}
-.radio-draw-hint{margin:0;text-align:center;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.radio-draw-actions{display:flex;align-items:center;gap:6px}
+.radio-draw-hint{flex:none;margin:0;text-align:center;font-size:11px;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.radio-draw-actions{flex:none;display:flex;align-items:center;gap:6px}
 .radio-swatch{flex:none;width:18px;height:18px;border:2px solid var(--ink)}
 .radio-draw-tone{flex:none;font-size:13px;color:var(--ink-2)}
 .radio-draw-actions .btn{flex:1;min-width:0;min-height:44px;padding:4px;font-size:14px}
+/* the swatch is a key: a tap takes the next tone, like SELECT (#390) */
+.radio-draw-actions .radio-draw-color{flex:none;display:flex;align-items:center;gap:6px;padding:4px 8px}
+.radio-draw-actions .radio-draw-color .radio-draw-tone{color:inherit}
 .radio-meter-page{overflow-y:auto;overflow-x:hidden;padding:8px;gap:8px;display:flex;flex-direction:column;-webkit-overflow-scrolling:touch}
 .radio-meter-block{display:flex;flex-direction:column;gap:4px;border:2px solid var(--ink-2);padding:6px}
 .radio-meter-block h3{margin:0;font-size:14px;font-weight:400}
