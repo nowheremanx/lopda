@@ -515,6 +515,23 @@ function localKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+/* The title is the first screen now; tests that play open today's puzzle explicitly. */
+function openTodayOn(app) {
+  const BOX = app.ctx.get("BOX");
+  const ok = BOX.openDay(localKey(new Date()));
+  assert.equal(ok, true, "today opens from the title");
+  return BOX;
+}
+
+function pastKey(offset) {
+  const d = new Date();
+  return localKey(new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset));
+}
+
+function epochKey() {
+  return "2026-10-26";
+}
+
 const CORRIDOR = [
   "##########",
   "@        .",
@@ -641,7 +658,8 @@ test("daily-box app: box-now restores the board, and an old day's box-now is dro
 
   const restored = bootBox({ "box-help": 1, "box-now": { date: key, history, ms: 4321 } });
   await settleApp();
-  const s = restored.app.ctx.get("BOX").state();
+  const restoredBox = openTodayOn(restored.app);
+  const s = restoredBox.state();
   assert.equal(s.ui, "play");
   assert.equal(s.player, state.player);
   assert.deepEqual(Array.from(s.boxes), Array.from(state.boxes));
@@ -652,7 +670,8 @@ test("daily-box app: box-now restores the board, and an old day's box-now is dro
 
   const stale = bootBox({ "box-help": 1, "box-now": { date: "2000-01-01", history } });
   await settleApp();
-  const fresh = stale.app.ctx.get("BOX").state();
+  const staleBox = openTodayOn(stale.app);
+  const fresh = staleBox.state();
   assert.equal(fresh.player, Board.create(level).player, "an old day starts the new day fresh");
   assert.equal(fresh.moves, 0);
   assert.ok(stale.pad.writes.some((w) => w.key === "box-now" && w.removed), "the stale board is removed");
@@ -756,7 +775,7 @@ test("daily-box app: B while still holding a stopped direction does not re-push 
 test("daily-box app: START pauses, SELECT confirms and B stops 看答案 (app-vm)", async () => {
   const { app, pad } = bootBox({ "box-help": 1 });
   await settleApp();
-  const BOX = app.ctx.get("BOX");
+  const BOX = openTodayOn(app);
   run(app, 1);
   startAnswerReplay(app, pad);
   assert.equal(BOX.state().peeked, true);
@@ -797,7 +816,7 @@ test("daily-box app: a winning box-now restores as a solved day with its card (a
     "box-now": { date: localKey(new Date()), history: solved.history, ms: 4321 },
   });
   await settleApp();
-  const BOX = app.ctx.get("BOX");
+  const BOX = openTodayOn(app);
   const s = BOX.state();
   assert.equal(s.solved, true);
   assert.equal(s.ui, "play", "the result card is pending");
@@ -831,7 +850,8 @@ test("daily-box app: a corrupt box-now is dropped and the day starts fresh (app-
       "box-now": { date: localKey(new Date()), history, ms: 5 },
     });
     await settleApp();
-    const s = app.ctx.get("BOX").state();
+    const BOX = openTodayOn(app);
+    const s = BOX.state();
     assert.equal(s.player, fresh, "a corrupt board is not restored");
     assert.equal(s.moves, 0);
     assert.ok(pad.writes.some((w) => w.key === "box-now" && w.removed), "the corrupt box-now is removed");
@@ -844,7 +864,7 @@ test("daily-box app: a solved day's status bar shows the recorded pushes, not pa
   days[key] = { pushes: 1, moves: 1, ms: 1000, peeked: false };
   const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
   await settleApp();
-  const s = app.ctx.get("BOX").state();
+  const s = openTodayOn(app).state();
   assert.equal(s.solved, true);
   assert.equal(s.ui, "card");
   assert.equal(s.statusPushes, 1);
@@ -877,10 +897,10 @@ test("daily-box app: 看答案 on a solved day keeps the numbers, marks peeked a
   days[key] = { pushes: 99, moves: 99, ms: 99999, peeked: false };
   const { app, pad } = bootBox({ "box-help": 1, "box": { v: 1, days } });
   await settleApp();
-  const BOX = app.ctx.get("BOX");
+  const BOX = openTodayOn(app);
   assert.equal(BOX.state().ui, "card");
-  tapButton(app, pad, "a");      /* close the card */
-  assert.equal(BOX.state().ui, "done");
+  tapButton(app, pad, "b");      /* 再看看: the solved board, then START can still replay */
+  assert.equal(BOX.state().ui, "play");
   startAnswerReplay(app, pad);
   assert.equal(BOX.state().peeked, true);
 
@@ -901,7 +921,7 @@ test("daily-box app: 看答案 on a solved day keeps the numbers, marks peeked a
 test("daily-box app: 看答案 on a fresh day saves the result with peeked true (app-vm)", async () => {
   const { app, pad } = bootBox({ "box-help": 1 });
   await settleApp();
-  const BOX = app.ctx.get("BOX");
+  const BOX = openTodayOn(app);
   run(app, 1);
   startAnswerReplay(app, pad);
   let frames = 0;
@@ -979,8 +999,7 @@ test("daily-box app: the saved box-now keeps only 400 snapshots, undo in the ses
 test("daily-box app: a failed save read still starts today's level fresh (app-vm)", async () => {
   const { app, pad } = bootBox({}, true);
   await settleApp();
-  const BOX = app.ctx.get("BOX");
-  if (BOX.state().ui === "help") tapButton(app, pad, "a");
+  const BOX = openTodayOn(app);
   const level = Board.levelFor(new Date());
   const s = BOX.state();
   assert.equal(s.ui, "play");
@@ -1033,7 +1052,7 @@ const BUMP_LEFT = [
 test("daily-box app: 看答案 survives leaving before the solve and a later solve records peeked (app-vm)", async () => {
   const first = bootBox({ "box-help": 1 });
   await settleApp();
-  const BOX = first.app.ctx.get("BOX");
+  const BOX = openTodayOn(first.app);
   run(first.app, 1);
 
   tapButton(first.app, first.pad, "start");
@@ -1056,7 +1075,7 @@ test("daily-box app: 看答案 survives leaving before the solve and a later sol
   /* Reload the stopped board, then solve it by hand. */
   const second = bootBox({ "box-help": 1, "box-now": savedNow });
   await settleApp();
-  const BOX2 = second.app.ctx.get("BOX");
+  const BOX2 = openTodayOn(second.app);
   assert.equal(BOX2.state().peeked, true, "box-now restores the peek");
   assert.equal(BOX2.state().ui, "play");
 
@@ -1150,7 +1169,7 @@ test("daily-box app: a failed box-now read keeps a loaded box (app-vm)", async (
   days[key] = { pushes: 3, moves: 4, ms: 5000, peeked: false };
   const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } }, false, ["box-now"]);
   await settleApp();
-  const BOX = app.ctx.get("BOX");
+  const BOX = openTodayOn(app);
   assert.equal(BOX.state().solved, true);
   assert.equal(BOX.state().ui, "card");
   assert.equal(BOX.days().days[key].pushes, 3);
@@ -1188,7 +1207,7 @@ test("daily-box app: normalizeBox drops junk day entries (app-vm)", async () => 
 
 /* --- the owner's ruling: a peeked day keeps its streak, and the card says so --------------------- */
 
-const CARD_W = 124;
+const CARD_W = 144;
 
 test("daily-box app: a peeked day's card says the streak still counts, inside the card (app-vm)", async () => {
   const key = localKey(new Date());
@@ -1196,7 +1215,7 @@ test("daily-box app: a peeked day's card says the streak still counts, inside th
   days[key] = { pushes: 99, moves: 99, ms: 99999, peeked: true };
   const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
   await settleApp();
-  const BOX = app.ctx.get("BOX");
+  const BOX = openTodayOn(app);
   assert.equal(BOX.state().ui, "card");
   assert.equal(BOX.badge(), "answer");
 
@@ -1215,8 +1234,8 @@ test("daily-box app: a peeked day's card says the streak still counts, inside th
   assert.equal(line.x, 80, "the line is centred in the card");
   const width = game.g.measure(line.str);
   assert.ok(width <= CARD_W - 8, `the line is ${width} px wide, the card allows ${CARD_W - 8}`);
-  const ok = calls.find((c) => c.str === "A 好");
-  assert.ok(ok && line.y + 13 <= ok.y, "the new line leaves the A key label its place");
+  const ok = calls.find((c) => c.str === "A 日历   B 再看看");
+  assert.ok(ok && line.y + 13 <= ok.y, "the new line leaves the A/B prompt its place");
 });
 
 async function peekedStreakFor(offsets) {
@@ -1233,4 +1252,360 @@ test("daily-box app: a peeked day counts in the streak exactly like a solved one
   }
   assert.equal(await peekedStreakFor([0, 1]), 2, "two peeked days in a row are a streak of two");
   assert.equal(await peekedStreakFor([0, 2]), 1, "a gap still breaks the streak");
+});
+
+/* --- 1.1.0: the title, back-play (late days), the calendar and the tally ------------------------- */
+
+test("daily-box app: the title is the first screen; A opens today's puzzle (app-vm)", async () => {
+  const { app, pad } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.state().ui, "title");
+  assert.equal(BOX.title().today, localKey(new Date()));
+
+  tapButton(app, pad, "a");       /* 今天 */
+  assert.equal(BOX.state().ui, "play");
+  assert.equal(BOX.state().date, localKey(new Date()));
+});
+
+test("daily-box app: normalizeBox keeps late:true and never invents it (app-vm)", async () => {
+  const days = {
+    "2020-01-01": { pushes: 1, moves: 2, ms: 3, peeked: false, late: true },
+    "2020-01-02": { pushes: 1, moves: 2, ms: 3, peeked: false, late: false },
+    "2020-01-03": { pushes: 1, moves: 2, ms: 3, peeked: false },
+  };
+  const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  const kept = app.ctx.get("BOX").days().days;
+  assert.equal(kept["2020-01-01"].late, true, "late is copied through");
+  assert.ok(!("late" in kept["2020-01-02"]), "late:false is not written");
+  assert.ok(!("late" in kept["2020-01-03"]), "an old entry has no late key");
+});
+
+async function lateStreakFor(days) {
+  const { app } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  return app.ctx.get("BOX").streak();
+}
+
+test("daily-box app: late entries break the streak while old entries still count (app-vm)", async () => {
+  const plain = dayWith([0, 1, 2]);
+  assert.equal(await lateStreakFor(plain), 3, "three old entries with no late are a streak of three");
+
+  const yesterdayLate = dayWith([0, 1, 2]);
+  yesterdayLate[localKey(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - 1))].late = true;
+  assert.equal(await lateStreakFor(yesterdayLate), 1, "today counts, yesterday's late entry stops it");
+
+  const endingLate = dayWith([1, 2]);
+  endingLate[localKey(new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - 1))].late = true;
+  assert.equal(await lateStreakFor(endingLate), 0, "a late entry is not a streak day");
+
+  const oldStreak = dayWith([1, 2]);
+  assert.equal(await lateStreakFor(oldStreak), 2, "a streak ending yesterday still counts without today");
+});
+
+test("daily-box app: a past day's solve is recorded under that day with late:true (app-vm)", async () => {
+  const todayK = localKey(new Date());
+  const pastK = pastKey(1);
+  const days = {};
+  days[todayK] = { pushes: 7, moves: 9, ms: 1234, peeked: false };
+  const todayBefore = JSON.parse(JSON.stringify(days[todayK]));
+
+  const { app, pad } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.openDay(pastK), true);
+  assert.equal(BOX.state().date, pastK, "the past day is the puzzle now");
+
+  BOX.load(ONE_PUSH);
+  pad.press("right");
+  run(app, 22);
+  pad.release("right");
+  assert.equal(BOX.state().solved, true);
+
+  const kept = pad.data.box.days;
+  assert.equal(kept[pastK].late, true, "a solve on a later date is late");
+  assert.equal(kept[pastK].pushes, 1);
+  assert.deepEqual(kept[todayK], todayBefore, "today's entry is untouched");
+});
+
+test("daily-box app: a box-now dated in the past resumes that day's puzzle (app-vm)", async () => {
+  const key = pastKey(1);
+  const when = new Date();
+  const day = new Date(when.getFullYear(), when.getMonth(), when.getDate() - 1);
+  const level = Board.levelFor(day);
+  const state = Board.create(level);
+  let dir = null;
+  for (const candidate of ["up", "down", "left", "right"]) {
+    const probe = Board.create(level);
+    const result = Board.step(probe, candidate);
+    if (result.kind === "walk" || result.kind === "push") {
+      Board.step(state, candidate);
+      dir = candidate;
+      break;
+    }
+  }
+  assert.ok(dir, "the past level has a direction to move");
+  const history = state.history.concat([{
+    player: state.player,
+    boxes: state.boxes.slice(),
+    moves: state.moves,
+    pushes: state.pushes,
+  }]);
+
+  const { app } = bootBox({ "box-help": 1, "box-now": { date: key, history, ms: 4321 } });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.state().ui, "title", "the title is still the first screen");
+  assert.equal(BOX.openDay(key), true);
+
+  const s = BOX.state();
+  assert.equal(s.date, key, "the past day's puzzle, not today's");
+  assert.notEqual(s.date, localKey(new Date()));
+  assert.equal(s.ui, "play");
+  assert.equal(s.player, state.player);
+  assert.deepEqual(Array.from(s.boxes), Array.from(state.boxes));
+  assert.equal(s.moves, state.moves);
+  assert.equal(s.ms, 4321);
+});
+
+test("daily-box app: the calendar never selects a future day or a day before the epoch (app-vm)", async () => {
+  const { app } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  const today = new Date();
+
+  BOX.openCalendar(localKey(today));
+  for (let i = 0; i < 80; i++) BOX.calMove(1, 0);
+  let cal = BOX.calendar();
+  assert.equal(cal.selected, localKey(today), "right stops at today");
+  assert.equal(cal.month, today.getMonth(), "and it never leaves the current month");
+  for (let i = 0; i < 24; i++) BOX.calShiftMonth(1);
+  cal = BOX.calendar();
+  assert.equal(cal.month, today.getMonth(), "the month arrow stops at the current month");
+
+  BOX.openCalendar(epochKey());
+  for (let i = 0; i < 80; i++) BOX.calMove(-1, 0);
+  cal = BOX.calendar();
+  assert.equal(cal.selected, epochKey(), "left stops at the epoch");
+  assert.equal(cal.year, 2026);
+  assert.equal(cal.month, 9, "October 2026 is the first month");
+  for (let i = 0; i < 24; i++) BOX.calShiftMonth(-1);
+  cal = BOX.calendar();
+  assert.equal(cal.month, 9, "the month arrow stops at the epoch month");
+
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  assert.equal(BOX.calSelectable(localKey(tomorrow)), false, "tomorrow is not selectable");
+  assert.equal(BOX.calSelectable("2026-10-25"), false, "the day before the epoch is not selectable");
+  assert.equal(BOX.calSelectable(epochKey()), true);
+});
+
+test("daily-box app: a solve shows the tally card and A opens the calendar on that day (app-vm)", async () => {
+  const { app, pad } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = openTodayOn(app);
+  BOX.load(ONE_PUSH);
+  pad.press("right");
+  run(app, 22);
+  pad.release("right");
+  assert.equal(BOX.state().solved, true);
+  run(app, 30);
+  assert.equal(BOX.state().ui, "card", "the tally card follows the solve");
+
+  tapButton(app, pad, "a");
+  assert.equal(BOX.state().ui, "calendar");
+  assert.equal(BOX.calendar().selected, localKey(new Date()));
+});
+
+/* --- round 2: trim order, back-play timing, box-now isolation, calendar hit boxes and B ---------- */
+
+function weekdayOfKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+}
+
+/* Mirrors the calendar layout constants in game.js (CAL_LEFT 2, col 22, CAL_TOP 28, row 17). */
+function cellCenterFor(BOX, key) {
+  const cal = BOX.calendar();
+  const [, , day] = key.split("-").map(Number);
+  const offset = (new Date(cal.year, cal.month, 1).getDay() + 6) % 7;
+  const index = offset + day - 1;
+  return { x: 2 + (index % 7) * 22 + 10, y: 28 + Math.floor(index / 7) * 17 + 8 };
+}
+
+test("daily-box app: the 400-day trim never deletes the day just recorded (app-vm)", async () => {
+  const base = new Date();
+  const days = {};
+  const tomorrowKey = localKey(new Date(base.getFullYear(), base.getMonth(), base.getDate() + 1));
+  for (let i = 1; i <= 400; i++) {
+    const d = new Date(base.getFullYear(), base.getMonth(), base.getDate() + i);
+    days[localKey(d)] = { pushes: 1, moves: 1, ms: 1, peeked: false };
+  }
+  const key = pastKey(1);
+  const { app, pad } = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.openDay(key), true);
+  BOX.load(ONE_PUSH);
+  pad.press("right");
+  run(app, 22);
+  pad.release("right");
+  assert.equal(BOX.state().solved, true);
+
+  const kept = pad.data.box.days;
+  assert.ok(kept[key], "the back-played day survives the trim");
+  assert.equal(kept[key].late, true);
+  assert.equal(Object.keys(kept).length, 400);
+  assert.ok(!kept[tomorrowKey], "the oldest day other than the new one is trimmed");
+});
+
+test("daily-box app: solving today after back-playing yesterday is not late (app-vm)", async () => {
+  const { app, pad } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  assert.equal(BOX.openDay(pastKey(1)), true);
+  assert.equal(BOX.openDay(localKey(new Date())), true);
+  BOX.load(ONE_PUSH);
+  pad.press("right");
+  run(app, 22);
+  pad.release("right");
+
+  const day = pad.data.box.days[localKey(new Date())];
+  assert.ok(day);
+  assert.ok(!("late" in day), "today's solve happened on the day itself");
+});
+
+test("daily-box app: solving a past puzzle keeps another day's box-now (app-vm)", async () => {
+  const todayK = localKey(new Date());
+  const pastK = pastKey(1);
+  const now = new Date();
+  const pastDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+  const level = Board.levelFor(pastDay);
+  const solvedState = Board.create(level);
+  for (const dir of level.solution) Board.step(solvedState, dir);
+  const history = solvedState.history.concat([{
+    player: solvedState.player,
+    boxes: solvedState.boxes.slice(),
+    moves: solvedState.moves,
+    pushes: solvedState.pushes,
+  }]);
+
+  const { app, pad } = bootBox({ "box-help": 1, "box-now": { date: pastK, history, ms: 4321 } });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  openTodayOn(app);
+  BOX.load(CORRIDOR);
+  run(app, 1);
+  pad.press("right");
+  run(app, 2);
+  pad.release("right");
+  run(app, 1);
+  assert.equal(pad.data["box-now"].date, todayK, "today's board is now the stored one");
+
+  assert.equal(BOX.openDay(pastK), true);
+  assert.ok(pad.data["box-now"], "the other day's box-now is still there");
+  assert.equal(pad.data["box-now"].date, todayK, "solving the past day did not delete today's board");
+  assert.equal(pad.data.box.days[pastK].late, true);
+});
+
+test("daily-box app: calendar cells and arrow zones never accept future or pre-epoch days (app-vm)", async () => {
+  const { app } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+
+  BOX.openCalendar(epochKey());
+  const pre = cellCenterFor(BOX, "2026-10-25");
+  assert.equal(BOX.calHit(pre.x, pre.y), null, "the day before the epoch is not a cell target");
+  const first = cellCenterFor(BOX, epochKey());
+  assert.equal(BOX.calHit(first.x, first.y), epochKey());
+  assert.equal(BOX.calArrow(10, 5), 0, "there is no month before the epoch");
+  const epochIsCurrent = BOX.calendar().today.slice(0, 7) === epochKey().slice(0, 7);
+  assert.equal(BOX.calArrow(150, 5), epochIsCurrent ? 0 : 1);
+
+  BOX.openCalendar(localKey(new Date()));
+  const today = new Date();
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  if (tomorrow.getMonth() === today.getMonth()) {
+    const future = cellCenterFor(BOX, localKey(tomorrow));
+    assert.equal(BOX.calHit(future.x, future.y), null, "a future cell is not a target");
+  }
+  assert.equal(BOX.calArrow(150, 5), 0, "there is no month after the current month");
+  const cur = BOX.calendar();
+  assert.equal(BOX.calArrow(10, 5), cur.year === 2026 && cur.month === 9 ? 0 : -1);
+  assert.equal(BOX.calArrow(10, 20), 0, "the streak line is not an arrow zone");
+  assert.equal(BOX.calHit(10, 20), null, "and it is not a day cell either");
+});
+
+test("daily-box app: Up/Down on the calendar keep the same weekday column (app-vm)", async () => {
+  const { app } = bootBox({ "box-help": 1 });
+  await settleApp();
+  const BOX = app.ctx.get("BOX");
+  BOX.openCalendar(localKey(new Date()));
+  const start = BOX.calendar().selected;
+  const month = BOX.calendar().month;
+
+  for (let i = 0; i < 8; i++) BOX.calMove(0, -1);
+  let cal = BOX.calendar();
+  assert.equal(weekdayOfKey(cal.selected), weekdayOfKey(start), "up keeps the weekday");
+  assert.equal(cal.month, month, "up never jumps to another month");
+
+  for (let i = 0; i < 16; i++) BOX.calMove(0, 1);
+  cal = BOX.calendar();
+  assert.equal(weekdayOfKey(cal.selected), weekdayOfKey(start), "down keeps the weekday");
+  assert.equal(cal.month, month, "down never jumps to another month");
+});
+
+test("daily-box app: the calendar footer fits 160 px at its longest (app-vm)", async () => {
+  const key = localKey(new Date());
+  const days = {};
+  days[key] = { pushes: 999, moves: 999, ms: 6000000, peeked: true };
+
+  const zh = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  const zhBox = zh.app.ctx.get("BOX");
+  zhBox.openCalendar(key);
+  assert.ok(zh.app.ctx.get("game").g.measure(zhBox.calFooter()) <= 160);
+
+  const en = fakePad({ "box-help": 1, "box": { v: 1, days } });
+  en.pad.lang = "en";
+  const enApp = boot(join(ROOT, APP_REL), { pad: en.pad, seed: 1 });
+  await settleApp();
+  const enBox = enApp.ctx.get("BOX");
+  enBox.openCalendar(key);
+  const text = enBox.calFooter();
+  assert.ok(!text.includes("peek"), "the stamp already shows a peeked day");
+  assert.ok(enApp.ctx.get("game").g.measure(text) <= 160, `${text} is too wide`);
+});
+
+test("daily-box app: B on the calendar returns to title, pause menu or card (app-vm)", async () => {
+  const fromTitle = bootBox({ "box-help": 1 });
+  await settleApp();
+  let BOX = fromTitle.app.ctx.get("BOX");
+  tapButton(fromTitle.app, fromTitle.pad, "down");
+  tapButton(fromTitle.app, fromTitle.pad, "a");
+  assert.equal(BOX.state().ui, "calendar");
+  tapButton(fromTitle.app, fromTitle.pad, "b");
+  assert.equal(BOX.state().ui, "title");
+
+  const fromMenu = bootBox({ "box-help": 1 });
+  await settleApp();
+  BOX = openTodayOn(fromMenu.app);
+  tapButton(fromMenu.app, fromMenu.pad, "start");
+  for (let i = 0; i < 4; i++) tapButton(fromMenu.app, fromMenu.pad, "down");
+  tapButton(fromMenu.app, fromMenu.pad, "a");
+  assert.equal(BOX.state().ui, "calendar");
+  tapButton(fromMenu.app, fromMenu.pad, "b");
+  assert.equal(BOX.state().ui, "play");
+
+  const key = localKey(new Date());
+  const days = {};
+  days[key] = { pushes: 99, moves: 99, ms: 99999, peeked: false };
+  const fromCard = bootBox({ "box-help": 1, "box": { v: 1, days } });
+  await settleApp();
+  BOX = openTodayOn(fromCard.app);
+  assert.equal(BOX.state().ui, "card");
+  tapButton(fromCard.app, fromCard.pad, "a");
+  assert.equal(BOX.state().ui, "calendar");
+  tapButton(fromCard.app, fromCard.pad, "b");
+  assert.equal(BOX.state().ui, "card");
 });

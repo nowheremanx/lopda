@@ -16,6 +16,8 @@ var VEC = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var MS = BoxInput.MS;
 var WEEK_ZH = ["日", "一", "二", "三", "四", "五", "六"];
 var WEEK_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var MONTH_EN = ["January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"];
 
 var today, dayK, level, goalMap = new Uint8Array(CELLS);
 var state, inp = BoxInput.create();
@@ -27,6 +29,16 @@ var playMs = 0;
 var cardPending = false, cardAt = 0;
 var replay = null, dust = [], swipe = null;
 var menuSel = 0, menuBack = "play", confirmBack = "play", helpBack = "play";
+var titleSel = 0;
+var firstHint = false, hintUntil = 0;
+var calY = 0, calM = 0, calSel = null, calBack = "title";
+/* True when the puzzle on screen was deliberately opened from an earlier day. Only then does the
+   clock's midnight leave it alone; today's own puzzle still rolls over to the new day. */
+var backPlay = false;
+/* box-now keeps only one board on disk; this holds the others for the session, so looking at the
+   calendar or another day never loses a board that is already in progress. */
+var parked = {}, storageNowKey = null;
+var tallyDrop = false, tallyAt = 0;
 
 /* lo-game's pointer keeps only the latest position in a tick, so a down + move + up inside one tick
    would lose where the finger started. These listeners keep both ends of the gesture. */
@@ -79,6 +91,38 @@ if (typeof document !== "undefined" && document.addEventListener) {
 function pad2(n) { return n < 10 ? "0" + n : "" + n; }
 function dayKey(d) { return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate()); }
 
+function dayStart(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function addDays(d, n) { return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n); }
+
+/* The table's own epoch, so the calendar and box-now agree with Board.levelFor. */
+function epochKey() {
+  var e = (typeof LEVELS !== "undefined" && LEVELS.epoch) || [2026, 10, 26];
+  return e[0] + "-" + pad2(e[1]) + "-" + pad2(e[2]);
+}
+
+/* A strict YYYY-MM-DD to a local date, or null; 2026-02-31 must not become March. */
+function keyToDate(key) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(key || ""));
+  if (!m) return null;
+  var y = +m[1], mo = +m[2] - 1, d = +m[3];
+  var date = new Date(y, mo, d);
+  if (date.getFullYear() !== y || date.getMonth() !== mo || date.getDate() !== d) return null;
+  return date;
+}
+
+/* Calendar days run from the epoch to the real today; the table wraps, but the calendar does not. */
+function playableKey(key) {
+  return !!keyToDate(key) && key >= epochKey() && key <= dayKey(new Date());
+}
+
+function isTodayKey(key) { return key === dayKey(new Date()); }
+
+function mondayOf(d) {
+  var s = dayStart(d);
+  s.setDate(s.getDate() - ((s.getDay() + 6) % 7));
+  return s;
+}
+
 function dateLabel(d) {
   if (game.lang === "en") return WEEK_EN[d.getDay()] + " " + (d.getMonth() + 1) + "/" + d.getDate();
   return (d.getMonth() + 1) + "/" + d.getDate() + " 周" + WEEK_ZH[d.getDay()];
@@ -103,45 +147,56 @@ function normalizeBox(v) {
   Object.keys(v.days).forEach(function (key) {
     var day = v.days[key];
     if (validDay(day)) {
-      out.days[key] = {
+      var kept = {
         pushes: day.pushes,
         moves: day.moves,
         ms: day.ms,
         peeked: !!day.peeked
       };
+      /* `late` is only ever added (a past day solved later); old entries have no key and keep counting. */
+      if (day.late === true) kept.late = true;
+      out.days[key] = kept;
     }
   });
   return out;
 }
 
+/* Keep 400 days, but never the one just recorded: back-playing an old day puts it at the front
+   of the sorted list, and deleting it would lose the result the player just earned. */
 function trimDays() {
   var keys = Object.keys(saved.days).sort();
-  while (keys.length > 400) delete saved.days[keys.shift()];
+  while (keys.length > 400) {
+    var victim = keys[0] === dayK ? 1 : 0;
+    delete saved.days[keys.splice(victim, 1)[0]];
+  }
 }
 
-/* The first result of the day is the one kept: replaying a solved day never overwrites it. */
+/* The first result of the day is the one kept: replaying a solved day never overwrites it.
+   A day solved on a later date is marked late, so the streak (days solved on the day) stays honest. */
 function recordDay(pushes, moves, ms, wasPeeked) {
   if (saved.days[dayK]) return saved.days[dayK];
-  saved.days[dayK] = {
+  var rec = {
     pushes: pushes,
     moves: moves,
     ms: Math.max(0, Math.round(ms)),
     peeked: !!wasPeeked
   };
+  if (dayK !== dayKey(new Date())) rec.late = true;
+  saved.days[dayK] = rec;
   trimDays();
   if (boxWritable) game.save("box", saved);   /* a failed read must not overwrite the player's store */
-  game.remove("box-now");
   return saved.days[dayK];
 }
 
+/* Back from the real today: a day with an entry continues it, a `late` entry breaks it. Entries
+   written before 1.1.0 have no `late` and keep counting, as they always did. */
 function streakCount() {
-  if (!today) return 0;
-  var d = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  if (!saved.days[dayKey(d)]) d.setDate(d.getDate() - 1);
+  var d = dayStart(new Date());
+  if (!saved.days[dayKey(d)]) d = addDays(d, -1);
   var n = 0;
-  while (saved.days[dayKey(d)]) {
+  while (saved.days[dayKey(d)] && !saved.days[dayKey(d)].late) {
     n++;
-    d.setDate(d.getDate() - 1);
+    d = addDays(d, -1);
   }
   return n;
 }
@@ -151,17 +206,45 @@ function streakCount() {
    The save is capped at 400 snapshots so 400 moves can never reach the 256 KB budget; undo inside
    a session stays unlimited (state.history is not trimmed). `ms` keeps the elapsed time across a
    visit to HOME. */
-function saveNow() {
-  if (!state || solvedFlag) return;
+function nowDoc() {
+  if (!state) return null;
   var cur = { player: state.player, boxes: state.boxes.slice(), moves: state.moves, pushes: state.pushes };
   var hist = state.history.concat([cur]);
   if (hist.length > 400) hist = hist.slice(hist.length - 400);
-  game.save("box-now", {
+  return {
     date: dayK,
     history: hist,
     ms: Math.round(playMs),
     peeked: !!peeked
-  });
+  };
+}
+
+function saveNow() {
+  if (!state || solvedFlag) return;
+  var doc = nowDoc();
+  if (!doc) return;
+  game.save("box-now", doc);
+  storageNowKey = dayK;
+}
+
+/* Remove the one box-now slot only when it really holds this day's board: another day's board
+   parked in the session must not be thrown away because this one was solved or restarted. */
+function dropNowFor(key) {
+  if (storageNowKey === null || storageNowKey === key) {
+    game.remove("box-now");
+    storageNowKey = null;
+  }
+}
+
+/* Keep an in-progress board for this session when the player looks at another day. A blank board
+   is not worth a write, and a write would only replace another day's box-now on disk. */
+function parkCurrent() {
+  if (!state || solvedFlag) return;
+  if (state.moves <= 0 && state.pushes <= 0 && !peeked) return;
+  var doc = nowDoc();
+  if (!doc) return;
+  parked[dayK] = doc;
+  saveNow();
 }
 
 function validCell(v) {
@@ -226,7 +309,10 @@ function resetBoard(clearNow) {
   touchCancelled = false;
   touchIgnored = false;
   playMs = 0;
-  if (clearNow) game.remove("box-now");
+  if (clearNow) {
+    delete parked[dayK];
+    dropNowFor(dayK);
+  }
 }
 
 /* No held key may survive an overlay: otherwise the postman walks off on his own when it closes. */
@@ -260,6 +346,7 @@ function pumpReleases() {
 function freshToday() {
   today = new Date();
   dayK = dayKey(today);
+  backPlay = false;
   setLevel(Board.levelFor(today));
   peeked = false;
   resetBoard(false);
@@ -275,18 +362,22 @@ function anyInput() {
 /* Midnight while the app is open: the next play input, or coming back from HOME, starts the new
    day. A card already on screen stays until A, as the brief says. */
 function switchDay(now) {
-  today = now;
-  dayK = dayKey(now);
-  setLevel(Board.levelFor(now));
+  var oldKey = dayK;
+  today = dayStart(now);
+  dayK = dayKey(today);
+  backPlay = false;
+  setLevel(Board.levelFor(today));
   peeked = false;
   resetBoard(false);
-  game.remove("box-now");
+  delete parked[oldKey];
+  dropNowFor(oldKey);
   var rec = saved.days[dayK];
   if (rec) {
     for (var i = 0; i < level.solution.length; i++) Board.step(state, level.solution[i]);
     solvedFlag = true;
     inp.won = true;
     solvedRecord = rec;
+    tallyDrop = false;
     ui = "card";
   } else {
     ui = "play";
@@ -295,9 +386,12 @@ function switchDay(now) {
   return true;
 }
 
+/* A past puzzle is the player's to finish: only today's board rolls over at midnight. */
 function maybeNewDay() {
   var now = new Date();
-  if (dayKey(now) === dayK) return false;
+  var nowKey = dayKey(now);
+  if (nowKey === dayK) return false;
+  if (backPlay) return false;
   if (ui === "card") return false;
   if (solvedFlag && ui !== "done") return false;
   return switchDay(now);
@@ -311,47 +405,256 @@ function readKey(key) {
   );
 }
 
+function showFirstHint() {
+  hintUntil = game.time + 6;
+  seenHelp = true;
+  /* Keep the old key written (never deleted) so the hint stays a first-start thing. */
+  game.save("box-help", 1);
+}
+
+/* Open a day's puzzle: a finished day shows its result, a day in progress restores it, and a
+   fresh day starts empty. The calendar refuses days outside the epoch..today range; the title's
+   今天 row uses `force` so a phone with a wrong clock can still play. */
+function openDay(d, force) {
+  var key = dayKey(d);
+  if (!force && !playableKey(key)) return false;
+  backPlay = key < dayKey(new Date());
+  var hint = firstHint;
+  firstHint = false;
+  var same = (dayK === key && state && level);
+  if (same) {
+    var recNow = saved.days[key];
+    if (solvedFlag || recNow) {
+      if (!solvedFlag) {
+        resetBoard(false);
+        for (var j = 0; j < level.solution.length; j++) Board.step(state, level.solution[j]);
+      }
+      solvedFlag = true;
+      inp.won = true;
+      solvedRecord = saved.days[key] || solvedRecord;
+      tallyDrop = false;
+      ui = "card";
+      clearInput();
+      return true;
+    }
+    var live = parked[key];
+    if (live && state.moves === 0 && state.pushes === 0 && !peeked) {
+      if (restoreNow(live)) {
+        delete parked[key];
+        if (Board.solved(state)) onSolved();
+      } else if (storageNowKey === key) {
+        game.remove("box-now");
+        storageNowKey = null;
+      }
+    }
+    ui = "play";
+    if (hint && !solvedFlag) showFirstHint();
+    clearInput();
+    return true;
+  }
+
+  parkCurrent();
+  today = dayStart(d);
+  dayK = key;
+  setLevel(Board.levelFor(today));
+  peeked = false;
+  resetBoard(false);
+
+  var rec = saved.days[key];
+  if (rec) {
+    /* A solved day opens on its finished board: replay the stored moves with no animation. */
+    for (var i = 0; i < level.solution.length; i++) Board.step(state, level.solution[i]);
+    solvedFlag = true;
+    inp.won = true;
+    solvedRecord = rec;
+    tallyDrop = false;
+    ui = "card";
+    delete parked[key];
+    if (storageNowKey === key) { game.remove("box-now"); storageNowKey = null; }
+  } else {
+    var doc = parked[key];
+    delete parked[key];
+    if (doc && restoreNow(doc)) {
+      ui = "play";
+      /* The winning move itself can be in box-now: finish the day instead of showing an unsolved board. */
+      if (Board.solved(state)) onSolved();
+    } else {
+      if (doc && storageNowKey === key) { game.remove("box-now"); storageNowKey = null; }
+      ui = "play";
+    }
+    if (hint && !solvedFlag && ui === "play") showFirstHint();
+  }
+  clearInput();
+  return true;
+}
+
+function openToday() { return openDay(new Date(), true); }
+
 function loadAll() {
   Promise.all([readKey("box"), readKey("box-now"), readKey("box-help")]).then(function (r) {
     boxWritable = r[0].ok;
     saved = normalizeBox(r[0].value);
     trimDays();
     seenHelp = !!(r[2].ok && r[2].value);
+    firstHint = !seenHelp;
+    parked = {};
+    storageNowKey = null;
+    var old = r[1].ok ? r[1].value : null;
+    if (old && keyToDate(old.date) && old.date >= epochKey() && old.date <= dayKey(new Date()) &&
+        !saved.days[old.date]) {
+      parked[old.date] = old;
+      storageNowKey = old.date;
+    } else if (old) {
+      game.remove("box-now");   /* a future, malformed or finished day's board is not ours to resume */
+    }
     freshToday();
-    var now = r[1].ok ? r[1].value : null;
-    var rec = saved.days[dayK];
-    if (rec) {
-      /* A solved day opens on its finished board: replay the stored moves with no animation. */
-      for (var i = 0; i < level.solution.length; i++) Board.step(state, level.solution[i]);
-      solvedFlag = true;
-      inp.won = true;
-      solvedRecord = rec;
-      if (now) game.remove("box-now");
-      ui = "card";
-    } else if (now && now.date === dayK && restoreNow(now)) {
-      ui = "play";
-      /* The winning move itself can be in box-now: finish the day instead of showing an unsolved board. */
-      if (Board.solved(state)) onSolved();
-    } else {
-      if (now) game.remove("box-now");
-      ui = "play";
-    }
+    ui = "title";
     clearInput();
-    if (!seenHelp) {
-      helpBack = ui;
-      ui = "help";
-    }
   }).catch(function () {
     /* Unexpected only: keep whatever was read, but never leave level/state undefined. */
     if (!level || !state) {
       try { freshToday(); } catch (e) {}
     }
+    firstHint = true;
     clearInput();
-    ui = "play";
+    ui = "title";
   });
 }
 
-/* ---------------- sound: all original, and quiet ---------------- */
+/* ---------------- the calendar ---------------- */
+
+var parCache = {};
+
+function calMonthInRange(y, m) {
+  var e = keyToDate(epochKey()), t = dayStart(new Date());
+  return (y * 12 + m) >= (e.getFullYear() * 12 + e.getMonth()) &&
+    (y * 12 + m) <= (t.getFullYear() * 12 + t.getMonth());
+}
+
+function calDaysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+/* The first and last days of a month the calendar may select: 1..end, trimmed by the epoch and today. */
+function calMonthRange(y, m) {
+  if (!calMonthInRange(y, m)) return null;
+  var first = 1, last = calDaysInMonth(y, m);
+  var ek = epochKey(), tk = dayKey(new Date());
+  var prefix = y + "-" + pad2(m + 1) + "-";
+  if (ek.slice(0, 7) === prefix.slice(0, 7)) first = +ek.slice(8, 10);
+  if (tk.slice(0, 7) === prefix.slice(0, 7)) last = +tk.slice(8, 10);
+  if (first > last) return null;
+  return { first: first, last: last };
+}
+
+function calKey(y, m, day) { return y + "-" + pad2(m + 1) + "-" + pad2(day); }
+
+function parForKey(key) {
+  if (parCache[key] == null) {
+    var d = keyToDate(key);
+    try { parCache[key] = d ? Board.levelFor(d).par : 0; } catch (e) { parCache[key] = 0; }
+  }
+  return parCache[key];
+}
+
+function stampKind(key, rec) {
+  if (!rec) return null;
+  if (rec.peeked) return "peek";
+  return rec.pushes === parForKey(key) ? "perfect" : "over";
+}
+
+function monthParCount(y, m) {
+  var b = calMonthRange(y, m);
+  if (!b) return 0;
+  var n = 0;
+  for (var day = b.first; day <= b.last; day++) {
+    var key = calKey(y, m, day), rec = saved.days[key];
+    if (rec && !rec.peeked && rec.pushes === parForKey(key)) n++;
+  }
+  return n;
+}
+
+function calSelectable(key) { return playableKey(key); }
+
+/* Open the calendar on a day; a day outside the epoch..today range falls back to today.
+   `back` is where B returns: "title", "play" (the pause menu) or "card" (the result card). */
+function openCalendar(key, back) {
+  if (back) calBack = back;
+  var d = key ? keyToDate(key) : null;
+  if (!d || !calMonthInRange(d.getFullYear(), d.getMonth())) d = dayStart(new Date());
+  var dk = dayKey(d);
+  if (dk < epochKey()) d = keyToDate(epochKey());
+  if (dk > dayKey(new Date())) d = dayStart(new Date());
+  calY = d.getFullYear();
+  calM = d.getMonth();
+  calSel = dayKey(d);
+  if (!calSelectable(calSel)) {
+    var b = calMonthRange(calY, calM);
+    if (b) calSel = calKey(calY, calM, b.first);
+  }
+  clearInput();
+  ui = "calendar";
+  game.sfx("tap");
+}
+
+/* Left/right step a day (and cross a month edge); up/down step a week in the same weekday column.
+   A vertical step that leaves the month or the selectable range does nothing: it never jumps to
+   another weekday. */
+function calMove(dx, dy) {
+  if (ui !== "calendar") openCalendar(calSel || dayKey(new Date()));
+  var cur = keyToDate(calSel);
+  if (!cur) return false;
+  if (dx) {
+    var next = addDays(cur, dx);
+    var key = dayKey(next);
+    if (!calSelectable(key)) return false;
+    calY = next.getFullYear();
+    calM = next.getMonth();
+    calSel = key;
+    return true;
+  }
+  if (dy) {
+    var far = addDays(cur, dy * 7);
+    if (far.getFullYear() !== calY || far.getMonth() !== calM) return false;
+    var k = dayKey(far);
+    if (!calSelectable(k)) return false;
+    calSel = k;
+    return true;
+  }
+  return false;
+}
+
+/* The header arrows change a whole month, never past the epoch month or the current month. */
+function calCanShift(delta) {
+  var y = calY, m = calM + delta;
+  y += Math.floor(m / 12);
+  m = ((m % 12) + 12) % 12;
+  return calMonthInRange(y, m) && !!calMonthRange(y, m);
+}
+
+function calShiftMonth(delta) {
+  if (!calCanShift(delta)) return false;
+  var m = calM + delta;
+  var y = calY + Math.floor(m / 12);
+  m = ((m % 12) + 12) % 12;
+  calY = y;
+  calM = m;
+  var b = calMonthRange(y, m);
+  if (!b) return false;
+  calSel = calKey(y, m, delta < 0 ? b.last : b.first);
+  return true;
+}
+
+function calDayKeyAt(row, col) {
+  var offset = (new Date(calY, calM, 1).getDay() + 6) % 7;
+  var day = row * 7 + col - offset + 1;
+  if (day < 1 || day > calDaysInMonth(calY, calM)) return null;
+  return calKey(calY, calM, day);
+}
+
+function openSelectedDay() {
+  if (!calSel || !calSelectable(calSel)) { game.sfx("err"); return; }
+  if (openDay(keyToDate(calSel))) game.sfx("tap");
+}
+
 
 function sndStep() {
   game.sfx({ wave: "square", from: 880, to: 880, ms: 18, attack: 1, decay: 17, vol: 0.02 });
@@ -442,9 +745,11 @@ function onSolved() {
   clearInput();
   /* The result comes before the removal: a full box-now must never cost the day's result. */
   solvedRecord = saved.days[dayK] || recordDay(state.pushes, state.moves, playMs, peeked);
-  game.remove("box-now");
+  delete parked[dayK];
+  dropNowFor(dayK);
   cardPending = true;
   cardAt = game.time + 0.35;
+  tallyDrop = true;
   sndWin();
 }
 
@@ -501,7 +806,8 @@ function menuItems() {
     T({ zh: "继续", en: "Resume" }),
     T({ zh: "重来", en: "Restart" }),
     T({ zh: "看答案", en: "Show answer" }),
-    T({ zh: "玩法", en: "How to play" })
+    T({ zh: "玩法", en: "How to play" }),
+    T({ zh: "日历", en: "Calendar" })
   ];
 }
 
@@ -527,12 +833,18 @@ function chooseMenu(i) {
   else if (i === 1) { confirmBack = "menu"; clearInput(); ui = "confirm"; }
   else if (i === 2) startReplay();
   else if (i === 3) { helpBack = "menu"; clearInput(); ui = "help"; }
+  else if (i === 4) {
+    parkCurrent();
+    openCalendar(dayKey(today || new Date()), "play");
+  }
 }
 
 function menuHit() {
   var p = game.pointer;
-  if (p.x < 24 || p.x > 136 || p.y < 32 || p.y >= 32 + 4 * 16) return -1;
-  return Math.min(3, Math.floor((p.y - 32) / 16));
+  var items = menuItems();
+  var top = 18, h = items.length * 22;
+  if (p.x < 24 || p.x > 136 || p.y < top || p.y >= top + h) return -1;
+  return Math.min(items.length - 1, Math.floor((p.y - top) / 22));
 }
 
 /* Only the A label confirms a tap; the rest of the dialog is inert. */
@@ -588,9 +900,11 @@ function updateHelp() {
 }
 
 function updateCard() {
-  if (game.pressed("a") || game.pointer.pressed) {
+  if (game.pressed("a") || (game.pointer.pressed && game.pointer.x < 80)) {
+    openCalendar(dayK, "card");
+  } else if (game.pressed("b") || game.pressed("start") || game.pointer.pressed) {
     clearInput();
-    ui = "done";
+    ui = "play";             /* 再看看: back to the finished board */
     game.sfx("tap");
   }
 }
@@ -598,6 +912,86 @@ function updateCard() {
 function updateDone() {
   if (game.pressed("start")) openMenu();
   else if (game.pressed("select")) openConfirm("done");
+}
+
+/* ---------------- title and calendar input ---------------- */
+
+var TITLE_ROW_Y = [78, 104], TITLE_ROW_H = 22;
+
+function chooseTitle(i) {
+  game.sfx("tap");
+  if (i === 0) openToday();
+  else openCalendar(dayKey(new Date()), "title");
+}
+
+function titleHit(x, y) {
+  if (x < 4 || x > 156) return -1;
+  for (var i = 0; i < TITLE_ROW_Y.length; i++) {
+    if (y >= TITLE_ROW_Y[i] && y < TITLE_ROW_Y[i] + TITLE_ROW_H) return i;
+  }
+  return -1;
+}
+
+function updateTitle() {
+  if (game.repeat("up", 0.32, 0.09)) { titleSel = (titleSel + 1) % 2; game.sfx("move"); }
+  else if (game.repeat("down", 0.32, 0.09)) { titleSel = (titleSel + 1) % 2; game.sfx("move"); }
+  if (game.pressed("a") || game.pressed("start")) chooseTitle(titleSel);
+  else if (game.pointer.pressed) {
+    var hit = titleHit(game.pointer.x, game.pointer.y);
+    if (hit >= 0) { titleSel = hit; chooseTitle(hit); }
+  }
+}
+
+var CAL_TOP = 28, CAL_ROW_H = 17, CAL_COL_W = 22, CAL_LEFT = 2, CAL_HEADER_H = 14;
+
+function calHitCell(x, y) {
+  /* The cells stay 17 tall: a 6-row month simply cannot be taller on a 144 px screen. */
+  if (y < CAL_TOP || y >= CAL_TOP + 6 * CAL_ROW_H) return null;
+  var col = Math.floor((x - CAL_LEFT) / CAL_COL_W);
+  var row = Math.floor((y - CAL_TOP) / CAL_ROW_H);
+  if (col < 0 || col > 6) return null;
+  var key = calDayKeyAt(row, col);
+  return key && calSelectable(key) ? key : null;
+}
+
+/* The month-arrow zones are on the month-name line only (y < 14); the streak/par text starts at
+   y = 14 and spans most of the width. An arrow that is out of range is neither drawn nor accepted,
+   and its 14 px height cannot grow to 22 without covering that text. */
+function calArrowAt(x, y) {
+  if (y < 0 || y >= CAL_HEADER_H) return 0;
+  if (x < 24) return calCanShift(-1) ? -1 : 0;
+  if (x > 136) return calCanShift(1) ? 1 : 0;
+  return 0;
+}
+
+function updateCalendar() {
+  var moved = false;
+  if (game.repeat("left", 0.32, 0.09)) moved = calMove(-1, 0);
+  else if (game.repeat("right", 0.32, 0.09)) moved = calMove(1, 0);
+  else if (game.repeat("up", 0.32, 0.09)) moved = calMove(0, -1);
+  else if (game.repeat("down", 0.32, 0.09)) moved = calMove(0, 1);
+  if (moved) game.sfx("move");
+
+  if (game.pressed("a") || game.pressed("start")) { openSelectedDay(); return; }
+  if (game.pressed("b")) {
+    ui = calBack || "title";
+    if (ui === "title") titleSel = 1;
+    game.sfx("miss");
+    return;
+  }
+  if (game.pointer.pressed) {
+    var arrow = calArrowAt(game.pointer.x, game.pointer.y);
+    if (arrow) {
+      if (calShiftMonth(arrow)) game.sfx("move"); else game.sfx("miss");
+    } else if (game.pointer.y < CAL_HEADER_H) {
+      game.sfx("miss");          /* the month line, but no arrow there */
+    } else {
+      var key = calHitCell(game.pointer.x, game.pointer.y);
+      if (!key) { game.sfx("miss"); return; }
+      if (key === calSel) openSelectedDay();
+      else { calSel = key; game.sfx("move"); }
+    }
+  }
 }
 
 /* ---------------- play input ---------------- */
@@ -671,6 +1065,8 @@ game.scene("play", {
   update: function (dt) {
     var now = game.time * 1000;
     if (ui === "loading") return;
+    if (ui === "title") { updateTitle(); return; }
+    if (ui === "calendar") { updateCalendar(); return; }
     if (ui === "play" && !solvedFlag && anyInput() && maybeNewDay()) return;
     if (ui === "done" && anyInput() && maybeNewDay()) return;
     pumpReleases();
@@ -690,6 +1086,7 @@ game.scene("play", {
 
     if (cardPending && !inp.anim && game.time >= cardAt) {
       cardPending = false;
+      tallyAt = game.time;
       clearInput();
       ui = "card";
       return;
@@ -828,6 +1225,13 @@ function statusPushes() {
 function drawStatus(g) {
   if (!state || !level || !today) return;
   g.rect(0, TB, 160, 16, g.INK);
+  if (hintUntil && game.time < hintUntil) {
+    /* The first puzzle teaches in one footer line instead of the old help wall. English is a
+       little shorter so it still fits one line at the twelve-pixel font. */
+    g.text(T({ zh: "推箱子到记号上，B 撤销", en: "Push to marks. B undo." }), 80, 131,
+      { color: g.PAPER, align: "center" });
+    return;
+  }
   g.text(dateLabel(today), 4, 131, { color: g.PAPER });
   var right = T({ zh: "推 {n}  最少 {p}", en: "{n} / par {p}" }, { n: statusPushes(), p: level.par });
   g.text(right, 156, 131, { color: g.PAPER, align: "right" });
@@ -835,12 +1239,12 @@ function drawStatus(g) {
 
 function helpLines() {
   return [
-    T({ zh: "把箱子推到记号上。", en: "Push crates to marks." }),
-    T({ zh: "只能推，不能拉。", en: "Push, never pull." }),
+    T({ zh: "推到记号上，只能推。", en: "Push to marks; no pull." }),
     T({ zh: "方向键或滑动，B 撤销。", en: "Keys/swipe. B undo." }),
     T({ zh: "SELECT 重来", en: "SELECT restart" }),
     T({ zh: "START 菜单", en: "START menu" }),
     T({ zh: "看答案也不断连续", en: "Peeking keeps streak" }),
+    T({ zh: "日历：往日补玩不算连续", en: "Past days: no streak." }),
     T({ zh: "一天一关，明天再来。", en: "One puzzle a day." })
   ];
 }
@@ -854,25 +1258,27 @@ function drawHelp(g) {
   g.rect(x + 10, ty - 4, w - 20, 1, g.MID);
   ty += 2;
   var lines = helpLines();
+  /* 142 px of text room keeps every help line (the longest about 141 px) on on one line. */
   for (var i = 0; i < lines.length; i++) {
-    ty += g.text(lines[i], x + 9, ty, { width: w - 18 });
+    ty += g.text(lines[i], x + 7, ty, { width: w - 14 });
   }
   g.text(T({ zh: "A 好", en: "A OK" }), x + w / 2, y + h - 16, { align: "center" });
 }
 
 function drawMenu(g) {
   var items = menuItems();
-  var x = 24, y = 8, w = 112, h = 112;
+  var x = 24, y = 0, w = 112, h = 144;
   g.window(x, y, w, h);
-  g.text(T({ zh: "暂停", en: "Paused" }), x + w / 2, y + 5, { align: "center" });
-  g.rect(x + 8, y + 20, w - 16, 1, g.MID);
+  g.text(T({ zh: "暂停", en: "Paused" }), x + w / 2, y + 2, { align: "center" });
+  g.rect(x + 8, y + 16, w - 16, 1, g.MID);
+  /* Rows are 22 units (about 44 CSS px on the smallest screen); five fit above the footer. */
   for (var i = 0; i < items.length; i++) {
-    var ry = y + 24 + i * 16;
+    var ry = y + 18 + i * 22;
     if (i === menuSel) {
-      g.rect(x + 6, ry - 1, w - 12, 15, g.INK);
-      g.text(items[i], x + 14, ry, { color: g.PAPER });
+      g.rect(x + 6, ry, w - 12, 22, g.INK);
+      g.text(items[i], x + 14, ry + 5, { color: g.PAPER });
     } else {
-      g.text(items[i], x + 14, ry);
+      g.text(items[i], x + 14, ry + 5);
     }
   }
   g.text(T({ zh: "A 好  B 返回", en: "A select  B back" }), x + w / 2, y + h - 14, { align: "center", color: g.DARK });
@@ -891,33 +1297,180 @@ function cardBadge(rec) {
   return rec.pushes === level.par ? "perfect" : null;
 }
 
+/* The little stamp the calendar and the tally strip use: a filled square at par, a ring above
+   par, a dot when the answer was seen. Drawn from pixels, never a font character. */
+function drawStamp(g, x, y, kind, color) {
+  color = color == null ? g.INK : color;
+  if (kind === "perfect") {
+    g.rect(x, y, 5, 5, color);
+  } else if (kind === "over") {
+    g.frame(x, y, 5, 5, color);
+  } else if (kind === "peek") {
+    g.rect(x + 1, y + 1, 3, 3, color);
+  }
+}
+
+/* The solved day's week, Mon-first, with the stamp dropping onto it. */
+function drawTallyStrip(g, x, y) {
+  var start = mondayOf(today);
+  var cw = 14, gap = 2;
+  for (var i = 0; i < 7; i++) {
+    var d = addDays(start, i), key = dayKey(d);
+    var cx = x + i * (cw + gap);
+    g.frame(cx, y, cw, 20, key === dayK ? g.INK : g.MID);
+    g.text(String(d.getDate()), cx + cw / 2, y + 1, { align: "center" });
+    var rec = saved.days[key];
+    if (!rec) continue;
+    var kind = stampKind(key, rec);
+    var sy = y + 14;
+    if (key === dayK && tallyDrop) {
+      var p = Math.max(0, Math.min(1, (game.time - tallyAt) / 0.45));
+      sy = y - 8 + Math.round(22 * ease(p));
+    }
+    drawStamp(g, cx + 4, sy, kind);
+  }
+}
+
+/* lopix12 has no 2x size, so the title's name is drawn once, read back and doubled.
+   The doubled glyphs span cx-w .. cx+w, so the name is centred on cx (not on the 1x copy). */
+function drawText2x(g, str, cx, y, color) {
+  var w = g.measure(str), sx = Math.round(cx - w / 2), dx = Math.round(cx - w), pts = [], yy, xx;
+  g.text(str, sx, y, { color: color });
+  for (yy = 0; yy < 12; yy++) {
+    for (xx = 0; xx < w; xx++) {
+      if (g.get(sx + xx, y + yy) === color) pts.push([xx, yy]);
+    }
+  }
+  g.rect(dx, y, 2 * w, 24, g.PAPER);
+  for (var i = 0; i < pts.length; i++) {
+    g.rect(dx + pts[i][0] * 2, y + pts[i][1] * 2, 2, 2, color);
+  }
+}
+
+function drawSpriteScale(g, s, x, y, k) {
+  for (var sy = 0; sy < s.h; sy++) {
+    for (var sx = 0; sx < s.w; sx++) {
+      var v = s.px[sy * s.w + sx];
+      if (v <= 3) g.rect(x + sx * k, y + sy * k, k, k, v);
+    }
+  }
+}
+
+function drawTri(g, x, y, dir, color) {
+  for (var i = 0; i < 6; i++) {
+    /* A left arrow keeps its base on the right; a right arrow keeps it on the left. */
+    g.rect(dir < 0 ? x + 5 - i : x + i, y + i, 1, 11 - 2 * i, color);
+  }
+}
+
+function drawTitle(g) {
+  drawSpriteScale(g, ART.box, 56, 2, 3);
+  drawText2x(g, T({ zh: "每日推箱", en: "DailyBox" }), 80, 54, g.INK);
+
+  var labels = [T({ zh: "今天", en: "Today" }), T({ zh: "日历", en: "Calendar" })];
+  var todayRec = saved.days[dayKey(new Date())];
+  for (var i = 0; i < 2; i++) {
+    var y = TITLE_ROW_Y[i], x = 4, w = 152, h = TITLE_ROW_H;
+    if (i === titleSel) {
+      g.rect(x, y, w, h, g.INK);
+      g.text(labels[i], x + 10, y + 4, { color: g.PAPER });
+    } else {
+      g.frame(x, y, w, h, g.MID);
+      g.text(labels[i], x + 10, y + 4);
+    }
+    if (i === 0) {
+      var date = new Date();
+      var dateStr = (date.getMonth() + 1) + "/" + date.getDate();
+      g.text(dateStr, x + w - (todayRec ? 22 : 10), y + 4,
+        { align: "right", color: i === titleSel ? g.PAPER : g.INK });
+      /* The ✓ the brief asks for is a stamp sprite, not a character in the font. On the selected
+         ink row a tone map keeps the check visible (ink body -> paper, paper check -> ink). */
+      if (todayRec) {
+        g.sprite(ART.stamp, x + w - 18, y + 5,
+          i === titleSel ? { map: [g.PAPER, g.PAPER, g.PAPER, g.INK] } : null);
+      }
+    }
+  }
+
+  g.rect(0, 128, 160, 16, g.INK);
+  g.text(T({ zh: "↑↓ 选   A 好", en: "Up/Down  A select" }), 80, 131,
+    { align: "center", color: g.PAPER });
+}
+
+function calendarFooter() {
+  if (!calSel || !calSelectable(calSel)) return T({ zh: "未解", en: "Unsolved" });
+  var rec = saved.days[calSel];
+  if (!rec) return T({ zh: "未解", en: "Unsolved" });
+  /* No peek suffix: the stamp already says it, and the longest case
+     "999 pushes · 100:00" measures 118 px (the band is 160 px). */
+  return T({ zh: "{n} 推 · {t}", en: "{n} pushes · {t}" }, { n: rec.pushes, t: fmtTime(rec.ms) });
+}
+
+function drawCalendar(g) {
+  /* A weekday header would need another 12 px and would push the 6-row grid past y=128:
+     it does not fit without shrinking the cells, so it is intentionally omitted. */
+  if (calCanShift(-1)) drawTri(g, 6, 3, -1, g.INK);
+  if (calCanShift(1)) drawTri(g, 148, 3, 1, g.INK);
+  var title = game.lang === "en" ? MONTH_EN[calM] + " " + calY : calY + " 年 " + (calM + 1) + " 月";
+  g.text(title, 80, 1, { align: "center" });
+  g.text(T({ zh: "连续 {k} 天 · 本月最少 {n}", en: "Streak {k} · Par {n}" },
+    { k: streakCount(), n: monthParCount(calY, calM) }), 80, 14, { align: "center", color: g.DARK });
+
+  var offset = (new Date(calY, calM, 1).getDay() + 6) % 7;   /* Monday first, like the table */
+  var days = calDaysInMonth(calY, calM);
+  var todayK = dayKey(new Date());
+  for (var row = 0; row < 6; row++) {
+    for (var col = 0; col < 7; col++) {
+      var day = row * 7 + col - offset + 1;
+      if (day < 1 || day > days) continue;
+      var key = calKey(calY, calM, day);
+      var cx = CAL_LEFT + col * CAL_COL_W, cy = CAL_TOP + row * CAL_ROW_H;
+      var selected = key === calSel;
+      var selectable = calSelectable(key);
+      if (selected) g.rect(cx, cy, 20, 15, g.INK);
+      else if (key === todayK) g.frame(cx, cy, 20, 15, g.INK);
+      else g.frame(cx, cy, 20, 15, g.MID);
+      var color = selected ? g.PAPER : (selectable ? g.INK : g.MID);
+      g.text(String(day), cx + 2, cy + 1, { color: color });
+      var rec = saved.days[key];
+      if (rec) drawStamp(g, cx + 14, cy + 9, stampKind(key, rec), color);
+    }
+  }
+
+  g.rect(0, 129, 160, 15, g.INK);
+  g.text(calendarFooter(), 80, 130, { align: "center", color: g.PAPER });
+}
+
 function drawCard(g) {
   var rec = solvedRecord || saved.days[dayK] || { pushes: state.pushes, moves: state.moves, ms: playMs, peeked: peeked };
   var badge = cardBadge(rec);
-  /* The peeked card carries one more line (it still counts for the streak), so it is 10 px taller. */
-  var w = 124, h = badge === "answer" ? 116 : 106, x = 18, y = Math.round((TB - h) / 2);
+  var w = 144, h = 126, x = 8, y = 1;
   g.window(x, y, w, h);
-  var ty = y + 6;
-  g.text(T({ zh: "今日完成", en: "All done" }), x + w / 2, ty, { align: "center" });
-  ty += 16;
+  var ty = y + 5;
+  var title = isTodayKey(dayK) ? T({ zh: "今日完成", en: "All done" }) : dateLabel(today);
+  g.text(title, x + w / 2, ty, { align: "center" });
+  ty += 15;
   if (badge === "answer") {
     g.text(T({ zh: "看过答案", en: "Answer shown" }), x + w / 2, ty, { align: "center", color: g.DARK });
-    ty += 14;
+    ty += 13;
     g.text(T({ zh: "看了答案也算连续", en: "Keeps your streak" }), x + w / 2, ty, { align: "center" });
-    ty += 14;
+    ty += 13;
   } else if (badge === "perfect") {
     g.text(T({ zh: "完美", en: "Perfect" }), x + w / 2, ty, { align: "center", color: g.DARK });
-    ty += 14;
+    ty += 13;
   }
   g.rect(x + 8, ty - 1, w - 16, 1, g.MID);
-  ty += 5;
-  g.text(T({ zh: "推 {n}  最少 {p}", en: "{n} / par {p}" }, { n: rec.pushes, p: level.par }),
+  ty += 4;
+  g.text(T({ zh: "推 {n} · {t}", en: "{n} pushes · {t}" }, { n: rec.pushes, t: fmtTime(rec.ms) }),
     x + w / 2, ty, { align: "center" });
   ty += 14;
-  g.text(T({ zh: "用时 {t}", en: "Time {t}" }, { t: fmtTime(rec.ms) }), x + w / 2, ty, { align: "center" });
-  ty += 14;
   g.text(T({ zh: "连续 {k} 天", en: "Streak {k}" }, { k: streakCount() }), x + w / 2, ty, { align: "center" });
-  g.text(T({ zh: "A 好", en: "A OK" }), x + w / 2, y + h - 18, { align: "center" });
+  drawTallyStrip(g, x + (w - 110) / 2, y + h - 38);
+  /* The prompt waits for the stamp to land, so the eye follows the drop first. */
+  if (!tallyDrop || game.time - tallyAt >= 0.45) {
+    g.text(T({ zh: "A 日历   B 再看看", en: "A calendar  B look" }), x + w / 2, y + h - 15,
+      { align: "center", color: g.DARK });
+  }
 }
 
 function drawTomorrow(g) {
@@ -929,7 +1482,10 @@ function drawTomorrow(g) {
 
 function draw(g) {
   g.clear(g.PAPER);
-  if (ui === "loading" || !level || !state) return;
+  if (ui === "loading") return;
+  if (ui === "title") { drawTitle(g); return; }
+  if (ui === "calendar") { drawCalendar(g); return; }
+  if (!level || !state) return;
   drawBoard(g);
   if (ui === "help") {
     drawHelp(g);            /* the help is the whole screen, so no status bar behind it */
@@ -995,12 +1551,31 @@ var BOX = {
   gesture: function (x0, y0, x1, y1, cancelled) {
     return gestureDirection({ x: x0, y: y0 }, { x: x1, y: y1 }, !!cancelled);
   },
+  title: function () {
+    return { ui: ui, selected: titleSel, today: dayKey(new Date()), solved: !!saved.days[dayKey(new Date())] };
+  },
+  openToday: function () { return openToday(); },
+  openDay: function (key) {
+    var d = keyToDate(key);
+    return d ? openDay(d) : false;
+  },
+  calendar: function () {
+    return { year: calY, month: calM, selected: calSel, today: dayKey(new Date()), earliest: epochKey(), ui: ui };
+  },
+  openCalendar: function (key) { openCalendar(key); },
+  calMove: function (dx, dy) { return calMove(dx, dy); },
+  calShiftMonth: function (delta) { return calShiftMonth(delta); },
+  calSelectable: function (key) { return calSelectable(key); },
+  calHit: function (x, y) { return calHitCell(x, y); },
+  calArrow: function (x, y) { return calArrowAt(x, y); },
+  calFooter: function () { return calendarFooter(); },
   load: function (rows) {
     if (!today) today = new Date();
     dayK = dayKey(today);
     setLevel(levelFromRows(rows));
     peeked = false;
     seenHelp = true;
+    firstHint = false;
     resetBoard(true);
     ui = "play";
   }
