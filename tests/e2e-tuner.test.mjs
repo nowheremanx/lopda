@@ -247,6 +247,20 @@ test("tuner: another program's music stops it, and so does the sleep timer", { s
   assert.deepEqual(errors, []);
 });
 
+test("tuner: each name on the dial is a 44 px tap target, the upper and lower rows apart, and a tap tunes it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { viewport: { width: 375, height: 667 } });
+  const boxes = await p.evaluate(() => Array.from(document.querySelectorAll("#tn-scale .tn-label")).slice(0, 2).map((b) => {
+    const r = b.getBoundingClientRect(); return { h: r.height, top: r.top, bottom: r.bottom };
+  }));
+  assert.ok(boxes[0].h >= 44 && boxes[1].h >= 44, "both rows are 44 px tall: " + JSON.stringify(boxes));
+  assert.ok(boxes[0].bottom <= boxes[1].top, "an upper and a lower name never share a tap area");
+  const from = await p.evaluate(() => Math.round(window.LOPDA_DEBUG.tuner.T.pos));
+  const to = from + 1 < 6 ? from + 1 : from - 1;
+  await p.locator("#tn-scale .tn-label").nth(to).click();
+  await until(p, (i) => { const T = window.LOPDA_DEBUG.tuner.T; return !T.anim && T.pos === i; }, to);
+  assert.deepEqual(errors, []);
+});
+
 test("tuner: edit, move and delete a station; a deleted seed stays deleted after a reload", { skip, timeout: 60000 }, async (t) => {
   const { p, errors, key, st, doc } = await open(t);
   await key("start");
@@ -270,6 +284,14 @@ test("tuner: edit, move and delete a station; a deleted seed stays deleted after
   await key("a");
   assert.match(await p.locator("#tn-edit-note").textContent(), /http/);
   assert.equal((await st()).page, "edit");
+
+  /* a move in between disarms 删除: the next press asks again (issue #456) */
+  await p.click("#tn-edit-del");
+  await p.click("#tn-edit-down");
+  assert.equal(await p.textContent("#tn-edit-del"), "删除", "moving takes the second press away");
+  await p.click("#tn-edit-del");
+  assert.equal((await st()).n, 6, "the first press after a move only arms it");
+  await p.click("#tn-edit-up");
 
   /* delete takes two presses */
   await p.click("#tn-edit-del");
