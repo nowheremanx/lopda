@@ -23,6 +23,10 @@
 "use strict";
 
 var VERSION=1, W=800, H=700;
+/* every algorithm version this runtime can still develop: when VERSION moves on, the old one stays listed here with its
+   code path, so rolls developed with it reprint as before (decisions.md section 19). Only a newer one is refused. */
+var KNOWN=[1];
+function known(v){ return KNOWN.indexOf(v)>=0; }
 
 /* The stocks, as numbers. Read them against the table in darkroom.md section 4.
    ev    exposure offset in stops         wb    white balance multipliers (r, g, b), in linear light
@@ -123,7 +127,7 @@ function look(lut,lin){ var q=Math.sqrt(lin<0?0:lin>LMAX?1:lin/LMAX); return lut
    o: {stock, rollSeed, size, res, n, exposure, contrast, dated, taken, blank, devSeed, v, scale (1: 800x700, 2: 1600x1400)}
    Returns {data: Uint8ClampedArray RGBA, w, h}. */
 function develop(src,o){
-  if(o.v!=null && o.v!==VERSION) throw new Error("develop v"+o.v+" is not known to this runtime");
+  if(o.v!=null && !known(o.v)) throw new Error("develop v"+o.v+" is not known to this runtime");
   var s=stockFor(o.stock,o.rollSeed>>>0), scale=o.scale===2?2:1, N=W*H;
   var R=new Float32Array(N), G=new Float32Array(N), B=new Float32Array(N), HL=null;
   /* the lab's drift: a little for the whole roll, less per frame; black and white film has no colour to drift */
@@ -366,6 +370,6 @@ function shrink(img,dw,dh){
 /* what strips and contact sheets print in the stock's colours */
 function edgeOf(id){ var s=STOCKS[id]||STOCKS.portrait; return {edge:s.edge, base:s.base||BASE, holes:s.holes||HOLES, text:s.text||TEXT}; }
 
-window.LopdaDevelop={VERSION:VERSION, W:W, H:H, STOCKS:STOCKS, ORDER:ORDER, LEAK_P:LEAK_P,
+window.LopdaDevelop={VERSION:VERSION, known:known, W:W, H:H, STOCKS:STOCKS, ORDER:ORDER, LEAK_P:LEAK_P,
   develop:develop, devSeed:devSeed, leakOf:leakOf, stockFor:stockFor, shrink:shrink, edgeOf:edgeOf, dateText:dateText, rng:rng, mix:mix};
 })(Math,Float32Array,Uint8ClampedArray);
