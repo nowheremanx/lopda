@@ -312,9 +312,9 @@ test("counter opens fortune; a daily draw is saved once and START writes its exa
   const index = env.app.ctx.get("SLIPS").slotFor(key);
   assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: false });
   assert.equal(env.saveCalls.filter((call) => call.key === "slip").length, 1, "drawing persists once");
-  const buttons = drawnLines(env.app);
-  assert.ok(buttons.includes("写入记事本"));
-  assert.ok(buttons.includes("不写"));
+  const after = drawnLines(env.app);
+  assert.ok(!after.includes("不写"), "no question about notes after a draw");
+  assert.ok(after.some((line) => line.includes("START 写入记事本")), "the footer says how to write");
   env.press("start");
   await settle();
   const item = env.app.ctx.get("SLIPS").DATA[index];
@@ -325,56 +325,7 @@ test("counter opens fortune; a daily draw is saved once and START writes its exa
   assert.deepEqual(env.saves.get("slip"), { dateKey: key, slip: index, written: true });
 });
 
-test("Right then A skips without writing or changing the saved draw; Left then A writes once", async () => {
-  const skipped = bootStored("zh");
-  await settle();
-  skipped.app.ctx.get("openSection")("fortune");
-  skipped.press("a");
-  for (let i = 0; i < 150; i++) skipped.app.frame();
-  await settle();
-  const original = { ...skipped.saves.get("slip") };
-  skipped.press("right");
-  skipped.press("a");
-  await settle();
-  assert.equal(skipped.app.ctx.get("slipSkipped"), true);
-  assert.deepEqual(skipped.appends, []);
-  assert.deepEqual(skipped.saves.get("slip"), original, "skip does not save a new choice");
-  assert.ok(drawnLines(skipped.app).includes("今天已抽 · 明天再来"));
-  skipped.press("a");
-  assert.deepEqual(skipped.appends, [], "the hidden choice cannot be confirmed again");
 
-  const written = bootStored("zh");
-  await settle();
-  written.app.ctx.get("openSection")("fortune");
-  written.press("a");
-  for (let i = 0; i < 150; i++) written.app.frame();
-  await settle();
-  written.press("right");
-  written.press("left");
-  written.press("a");
-  await settle();
-  assert.equal(written.appends.length, 1);
-  assert.equal(written.saves.get("slip").written, true);
-});
-
-test("slip text and both choices fit, and a tap on Skip marks only this visit", async () => {
-  for (const lang of ["zh", "en"]) {
-    const env = bootStored(lang);
-    await settle();
-    env.app.ctx.get("openSection")("fortune");
-    env.app.ctx.get("slipState").slip = 0;
-    const lines = drawnLines(env.app), g = env.app.ctx.get("game").g;
-    for (const line of lines) assert.ok(g.measure(line) <= SCREEN_W, `${lang}: ${line} is too wide`);
-    assert.ok(lines.includes(lang === "zh" ? "写入记事本" : "To notes"));
-    assert.ok(lines.includes(lang === "zh" ? "不写" : "Skip"));
-    if (lang === "zh") {
-      env.app.pointer("pointerdown", 160, 190, 216, 240);
-      env.app.frame();
-      assert.equal(env.app.ctx.get("slipSkipped"), true);
-      assert.equal(env.appends.length, 0);
-    }
-  }
-});
 
 test("a rejected slip load is never overwritten, and B returns from both sections", async () => {
   const env = bootStored("zh", null, true);
@@ -738,7 +689,7 @@ test("explanation data, gua results and details fit in both languages", async ()
     const changed = env.app.ctx.get("YI").changed(state.lines);
     if (changed) assert.ok(result.some((line) => line.includes("变卦") || line.includes("Changed:")));
     for (const line of result) assert.ok(g.measure(line) <= SCREEN_W, `${lang} result: ${line}`);
-    const expectedKey = lang === "zh" ? "←→选择 · A确认 · SELECT详解" : "←→ pick · A ok · SELECT more";
+    const expectedKey = lang === "zh" ? "START记事本 · SELECT详解" : "START notes · SELECT more";
     assert.ok(result.join(" ").includes(expectedKey));
     env.press("select");
     const details = drawnLines(env.app);
@@ -781,29 +732,6 @@ test("the coins on screen are the ones that made the line: backs 0-3 give 6, 7, 
   }
 });
 
-test("八卦 after a cast: Left/Right pick 写入记事本 or 不写, A presses it", async () => {
-  const done = [9, 7, 8, 6, 7, 8];
-  const skip = bootStored("zh", { v: 1, day: todayKeyForTest(), lines: done });
-  await settle();
-  skip.app.ctx.get("openSection")("hexagram");
-  skip.press("right");
-  assert.equal(skip.app.ctx.get("guaChoice"), 1);
-  skip.press("a");
-  await settle();
-  assert.equal(skip.appends.length, 0, "不写 writes nothing");
-  assert.equal(skip.app.ctx.get("guaButtonsShown")(), false);
-
-  const write = bootStored("zh", { v: 1, day: todayKeyForTest(), lines: done });
-  await settle();
-  write.app.ctx.get("openSection")("hexagram");
-  write.press("right");
-  write.press("left");
-  write.press("a");
-  await settle();
-  assert.equal(write.appends.length, 1);
-  assert.equal(write.appends[0].title, "八卦");
-  assert.equal(write.saves.get("gua").written, true);
-});
 
 function todayKeyForTest() {
   const d = new Date(), p = (n) => String(n).padStart(2, "0");
@@ -822,4 +750,32 @@ test("宜 / 忌 boxes hold every term line inside their frame for every day of 2
       for (const line of box.lines) assert.ok(g.measure(line) <= box.w - 6, `${y}-${m}-${day}: ${line}`);
     }
   }
+});
+
+test("no question about notes: after a slip or a cast A and the arrows write nothing; START writes", async () => {
+  const slip = bootStored("zh");
+  await settle();
+  slip.app.ctx.get("openSection")("fortune");
+  slip.press("a");
+  for (let i = 0; i < 160; i++) slip.app.frame();
+  for (const b of ["left", "right", "a"]) slip.press(b);
+  await settle();
+  assert.equal(slip.appends.length, 0);
+  for (const line of drawnLines(slip.app)) assert.ok(slip.app.ctx.get("game").g.measure(line) <= SCREEN_W, line);
+  slip.press("start");
+  await settle();
+  assert.equal(slip.appends.length, 1);
+
+  const gua = bootStored("zh", { v: 1, day: todayKeyForTest(), lines: [9, 7, 8, 6, 7, 8] });
+  await settle();
+  gua.app.ctx.get("openSection")("hexagram");
+  const shown = drawnLines(gua.app);
+  assert.ok(!shown.includes("不写") && !shown.includes("写入记事本"), "no buttons on the cast");
+  for (const b of ["left", "right", "a"]) gua.press(b);
+  await settle();
+  assert.equal(gua.appends.length, 0);
+  gua.press("start");
+  await settle();
+  assert.equal(gua.appends.length, 1);
+  assert.equal(gua.appends[0].title, "八卦");
 });

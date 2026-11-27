@@ -108,7 +108,7 @@ test("luck-compass: counter sections, daily slip and notes work from keys", { sk
   await key("ArrowRight");
   await key("x");
   assert.deepEqual(await saved(), firstDraw, "a second A does not change today's saved slip");
-  assert.doesNotMatch(await p.textContent("#log"), /notes\.append dialog:/, "Skip does not write a note");
+  assert.doesNotMatch(await p.textContent("#log"), /notes\.append dialog:/, "A and the arrows never write a note; only START does");
 
   await key("Enter");
   await p.waitForFunction(() => /notes\.append dialog:/.test(document.getElementById("log").textContent) &&

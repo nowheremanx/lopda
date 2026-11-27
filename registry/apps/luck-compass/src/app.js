@@ -524,7 +524,7 @@ function drawPanel(g, stem) {
 
 var slipState = { dateKey: todayKey(), slip: null, written: false, animating: false };
 var loadComplete = false, loadFailed = false, slipScroll = 0, appendBusy = false, appendStatus = "";
-var slipChoice = 0, slipSkipped = false, slipRevealAt = -1;
+var slipRevealAt = -1;
 var slipAnimAt = -1, slipAnimSpan = 0.82, slipLiftSpan = 0.62;
 var REDUCED_MOTION = typeof window.matchMedia === "function" &&
   window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -597,13 +597,6 @@ function scrollUpdate(sc, area, total, dt, lineHeight) {
   return sc.offset;
 }
 function scrollTapAllowed() { return !scrollGestureMoved; }
-function drawScrollbar(g, sc, area, total) {
-  if (total <= area.h) return;
-  var h = Math.max(8, Math.floor(area.h * area.h / total));
-  var y = area.y + Math.floor((area.h - h) * sc.offset / Math.max(1, sc.max));
-  g.rect(area.x + area.w - 3, area.y, 2, area.h, g.MID);
-  g.rect(area.x + area.w - 3, y, 2, h, g.INK);
-}
 function fillPoly(g, pts, tone) {
   var minY = 10000, maxY = -10000, i, j, intersections, y, x;
   for (i = 0; i < pts.length; i++) { minY = Math.min(minY, pts[i].y); maxY = Math.max(maxY, pts[i].y); }
@@ -646,20 +639,13 @@ function syncSlipDate() {
 var guaState = { day: todayKey(), lines: [], loaded: false, failed: false, animating: false, written: false };
 var guaScroll = 0, guaExplain = false, guaExplainScroll = 0;
 var guaAppendBusy = false, guaAppendStatus = "";
-/* after a cast, like the slip: 写入记事本 / 不写, Left/Right and A; "skip" lasts for this visit only */
-var guaChoice = 0, guaSkipped = false;
-function guaButtonsShown() {
-  return guaState.lines.length === 6 && !guaState.animating && !guaState.written && !guaSkipped && !guaAppendBusy;
-}
-function guaArea() { return { x: 9, y: 22, w: 198, h: guaButtonsShown() ? 150 : 183 }; }
+function guaArea() { return { x: 9, y: 22, w: 198, h: 183 }; }
 function syncGuaDate() {
   var key = todayKey();
   if (key === guaState.day) return;
   guaState.day = key;
   guaState.lines = [];
   guaState.written = false;
-  guaSkipped = false;
-  guaChoice = 0;
   guaState.animating = false;
   guaAppendStatus = "";
   guaScroll = 0;
@@ -783,8 +769,6 @@ function drawSlip() {
     slipState.animating = false;
     slipScroll = 0;
     slipScroller.offset = 0;
-    slipChoice = 0;
-    slipSkipped = false;
     slipRevealAt = game.time;
     appendStatus = "";
     saveSlip();
@@ -805,7 +789,6 @@ function appendSlip() {
     appendBusy = false;
     slipState.written = answer === "saved";
     appendStatus = answer === "saved" ? "saved" : "denied";
-    slipSkipped = false;
     saveSlip();
     if (answer === "saved") sfx("ok");
     else sfx("err");
@@ -816,12 +799,6 @@ function appendSlip() {
     saveSlip();
     sfx("err");
   });
-}
-function skipSlip() {
-  if (slipState.slip === null || slipState.animating || slipState.written) return;
-  slipSkipped = true;
-  appendStatus = "";
-  sfx("tap");
 }
 function openSection(id) {
   if (id !== "counter" && id !== "compass" && id !== "fortune" && id !== "almanac" &&
@@ -1098,7 +1075,6 @@ function drawAlmanacPage(g, offset, scroll, bottom) {
     almanacTotalHeight = layout.height;
     almanacScroll = Math.max(0, Math.min(almanacScroll, Math.max(0, layout.height - 171)));
     almanacScroller.max = Math.max(0, layout.height - 171);
-    drawScrollbar(g, almanacScroller, { x: 8, y: 36, w: 200, h: 171 }, layout.height);
   }
   g.clip();
   /* the page's lower edge while it hangs loose */
@@ -1213,7 +1189,6 @@ function drawAlmanacGlossary(g) {
     if (y >= 15 && y < 202) g.text(rows[i].text, 13, y, { color: rows[i].color });
   }
   g.clip();
-  drawScrollbar(g, glossaryScroller, area, rows.length * lineH);
   g.text(T({ zh: "↑↓读 · B/SELECT返回", en: "↑↓ read · B/SELECT back" }), CX, 211,
     { align: "center", color: g.INK });
   g.text(fitPageText(g, HINT, W), CX, 226, { align: "center", color: g.DARK });
@@ -1232,9 +1207,6 @@ function slipVerseCount(g) {
     count += g.wrap(item.verse[game.lang][i], 178).length;
   return count;
 }
-function slipChoiceReady() {
-  return slipRevealAt < 0 || game.time - slipRevealAt >= (REDUCED_MOTION ? .08 : .64);
-}
 function updateFortune(dt) {
   syncSlipDate();
   if (game.pressed("b")) { backToCounter(); return; }
@@ -1242,18 +1214,8 @@ function updateFortune(dt) {
     var rows = fortuneLines(game.g), lineH = game.g.lineHeight || 14;
     slipScroll = scrollUpdate(slipScroller, { x: 13, y: 68, w: 190, h: 102 },
       rows.length * lineH, dt, lineH);
-    var choiceReady = slipChoiceReady();
-    if (choiceReady && !slipSkipped && !slipState.written && game.pressed("left")) { slipChoice = 0; sfx("move"); }
-    if (choiceReady && !slipSkipped && !slipState.written && game.pressed("right")) { slipChoice = 1; sfx("move"); }
+    /* writing to notes is the player's own choice: START, never a question (owner, 2026-11-27) */
     if (game.pressed("start")) { appendSlip(); return; }
-    var pointer = game.pointer;
-    if (choiceReady && !slipSkipped && !slipState.written && pointer.pressed &&
-        pointer.y >= 176 && pointer.y <= 207 && scrollTapAllowed())
-      slipChoice = pointer.x < 108 ? 0 : 1;
-    if (choiceReady && !slipSkipped && !slipState.written &&
-        (game.pressed("a") || (pointer.pressed && pointer.y >= 176 && pointer.y <= 207 && scrollTapAllowed()))) {
-      if (slipChoice === 0) appendSlip(); else skipSlip();
-    }
   } else if (game.pressed("a") || (game.pointer.pressed && game.pointer.y >= 45 && game.pointer.y <= 208)) {
     drawSlip();
   }
@@ -1352,9 +1314,8 @@ function fortuneFooter(g) {
   else if (slipState.slip === null) line = T({ zh: "A 抽签 · 点签筒 · 摇一摇", en: "A draw · tap the cup · shake" });
   else if (appendBusy) line = T({ zh: "正在写入…", en: "Saving…" });
   else if (appendStatus === "denied") line = T({ zh: "没有写入 · 今天已抽", en: "Not saved · drawn today" });
-  else if (slipState.written) line = T({ zh: "已写入", en: "Saved" });
-  else if (slipSkipped) line = T({ zh: "今天已抽 · 明天再来", en: "Drawn today · come back tomorrow" });
-  else line = T({ zh: "←→选择 · A确认 · START写入", en: "←→ pick · A confirm · START notes" });
+  else if (slipState.written) line = T({ zh: "已写入记事本 · 明天再来", en: "In your notes · back tomorrow" });
+  else line = T({ zh: "↑↓ 读 · START 写入记事本", en: "↑↓ read · START to notes" });
   g.rect(0, 210, W, 30, g.PAPER);
   var lines = g.wrap(line, 208);
   for (var i = 0; i < lines.length && i < 2; i++) {
@@ -1396,17 +1357,7 @@ function drawFortune(g) {
       } else if (lineShown && y >= 55 && y <= 168) g.text(lines[j], 18, y, { color: g.INK });
     }
     g.clip();
-    drawScrollbar(g, slipScroller, area, lines.length * lineH);
     g.clip();
-    if (reveal >= 1 && !slipState.written && !slipSkipped && !appendBusy) {
-      var labels = [T({ zh: "写入记事本", en: "To notes" }), T({ zh: "不写", en: "Skip" })];
-      var bx = [8, 110];
-      for (var bi = 0; bi < 2; bi++) {
-        g.rect(bx[bi], 176, 98, 31, bi === slipChoice ? g.INK : g.PAPER);
-        g.frame(bx[bi], 176, 98, 31, g.INK);
-        g.text(labels[bi], bx[bi] + 49, 185, { align: "center", color: bi === slipChoice ? g.PAPER : g.INK });
-      }
-    }
   }
   fortuneFooter(g);
 }
@@ -1580,11 +1531,6 @@ function drawTossCoins(g) {
   ];
   g.text(T(names[backs]), CX, TABLE_Y + COIN_R + 5, { align: "center", color: g.INK });
 }
-function pickGuaChoice() {
-  sfx("tap");
-  if (guaChoice === 0) appendGua();
-  else guaSkipped = true;
-}
 function updateHexagram(dt) {
   syncGuaDate();
   if (guaExplain) { updateGuaExplain(dt); return; }
@@ -1600,13 +1546,6 @@ function updateHexagram(dt) {
     var rows = guaResultRows(game.g), total = 0;
     for (var i = 0; i < rows.length; i++) total += rows[i].height;
     guaScroll = scrollUpdate(guaScroller, guaArea(), total, dt, game.g.lineHeight || 14);
-    if (guaButtonsShown()) {
-      if (game.pressed("left")) { guaChoice = 0; sfx("move"); }
-      if (game.pressed("right")) { guaChoice = 1; sfx("move"); }
-      var tap = game.pointer;
-      if (tap.pressed && tap.y >= 176 && tap.y < 207) { guaChoice = tap.x < 108 ? 0 : 1; pickGuaChoice(); return; }
-      if (game.pressed("a")) { pickGuaChoice(); return; }
-    }
     if (game.pressed("start")) appendGua();
     return;
   }
@@ -1645,15 +1584,6 @@ function drawHexagram(g) {
       y += row.height;
     }
     g.clip();
-    drawScrollbar(g, guaScroller, area, total);
-    if (guaButtonsShown()) {
-      var labels = [T({ zh: "写入记事本", en: "To notes" }), T({ zh: "不写", en: "Skip" })], bx = [8, 110];
-      for (var bi = 0; bi < 2; bi++) {
-        g.rect(bx[bi], 176, 98, 31, bi === guaChoice ? g.INK : g.PAPER);
-        g.frame(bx[bi], 176, 98, 31, g.INK);
-        g.text(labels[bi], bx[bi] + 49, 185, { align: "center", color: bi === guaChoice ? g.PAPER : g.INK });
-      }
-    }
   } else {
     if (!guaState.lines.length) g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), 6, 42,
       { align: "center", color: g.INK, width: 204 });   /* with a width, align centres inside it from x */
@@ -1666,7 +1596,6 @@ function drawHexagram(g) {
   }
   var key = guaState.lines.length !== 6 ? T({ zh: "A 起卦", en: "A cast" }) :
     guaAppendBusy ? T({ zh: "正在写入…", en: "Saving…" }) :
-    guaButtonsShown() ? T({ zh: "←→选择 · A确认 · SELECT详解", en: "←→ pick · A ok · SELECT more" }) :
     guaState.written ? T({ zh: "已写入 · SELECT详解", en: "Saved · SELECT more" }) :
     guaAppendStatus === "denied" ? T({ zh: "没有写入 · SELECT详解", en: "Not saved · SELECT more" }) :
     T({ zh: "START记事本 · SELECT详解", en: "START notes · SELECT more" });
@@ -1721,7 +1650,6 @@ function drawGuaExplain(g) {
     y += row.height;
   }
   g.clip();
-  drawScrollbar(g, guaExplainScroller, area, total);
   g.text(T({ zh: "↑↓ 读 · B/SELECT 返回", en: "↑↓ read · B/SELECT back" }), CX, 211, { align: "center", color: g.INK });
 }
 
@@ -1763,7 +1691,7 @@ game.scene("compass", {
   }
 });
 game.scene("hexagram", {
-  enter: function () { section = "hexagram"; guaScroll = 0; guaSkipped = false; guaChoice = 0; syncGuaDate(); syncMotion(); },
+  enter: function () { section = "hexagram"; guaScroll = 0; syncGuaDate(); syncMotion(); },
   update: updateHexagram,
   draw: function (g) { if (guaExplain) drawGuaExplain(g); else drawHexagram(g); }
 });
