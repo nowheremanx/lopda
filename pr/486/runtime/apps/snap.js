@@ -24,7 +24,7 @@ var FINDER=window.LopdaFinder, LENS=window.LopdaLenses, SCORE=window.LopdaScoreP
    NOFRAME_MS (or a track that ends, or stays muted MUTE_MS) the stream restarts once; a second failure closes with null */
 var WATCH_MS=250, REPLAY_MS=1500, NOFRAME_MS=3000, MUTE_MS=1000;
 var SN={req:null, stream:null, gen:0, raf:0, last:0, watch:null, lens:"w", lenses:null, exposure:0, contrast:0,
-  swapping:0, swapTimer:null, systemOk:false, padWas:false, blink:null, focusWas:null,
+  swapping:0, swapTimer:null, systemOk:false, padWas:false, blink:null, focusWas:null, awake:null,
   since:0, seen:false, replayed:false, muted:0, restarts:0};
 /* ?debug: what the finder did (LOPDA_DEBUG.snap) */
 function log(s){ var d=window.LOPDA_DEBUG; if(d) (d.snap=d.snap||[]).push(s); }
@@ -82,6 +82,10 @@ function open(o){
   $("snap").hidden=false;
   /* the camera's keys: the chin pad shows while the finder is open, whatever the app asked for */
   SN.padWas=!$("gamepad").hidden; LP.showPad(true);
+  /* a built-in's finder (the four-track's score pages) is held up for a while to line the page up: the screen stays
+     on, as in the camera program (#439). An app's finder sits under the running app's own lock already */
+  SN.awake=null;
+  if(o.keep){ var aw=LP.awakeState(); LP.keepAwake(true); SN.awake={want:aw.want, calls:LP.awakeState().calls}; }
   /* a keyboard's keys go where the focus is: with the app's frame focused they would land in the app and never reach
      the finder (issue #436). The finder takes the focus and gives it back when it closes */
   SN.focusWas=document.activeElement;
@@ -163,10 +167,16 @@ function frame(v){
   var r=SN.req;
   return FINDER.ditherLuma(grab(v,v.videoWidth,v.videoHeight,r.w,r.h,lensNow().id==="f"),r.w,r.h,SN.exposure,SN.contrast);
 }
+/* the page handed back is what the finder framed: the same centred 8:7 crop of the video, at full size (1600 px on
+   the long side at most), with the finder's exposure and contrast; grey, not dithered (#438) */
 function fullFrame(v){
-  var size=SCORE.scaleSize(v.videoWidth,v.videoHeight,1600), w=size.w, h=size.h;
-  var lum=fullGrab(v,v.videoWidth,v.videoHeight,w,h,false), gray=new Uint8Array(w*h);
-  for(var i=0;i<gray.length;i++) gray[i]=Math.max(0,Math.min(255,Math.round(lum[i]*255)));
+  var r=SN.req, c=FINDER.crop(v.videoWidth,v.videoHeight,r.w,r.h);
+  var size=SCORE.scaleSize(Math.round(c[2]),Math.round(c[3]),1600), w=size.w, h=size.h;
+  var lum=fullGrab(v,v.videoWidth,v.videoHeight,w,h,false), gray=new Uint8Array(w*h), ex=SN.exposure, co=SN.contrast, i, l;
+  for(i=0;i<gray.length;i++){
+    l=ex||co ? FINDER.adjustLuma(lum[i],ex,co) : lum[i];
+    gray[i]=Math.max(0,Math.min(255,Math.round(l*255)));
+  }
   return {w:w,h:h,gray:gray};
 }
 /* not ready yet (no stream, a lens changing, no picture): a tick, as the camera program's shutter does while it starts,
@@ -196,6 +206,8 @@ function finish(v,linger,extraFrame){
   clearTimeout(SN.blink);
   if(linger) SN.blink=setTimeout(close,linger); else close();
   LP.releaseButtons(); LP.showPad(SN.padWas);
+  /* the lock goes back as the view under the finder had it, unless that view asked for something else meanwhile */
+  if(SN.awake){ if(LP.awakeState().calls===SN.awake.calls) LP.keepAwake(SN.awake.want); SN.awake=null; }
   var was=SN.focusWas; SN.focusWas=null;
   if(was && was.focus && was!==document.body && document.contains(was) && $("snap").contains(document.activeElement)) try{ was.focus({preventScroll:true}); }catch(e){}
   if(r.o.keep) r.o.done(v,extraFrame||null);

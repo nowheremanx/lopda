@@ -598,7 +598,7 @@
 
       <div class="radio-page radio-guide-page" id="radio-page-guide" hidden>
         <div class="radio-guide-body" id="radio-guide-body"></div>
-        <p class="hint radio-guide-page" id="radio-guide-page"></p>
+        <p class="hint radio-guide-num" id="radio-guide-page"></p>
         <p class="hint" data-i18n="radio.guide.keys">左右翻页 · A 下一页 · B 返回</p>
       </div>
 
@@ -631,8 +631,7 @@
         <canvas id="radio-draw-cv" width="256" height="256" data-i18n-label="radio.draw.label" aria-label="16×16 四色画板"></canvas>
         <p class="hint radio-draw-hint" data-i18n="radio.draw.keys">方向键移动 · A 涂 · SELECT 换色 · START 发送 · B 返回</p>
         <div class="radio-draw-actions">
-          <span class="radio-swatch" id="radio-draw-swatch" aria-hidden="true"></span>
-          <span class="radio-draw-tone" id="radio-draw-tone"></span>
+          <button class="btn ghost radio-draw-color" id="radio-draw-color" type="button" data-i18n-label="radio.draw.color" aria-label="换色"><span class="radio-swatch" id="radio-draw-swatch" aria-hidden="true"></span><span class="radio-draw-tone" id="radio-draw-tone"></span></button>
           <button class="btn" id="radio-draw-send" type="button" data-i18n="radio.draw.send">发送</button>
           <button class="btn ghost" id="radio-draw-back" type="button" data-i18n="radio.draw.back">返回</button>
         </div>

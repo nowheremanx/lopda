@@ -141,6 +141,7 @@ function saveScript(s){
   if(!refs()) return Promise.resolve(false);
   return put(M.items.doc(s.id), rec).then(function(ok){
     if(ok){
+      s.fresh=false;
       var i=-1;
       for(var k=0;k<M.list.length;k++) if(M.list[k].id===s.id){ i=k; break; }
       var copy={v:1,id:s.id,name:s.name,body:s.body||"",created:s.created,updated:s.updated};
@@ -409,7 +410,8 @@ function renderLibrary(){
 
 function newScript(focus){
   var now=Date.now();
-  var s={v:1,id:scriptId(),name:tr("scripts.untitled",{n:M.list.length+1}),body:"",created:now,updated:now};
+  /* fresh: never stored yet. Left with no code and its default name, it is not kept (#411) */
+  var s={v:1,id:scriptId(),name:tr("scripts.untitled",{n:M.list.length+1}),body:"",created:now,updated:now,fresh:true};
   M.current=s; M.dirty=false;
   show("script-edit");
   if(focus) setTimeout(function(){ var c=$("script-code"); if(c){ c.focus(); c.setSelectionRange(c.value.length,c.value.length); } },80);
@@ -442,8 +444,16 @@ function renderEditor(){
   },function(){ setHint(tr("scripts.newer")); });
 }
 
+/* a script made with 新建 and left as it came: no code, the default name or none. Leaving it keeps nothing, so a
+   look at the editor or a stray tap does not leave an empty row in the library (#411) */
+function blankNew(s){
+  if(!s || !s.fresh || generating()) return false;
+  var code=$("script-code").value, name=($("script-name").value||"").trim();
+  return !String(code||"").trim() && (!name || /^(程序|Script) \d+$/.test(name));
+}
 function flushSource(){
   if(!M.current || !M.dirty) return Promise.resolve(true);
+  if(blankNew(M.current)){ clearTimeout(M.saveTimer); M.dirty=false; return Promise.resolve(true); }
   /* the ◂ back button and leaving the editor go through here: a revise must not move the stored code */
   if(revising(M.current)) return Promise.resolve(true);
   clearTimeout(M.saveTimer);
@@ -1139,6 +1149,7 @@ function init(){
   $("scripts-file").addEventListener("change",function(){ var f=this.files && this.files[0]; this.value=""; if(f) importFile(f); });
 
   $("script-back").onclick=function(){
+    if(blankNew(M.current)){ clearTimeout(M.saveTimer); M.dirty=false; M.current=null; show("scripts"); renderLibrary(); return; }
     saveCurrent(true).then(function(){ show("scripts"); renderLibrary(); });
   };
   $("script-menu").onclick=function(){
@@ -1247,7 +1258,7 @@ LP.scripts._test={
   replaceBody:replaceBody, deleteScript:deleteScript,
   revising:revising, saveCurrent:saveCurrent, state:M, stream:G,
   generate:generate, openScript:openScript, flushSource:flushSource,
-  usesPad:usesPad, listScripts:listScripts
+  usesPad:usesPad, listScripts:listScripts, newScript:newScript, blankNew:blankNew
 };
 
 init();
