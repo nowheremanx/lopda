@@ -422,7 +422,7 @@ if (PAD.mic) {
 | `shake` | one event per shake; at least 0.5 s between two |
 | `level` | loudness 0-1 (-60 dB of full scale is 0, full scale is 1) |
 | `pitch` | the main frequency in Hz, an integer from 50 to 1500, or `null` when no clear note is heard (breath, noise, silence) |
-| `hz` | the same note to 0.01 Hz, for tuning (1 Hz is about 21 cents at 82 Hz); only when `pitch` is a number. Runtime 1.7.0+; undefined before, so use `s.hz \|\| s.pitch` |
+| `hz` | the note to 0.01 Hz, for tuning (1 Hz is about 21 cents at 82 Hz). It also comes for a note too quiet for `pitch` (down to about -60 dB, where `pitch` stops at -40), with `pitch` then `null`; undefined when no note is heard. Runtime 1.7.0+; undefined before, so use `s.hz \|\| s.pitch` |
 
 `x`, `y`, `flat` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
 only when a value changed: hold the last one between events.

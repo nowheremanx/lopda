@@ -346,7 +346,7 @@ test("sensor: tilt, shake and sound events reach PAD.on listeners; malformed one
   a.fromRuntime({ pad: 1, op: "shake" }, {});                       /* not from the parent */
   a.PAD.off("sound", snd);
   a.fromRuntime({ pad: 1, op: "sound", level: 1, pitch: null });
-  assert.deepEqual(log, [["tilt", 0.5, -0.25, 90], ["tilt", 0, 0, null], ["shake"], ["sound", 0.5, 440], ["sound", 0, null], ["sound", 0.5, 82, 82.41], ["sound", 0.5, null], ["sound", 0.5, 82]]);
+  assert.deepEqual(log, [["tilt", 0.5, -0.25, 90], ["tilt", 0, 0, null], ["shake"], ["sound", 0.5, 440], ["sound", 0, null], ["sound", 0.5, 82, 82.41], ["sound", 0.5, null, 82.41], ["sound", 0.5, 82]]);
 });
 
 test("sensor: the tilt's absolute flat reading passes through when valid, undefined on older runtimes", () => {
