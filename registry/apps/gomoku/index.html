@@ -125,17 +125,19 @@ document.getElementById('ln').textContent=TXT.leave;
 var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
 var b,over,busy,last,winLine,hover,pick,pickT,pickAt,WAIT=1000,wins=0,size=300,cell=20,pad=14,hist=[];
 var resultT;                             // the 0.9 s wait before the result dock appears, so a restart can cancel it
+var aiT;                                 // the computer's 0.45 s think, so a restart can cancel it too
 /* the link match: see the long comment over the link functions below */
 var LINK=(typeof PAD!=='undefined'&&PAD.link)?PAD.link:null;
 var mode='solo',panelMode='menu';        // mode: 'solo' | 'link'; panelMode: what the start overlay says
 var linkColour=0;                        // 1 black, 2 white; set once, at the match's first open
+var peerColour=0;                        // the peer's colour as its "c,<colour>" says, read again on every open
 var moves=[];                            // a match's moves in order, [x,y] (the board can be rebuilt from it)
 var linkOpen=false,openingLink=false,sendingMove=false,linkWhy='',syncs=0;
 var sendQ=[],sendBusy=false,syncAsked=false,allBuf=[];
 function emptyBoard(){var nb=[];for(var i=0;i<N;i++)nb.push(new Array(N).fill(0));return nb;}
 function reset(){
   b=emptyBoard();
-  unpick();over=false;busy=false;last=null;winLine=null;hover=null;hist=[];
+  unpick();clearTimeout(aiT);over=false;busy=false;last=null;winLine=null;hover=null;hist=[];
   turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;hideResult();draw();
 }
 function resize(){
@@ -292,7 +294,7 @@ function place(x,y){
   if(checkWin(x,y,1)){wins++;PAD.save('gomoku_wins',wins);endGame('win');return;}
   if(full()){endGame('draw');return;}
   busy=true;turnEl.textContent=TXT.thinking;draw();
-  setTimeout(function(){
+  aiT=setTimeout(function(){
     var m=aiMove();
     b[m[1]][m[0]]=2;last=[m[0],m[1]];hist.push([m[0],m[1]]);PAD.sfx('tick');
     if(checkWin(m[0],m[1],2)){endGame('lose');return;}
@@ -379,6 +381,11 @@ function undo(){
    the other handheld the initiator this time. The stones of this game keep their colours, so only the
    FIRST "open" of a match reads PAD.link.initiator (true = black, and black moves first); every later
    open keeps linkColour. Undo is off in a match for the same reason: one game, two identical boards.
+
+   Why "c,<colour>": the other side may have left and started a NEW match (HOME, then 对战 again), so its
+   first open read initiator afresh and can match the colour this side kept. A side with stones therefore
+   says its colour after "n,<count>"; a side that then takes over that game (applyMoves) takes the other
+   colour. Older versions ignore the message, as they ignore any message they do not know.
    ------------------------------------------------------------------------------------------------- */
 
 /* small DOM helper: show/hide by class (toggle with a second argument is not on every old browser) */
@@ -451,10 +458,13 @@ function openLink(){
     if(r==='open'){
       linkOpen=true;
       if(!linkColour)linkColour=LINK.initiator?1:2;   // only the first open of the match decides
-      allBuf=[];syncAsked=false;updateLinkUI();
-      /* after a reconnect both sides say how many moves they have. The side with fewer sends "sync".
-         On a fresh game both are 0 and there is nothing to compare, so the message is skipped. */
-      if(moves.length)queueSend('n,'+moves.length,function(v){if(v!=='sent')lostLink(v);});
+      allBuf=[];syncAsked=false;peerColour=0;updateLinkUI();
+      /* after a reconnect both sides say how many moves they have, and their colour. The side with fewer
+         sends "sync". On a fresh game both are 0 and there is nothing to compare, so both are skipped. */
+      if(moves.length){
+        queueSend('n,'+moves.length,function(v){if(v!=='sent')lostLink(v);});
+        queueSend('c,'+linkColour,function(v){if(v!=='sent')lostLink(v);});
+      }
     }else{
       linkOpen=false;linkWhy=r;
       if(r==='cancelled'&&!moves.length)leaveMatch();   // nothing to keep: back to the start menu
@@ -517,6 +527,7 @@ function applyMoves(list){                           // rebuild the board from a
     nb[m[1]][m[0]]=(i%2===0)?1:2;                    // move 1 is black, move 2 white, ...
   }
   b=nb;moves=list.slice();last=moves.length?moves[moves.length-1]:null;winLine=null;
+  if(peerColour)linkColour=3-peerColour;             // the game is the peer's: I am the other colour
   /* the list may end on a winning stone this side never saw (its message was the one that was lost):
      check the last move so both boards show the same result. checkWin() is the single-player one. */
   if(!over&&moves.length){
@@ -560,6 +571,8 @@ function onLinkMessage(data){
   if(data.indexOf('all,')===0){onAll(data);return;}
   var m=/^n,(\d+)$/.exec(data);
   if(m){onCount(+m[1]);return;}
+  m=/^c,([12])$/.exec(data);
+  if(m){peerColour=+m[1];return;}
   m=/^m,(\d+),(\d+),(\d+)$/.exec(data);
   if(m){onMove(+m[1],+m[2],+m[3]);return;}
   /* anything else belongs to another version of this app: ignore it instead of breaking the game */

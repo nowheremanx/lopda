@@ -351,3 +351,21 @@ for (const lang of ["zh", "en"]) {
     }
   });
 }
+
+test("an unreadable save: the title says so and a cleared song writes nothing over it (#311)", async () => {
+  let saves = 0;
+  const pad = {
+    lang: "zh", spec: "lopda/1", on() {}, off() {}, isDown: () => false,
+    load: () => { const e = new Error("PAD.load: corrupt"); e.code = "corrupt"; return Promise.reject(e); },
+    save() { saves++; }, remove() {}, exit() {}, sfx() {},
+    music: { play() {}, stop() {} }, ambience() {}
+  };
+  const app = boot(APP, { pad, seed: 7 });
+  for (let i = 0; i < 12; i++) { app.frame(); await app.ctx.get("__yield")(); }
+  assert.equal(app.ctx.get("canSave"), false);
+  const game = app.ctx.get("game"), calls = recordText(game);
+  app.frame();
+  assert.ok(calls.some((c) => c.str === "存档读不出，这次不存"), "the title says the save cannot be read");
+  app.ctx.get("saveProfile")();
+  assert.equal(saves, 0, "nothing is written over the unreadable save");
+});

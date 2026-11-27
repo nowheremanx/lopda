@@ -471,6 +471,7 @@ GM.ui = (function () {
   }
 
   function chooseMenu() {
+    if (state.loading) return;
     if (state.menuCursor === 0) continueGame();
     else if (state.menuCursor === 1) newGame();
     else openCodex();
@@ -493,6 +494,7 @@ GM.ui = (function () {
     var act = el.getAttribute("data-act");
     var i = +(el.getAttribute("data-i") || 0);
     var prev = state.screen;
+    if ((act === "continue" || act === "new" || act === "codex") && state.loading) { e.preventDefault(); return; }
     if (act === "continue") continueGame();
     else if (act === "new") newGame();
     else if (act === "codex") openCodex();

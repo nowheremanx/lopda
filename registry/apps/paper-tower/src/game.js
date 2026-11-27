@@ -10,6 +10,8 @@ var HUD = 30, TS = 16, VIEW_H = 144 - HUD, VIEW_W = 160, MAP_W = 11 * TS, MAP_H 
 var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var SLOT_KEYS = ["auto", "slot1", "slot2", "slot3"];
 var S = null, busy = false, musicId = null;
+var canSave = true;   /* false once a save could not be read: then nothing is written over it (SPEC.md 8) */
+function unreadable() { canSave = false; return null; }
 var toastMsg = null, toastT = 0, banner = null, bannerT = 0;
 
 function t(zh, en) { return T({ zh: zh, en: en }); }
@@ -44,8 +46,8 @@ function setAmbience(n) {
   else game.ambience(null);
 }
 function pack() { var o = R.clone(S); o.savedAt = Date.now(); return o; }
-function saveAuto() { if (S) game.save("auto", pack()); }
-function loadRun(key) { return game.load(key).then(function (v) { return v ? R.hydrate(v) : null; }); }
+function saveAuto() { if (S && canSave) game.save("auto", pack()); }
+function loadRun(key) { return game.load(key).then(function (v) { return v ? R.hydrate(v) : null; }, unreadable); }
 
 /* ---------- title screen ---------- */
 var FIVE = {
@@ -107,7 +109,7 @@ game.scene("title", {
     S = null; busy = false; titleAuto = null; titleMeta = null;
     music("title"); game.ambience(null);
     loadRun("auto").then(function (v) { titleAuto = v; });
-    game.load("meta").then(function (v) { titleMeta = v; });
+    game.load("meta").then(function (v) { titleMeta = v; }, unreadable);
   },
   update: function (dt) {
     if (busy) return;
@@ -118,7 +120,8 @@ game.scene("title", {
     titleTower(g, game.time);
     g.dither(0, 82, 160, 62, 0, 3);
     bigText(g, "PAPER TOWER", 80, 88, 2, g.PAPER);
-    g.text(titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit") : t("纸 塔", "a twelve-page climb"), 80, 108, { align: "center", color: g.PAPER });
+    if (!canSave) g.text(t("存档读不出，这次不存", "Save unreadable: no saving"), 80, 108, { align: "center", color: g.PAPER });
+    else g.text(titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit") : t("纸 塔", "a twelve-page climb"), 80, 108, { align: "center", color: g.PAPER });
     if (Math.floor(game.time * 2) % 2 === 0) g.text(t("按 A 开始", "PRESS A"), 80, 130, { align: "center", color: g.PAPER });
   }
 });
@@ -141,9 +144,14 @@ async function titleMenu() {
     S = R.newGame(); saveAuto(); busy = false; goPlay(); return;
   }
   if (act === "load") {
-    var v = await game.push(slotsScene("load"));
-    if (v) { S = v; saveAuto(); busy = false; goPlay(); return; }
-    busy = false; return;
+    var pick = await game.push(slotsScene("load"));
+    if (!pick) { busy = false; return; }
+    /* loading a slot writes it over the auto save, which is the run in progress: ask first, as 新的一页 does (#363) */
+    if (titleAuto && pick.key !== "auto") {
+      var ok = await game.choose([t("读这个存档", "Load it"), t("再想想", "Not yet")], { title: t("当前进度会被替换", "This replaces your run") });
+      if (ok !== 0) { busy = false; return; }
+    }
+    S = pick.v; saveAuto(); busy = false; goPlay(); return;
   }
   await helpPages();
   busy = false;
@@ -882,15 +890,20 @@ function slotsScene(mode) {
   Promise.all(SLOT_KEYS.map(function (k) { return game.load(k); })).then(function (vals) {
     infos = vals.map(function (v, i) { return { key: SLOT_KEYS[i], v: v ? R.hydrate(v) : null, raw: v }; });
     ready = true;
+  }, function () {
+    /* the saves cannot be read: show empty rows that neither load nor save, and say why */
+    unreadable();
+    infos = SLOT_KEYS.map(function (k) { return { key: k, v: null, raw: null }; });
+    ready = true;
   });
   function label(i) { return i === 0 ? t("自动", "Auto") : t("存档 {n}", "Slot {n}").replace("{n}", i); }
   return {
     update: function (dt) {
       if (msgT > 0) msgT -= dt;
+      if (game.pressed("b") || game.pressed("start")) { game.pop(); return; }
       if (!ready) return;
       var d = game.dir(0.25, 0.1);
       if (d.y) { sel = (sel + d.y + 4) % 4; sfx("move"); }
-      if (game.pressed("b") || game.pressed("start")) { game.pop(); return; }
       var tapped = game.pointer.pressed;
       if (tapped) {
         var row = Math.floor((game.pointer.y - 22) / 25);
@@ -899,11 +912,12 @@ function slotsScene(mode) {
       }
       if (game.pressed("a") || tapped) {
         var it = infos[sel];
+        if (!canSave) { sfx("denied"); msg = t("存档读不出，不能存。", "Save unreadable."); msgT = 1.2; return; }
         if (mode === "save") {
           game.save(it.key, pack()); infos[sel] = { key: it.key, v: S, raw: pack() }; sfx("save"); msg = t("存好了。", "Saved."); msgT = 1.2;
         } else {
           if (!it.v) { sfx("denied"); msg = t("空的。", "Empty."); msgT = 1.2; return; }
-          sfx("save"); game.pop(it.v); return;
+          sfx("save"); game.pop({ key: it.key, v: it.v }); return;
         }
       }
     },
@@ -920,7 +934,7 @@ function slotsScene(mode) {
           g.text(t("第{n}页", "p{n}").replace("{n}", v.floor), 48, y, { color: col });
           g.text(v.hp + "/" + v.hpMax, 9, y + 11, { color: col });
           g.text(when(it.raw && it.raw.savedAt), 150, y + 12, { color: i === sel ? g.PAPER : g.DARK, align: "right" });
-        } else g.text(t("空", "empty"), 48, y, { color: col });
+        } else g.text(canSave ? t("空", "empty") : t("读不出", "unreadable"), 48, y, { color: col });
       }
       g.text(msg || (mode === "save" ? t("A 存　B 走", "A save　B leave") : t("A 读　B 走", "A load　B leave")), 80, 127, { align: "center", color: g.DARK });
     }
@@ -1056,9 +1070,9 @@ game.scene("ending", {
     }
     S.flags.cleared = true; S.flags["boss:12"] = true;
     saveAuto();
-    var old = await game.load("meta");
+    var old = await game.load("meta").catch(unreadable);
     var best = Math.max((old && old.best) || 0, R.score(S));
-    game.save("meta", { cleared: true, best: best, wicks: S.wicks, at: Date.now() });
+    if (canSave) game.save("meta", { cleared: true, best: best, wicks: S.wicks, at: Date.now() });
     endingPhase = "done";
   },
   update: function () {
