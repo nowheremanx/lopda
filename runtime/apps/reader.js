@@ -175,7 +175,12 @@ function renderShelf(){
     var m=R.meta[id], li=el("li",i===R.pick?"on":"");
     li.appendChild(el("span","",m.title));
     li.appendChild(el("small","",Math.floor(m.pct||0)+"%"));
-    li.onclick=function(){ R.pick=i; R.armed=null; openBook(id); };
+    /* a tap opens the book; while 删除 is armed it picks this book to delete instead (a touch has no other way to move
+       the pick, and opening a book would put it on top of the shelf) */
+    li.onclick=function(){
+      if(R.armed){ R.pick=i; R.armed=id; sfx("move"); renderShelf(); return; }
+      R.pick=i; openBook(id);
+    };
     ul.appendChild(li);
   });
   var cur=ids[R.pick], del=$("rd-del"), armed=cur && R.armed===cur;
@@ -989,6 +994,13 @@ function importFont(f){
     R.fonts[id]=meta; return id;
   }).catch(function(e){ P.files.del("font/"+id).catch(function(){}); throw e; });
 }
+/* the import's own checks already say what went wrong in words; the store's refusals come with a code: say it in words */
+function fontFail(e){
+  var code=e && e.code;
+  if(code==="quota_exceeded") return tr("reader.fontquota");
+  if(code) return tr("reader.fontstorefail",{code:code});
+  return errMsg(e);
+}
 $("rd-fontfile").addEventListener("change",function(){
   var f=(this.files||[])[0]; if(!f || R.fbusy) return;
   /* reading the file and parsing it can take a while for a big CJK font */
@@ -1002,7 +1014,7 @@ $("rd-fontfile").addEventListener("change",function(){
     useFont(id);
     /* the busy hint goes with the toast, not when the font has loaded for the text */
     if(R.sheet==="font") renderSheet();
-  },function(e){ done(); toast(errMsg(e)); sfx("err"); if(R.sheet==="font") renderSheet(); });
+  },function(e){ done(); toast(fontFail(e)); sfx("err"); if(R.sheet==="font") renderSheet(); });
 });
 
 /* ---------- chin pad ----------
