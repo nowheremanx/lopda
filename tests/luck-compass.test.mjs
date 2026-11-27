@@ -12,8 +12,10 @@ import { boot, mulberry32 } from "./app-vm.mjs";
 const ctx = vm.createContext({ console });
 vm.runInContext(read("registry/apps/luck-compass/src/luck.js"), ctx, { filename: "luck.js" });
 vm.runInContext(read("registry/apps/luck-compass/src/almanac.js"), ctx, { filename: "almanac.js" });
+vm.runInContext(read("registry/apps/luck-compass/src/bazi.js"), ctx, { filename: "bazi.js" });
 const L = ctx.LUCK;
 const A = ctx.ALMANAC;
+const B = ctx.BAZI;
 
 test("almanac lunar dates and solar terms match the runtime tables", () => {
   const runtime = vm.createContext({ console });
@@ -504,5 +506,128 @@ test("every visible hexagram and trigram-chart string fits the canvas in both la
     assert.ok(chartLines.includes(lang === "en" ? "Image Earth" : "卦象 地"));
     assert.ok(chartLines.includes(lang === "en" ? "Family mother" : "家人 母"));
     assert.ok(chartLines.includes(lang === "en" ? "Direction SW" : "方位 西南"));
+  }
+});
+
+test("BAZI pillars, 子初换日, 纳音 and visible-element counts match reference charts", () => {
+  function names(chart) {
+    return ["year", "month", "day", "hour"].map((key) =>
+      chart[key] === null ? null : A.name(chart[key]));
+  }
+  const beforeSpring = B.chart(1990, 1, 15, 10);
+  assert.deepEqual(names(beforeSpring), ["己巳", "丁丑", "庚辰", "辛巳"]);
+  assert.deepEqual({ ...beforeSpring.nayin },
+    { year: "大林木", month: "涧下水", day: "白蜡金", hour: "白蜡金" });
+  assert.equal(beforeSpring.dayMaster, "庚金");
+  const late = B.chart(1992, 8, 8, 23);
+  assert.deepEqual(names(late), ["壬申", "戊申", "丁巳", "庚子"]);
+  assert.deepEqual({ ...late.nayin },
+    { year: "剑锋金", month: "大驿土", day: "沙中土", hour: "壁上土" });
+  assert.deepEqual(names(B.chart(1992, 8, 8, 22)), ["壬申", "戊申", "丙辰", "己亥"]);
+  const noon = B.chart(1985, 6, 1, 12);
+  assert.deepEqual(names(noon), ["乙丑", "辛巳", "辛未", "甲午"]);
+  assert.deepEqual({ ...noon.nayin },
+    { year: "海中金", month: "白蜡金", day: "路旁土", hour: "沙中金" });
+  assert.equal(noon.dayMaster, "辛金");
+  assert.deepEqual({ ...noon.counts }, { 木: 2, 火: 2, 土: 2, 金: 2, 水: 0 });
+  const unknown = B.chart(1985, 6, 1, null);
+  assert.deepEqual(names(unknown), ["乙丑", "辛巳", "辛未", null]);
+  assert.deepEqual({ ...unknown.counts }, { 木: 1, 火: 1, 土: 2, 金: 2, 水: 0 });
+  assert.equal(B.nayin(0), "海中金");
+  assert.equal(B.nayin(59), "大海水");
+  assert.equal(B.valid(1900, 1, 1), true);
+  assert.equal(B.valid(2100, 12, 31), true);
+  assert.equal(B.valid(1900, 2, 29), false);
+  assert.equal(B.valid(2101, 1, 1), false);
+});
+
+test("八字 picker saves a birth chart and shows its counter summary", async () => {
+  const env = bootStored("zh");
+  await settle();
+  env.app.ctx.get("openSection")("bazi");
+  assert.equal(env.app.ctx.get("baziState").picker, true);
+  assert.ok(drawnLines(env.app).includes("八字 · 填写"));
+  for (let i = 0; i < 5; i++) env.press("down");
+  env.press("right");
+  for (let i = 0; i < 5; i++) env.press("up");
+  env.press("right");
+  env.press("right");
+  for (let i = 0; i < 7; i++) env.press("up");
+  env.press("a");
+  assert.deepEqual(env.saves.get("bazi"), { v: 1, y: 1985, m: 6, d: 1, hour: 11 });
+  assert.equal(env.app.ctx.get("baziState").chart.dayMaster, "辛金");
+  env.press("b");
+  const counter = drawnLines(env.app);
+  assert.ok(counter.includes("日主 辛金"));
+});
+
+test("八字 rejected reads are not saved; invalid schemas wait for A before overwrite", async () => {
+  const rejected = bootStored("zh", null, true);
+  await settle();
+  rejected.app.ctx.get("openSection")("bazi");
+  assert.ok(drawnLines(rejected.app).some((line) => line.includes("存档读不出，这次不会保存")));
+  rejected.press("a");
+  assert.equal(rejected.saves.has("bazi"), false);
+
+  const invalid = bootStored("zh", { v: 2, y: 1985, m: 6, d: 1, hour: 11 });
+  await settle();
+  invalid.app.ctx.get("openSection")("bazi");
+  assert.equal(invalid.app.ctx.get("baziState").picker, true);
+  assert.equal(invalid.saves.has("bazi"), false);
+  invalid.press("a");
+  assert.deepEqual(invalid.saves.get("bazi"), { v: 1, y: 1990, m: 1, d: 1, hour: null });
+});
+
+test("八字 picker and chart strings fit 216px in both languages", async () => {
+  for (const lang of ["zh", "en"]) {
+    const env = bootStored(lang);
+    await settle();
+    env.app.ctx.get("openSection")("bazi");
+    let g = env.app.ctx.get("game").g;
+    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} picker: ${line}`);
+    const state = env.app.ctx.get("baziState");
+    state.y = 1985; state.m = 6; state.d = 1; state.hour = 11;
+    state.saved = { v: 1, y: 1985, m: 6, d: 1, hour: 11 };
+    state.chart = B.chart(1985, 6, 1, 11);
+    state.picker = true;
+    for (const line of drawnLines(env.app)) assert.ok(g.measure(line) <= SCREEN_W, `${lang} sample picker: ${line}`);
+    state.picker = false;
+    const chartLines = drawnLines(env.app);
+    for (const line of chartLines) assert.ok(g.measure(line) <= SCREEN_W, `${lang} chart: ${line}`);
+    assert.ok(chartLines.includes(lang === "en" ? "Na Yin" : "纳音"));
+    if (lang === "en") assert.equal(env.app.ctx.get("sectionSummary")("bazi"), "Day master 辛 Metal");
+  }
+});
+
+test("八字 chart text never overlaps vertically in either language or hour mode", async () => {
+  for (const lang of ["zh", "en"]) for (const hour of [11, null]) {
+    const env = bootStored(lang);
+    await settle();
+    const state = env.app.ctx.get("baziState"), bazi = env.app.ctx.get("BAZI");
+    state.saved = { v: 1, y: 1992, m: 2, d: 1, hour };
+    state.chart = bazi.chart(1992, 2, 1, hour);
+    state.loaded = true;
+    const g = env.app.ctx.get("game").g, real = g.text, calls = [];
+    g.text = function (text, x, y, options) {
+      const opts = options || {}, width = g.measure(String(text));
+      let left = x;
+      if (opts.align === "center") left -= width / 2;
+      else if (opts.align === "right") left -= width;
+      calls.push({ text: String(text), x: left, right: left + width, y });
+      return real.call(g, text, x, y, options);
+    };
+    try {
+      env.app.ctx.get("drawBaziChart")(g);
+    } finally {
+      g.text = real;
+    }
+    for (const line of calls) assert.ok(line.y + 12 <= 240, `${lang}/${hour}: ${line.text} at ${line.y}`);
+    for (let i = 0; i < calls.length; i++) for (let j = i + 1; j < calls.length; j++) {
+      const a = calls[i], b = calls[j];
+      if (a.x < b.right && b.x < a.right) {
+        assert.ok(Math.abs(a.y - b.y) >= 12,
+          `${lang}/${hour}: "${a.text}" at ${a.y} overlaps "${b.text}" at ${b.y}`);
+      }
+    }
   }
 });
