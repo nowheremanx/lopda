@@ -11,8 +11,9 @@ html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:mo
 #app{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:6px 12px;gap:6px}
 #lcd{border:3px solid #1f2a14;background:#a3ad7e;box-shadow:3px 3px 0 #4a5a32;padding:2px;display:flex;justify-content:center;flex:none}
 canvas{display:block}
-/* the four memory keys get one short row of their own; the five rows a player uses keep 44 px or more */
-#keys{flex:1;min-height:0;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:32px repeat(5,minmax(0,1fr));gap:6px}
+/* six rows of 44 px or more with 8 px between keys (UI.md section 3), the memory row too; on the smallest screen
+   the LCD gives way (fitCanvas) */
+#keys{flex:1;min-height:0;display:grid;grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(6,minmax(44px,1fr));gap:8px}
 button{font-family:monospace;font-size:20px;font-weight:bold;min-height:0;padding:0;color:#a3ad7e;background:#4a5a32;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;touch-action:manipulation;cursor:pointer;-webkit-tap-highlight-color:transparent}
 button.n{background:#1f2a14;box-shadow:3px 3px 0 #4a5a32}
 button.m{background:#7d8a58;color:#1f2a14;font-size:15px}
@@ -51,43 +52,47 @@ function norm(x){
   if(ip==='0'&&!fp)return '0';
   return (neg?'-':'')+ip+(fp?'.'+fp:'');
 }
-function create(){return {acc:0,op:null,entry:null,rep:false,after:false,lastOp:null,lastB:0,mem:0,err:false,cl:false};}
+/* entry is the number being shown as typed; ev is the full value behind it when it came from the memory or from
+   ± on a result (null when typed), so MR and ± keep the register's twelve digits as fin() does */
+function create(){return {acc:0,op:null,entry:null,ev:null,rep:false,after:false,lastOp:null,lastB:0,mem:0,err:false,cl:false};}
 function apply(a,op,b){
   if(op==='+')return a+b;
   if(op==='-')return a-b;
   if(op==='*')return a*b;
   return b===0?null:a/b;
 }
-/* number in, number out; an overflow or a division by zero sets the error state instead */
+/* number in, number out; an overflow or a division by zero sets the error state instead.
+   Like a business calculator's twelve-digit register, the result is kept to 12 significant digits and only the
+   display rounds to eight: 1 / 3 x 3 shows 1, not 0.9999999. Rounding every step to the eight shown digits
+   made each step's error the next step's input. */
 function fin(s,r){
-  var t=r===null?null:norm(r);
-  if(t===null){s.err=true;return 0;}
-  return parseFloat(t);
+  if(r===null||norm(r)===null){s.err=true;return 0;}
+  return parseFloat(r.toPrecision(12));
 }
-function value(s){return s.entry!==null?parseFloat(s.entry):s.acc;}
+function value(s){return s.entry!==null?(s.ev!==null?s.ev:parseFloat(s.entry)):s.acc;}
 function digits(t){return t.replace(/[-.]/g,'').length;}
 function shown(s){return s.entry!==null?s.entry:(norm(s.acc)||'0');}
-function done(s){s.op=null;s.entry=null;s.rep=false;s.after=true;}
+function done(s){s.op=null;s.entry=null;s.ev=null;s.rep=false;s.after=true;}
 function press(s,k){
   if(s.err&&k!=='C')return;
   if(k!=='C')s.cl=false;
   var v,r;
   if(k.length===1&&k>='0'&&k<='9'){
-    if(s.entry===null||s.rep){s.entry=k;s.rep=false;s.after=false;}
-    else if(digits(s.entry)<MAXD)s.entry=(s.entry==='0')?k:(s.entry==='-0'?'-'+k:s.entry+k);
+    if(s.entry===null||s.rep){s.entry=k;s.ev=null;s.rep=false;s.after=false;}
+    else if(digits(s.entry)<MAXD){s.entry=(s.entry==='0')?k:(s.entry==='-0'?'-'+k:s.entry+k);s.ev=null;}
   }else if(k==='.'){
-    if(s.entry===null||s.rep){s.entry='0.';s.rep=false;s.after=false;}
-    else if(s.entry.indexOf('.')<0&&digits(s.entry)<MAXD)s.entry+='.';
+    if(s.entry===null||s.rep){s.entry='0.';s.ev=null;s.rep=false;s.after=false;}
+    else if(s.entry.indexOf('.')<0&&digits(s.entry)<MAXD){s.entry+='.';s.ev=null;}
   }else if(k==='n'){
     v=value(s);
     if(v===0)return;
-    if(s.entry!==null)s.entry=s.entry.charAt(0)==='-'?s.entry.slice(1):'-'+s.entry;
-    else{s.entry=norm(-s.acc);s.after=false;}
+    if(s.entry!==null){s.entry=s.entry.charAt(0)==='-'?s.entry.slice(1):'-'+s.entry;if(s.ev!==null)s.ev=-s.ev;}
+    else{s.entry=norm(-s.acc);s.ev=-s.acc;s.after=false;}
   }else if(k==='+'||k==='-'||k==='*'||k==='/'){
     if(s.op!==null&&s.entry===null){s.op=k;return;}
     v=value(s);
     if(s.op!==null){v=fin(s,apply(s.acc,s.op,v));if(s.err)return;}
-    s.acc=v;s.op=k;s.entry=null;s.rep=false;s.after=false;
+    s.acc=v;s.op=k;s.entry=null;s.ev=null;s.rep=false;s.after=false;
   }else if(k==='='){
     v=value(s);
     if(s.op!==null){
@@ -114,15 +119,15 @@ function press(s,k){
     s.mem=r;
     if(s.entry!==null)s.rep=true; /* the next digit starts a new number */
   }else if(k==='MR'){
-    s.entry=norm(s.mem);s.rep=true;s.after=false;
+    s.entry=norm(s.mem);s.ev=s.mem;s.rep=true;s.after=false;
   }else if(k==='MC'){
     s.mem=0;
   }else if(k==='C'){
-    if(!s.err&&!s.cl&&s.entry!==null){s.entry='0';s.rep=false;s.cl=true;}
+    if(!s.err&&!s.cl&&s.entry!==null){s.entry='0';s.ev=null;s.rep=false;s.cl=true;}
     else{var m=s.mem;var n=create();for(var p in n)s[p]=n[p];s.mem=m;}
   }else if(k==='<'){
     if(s.entry!==null&&!s.rep){
-      s.entry=s.entry.slice(0,-1);
+      s.entry=s.entry.slice(0,-1);s.ev=null;
       if(s.entry===''||s.entry==='-')s.entry='0';
     }
   }
@@ -157,8 +162,11 @@ function fitCanvas(){
   var css=document.getElementById('lcd').clientWidth-4,dpr=Math.max(1,Math.min(3,window.devicePixelRatio||1));
   var W=Math.floor(css*dpr);
   /* widths in digit widths: margins, minus slot 0.9, eight digits of 1 with 0.62 after each (the point lives there).
-     The height is capped too: on the smallest screen the keys below must keep their 44 px, so the LCD gives way. */
-  var dw=Math.min(W/(0.45+0.9+8+8*0.62+0.1),(window.innerHeight||360)*0.125*dpr/(0.72+1.7+0.32));
+     The height is capped too: the six key rows need 6 x 44 + 5 x 8 = 304 px, the page's padding and gap 18 and the
+     LCD's border and padding 10, and the LCD gets what is left (2.74 digit widths tall), so on the smallest
+     screen the keys keep their 44 px and the digits shrink. */
+  var room=Math.max(8*(0.72+1.7+0.32),(window.innerHeight||360)-304-18-10-1);
+  var dw=Math.min(W/(0.45+0.9+8+8*0.62+0.1),room*dpr/(0.72+1.7+0.32),(window.innerHeight||360)*0.125*dpr/(0.72+1.7+0.32));
   G={dw:dw,dh:dw*1.7,t:Math.max(2,dw*0.19),sp:dw*0.62,slant:0.09,x0:dw*0.45,top:dw*0.72,W:W};
   G.H=Math.round(G.top+G.dh+dw*0.32);
   cv.width=W;cv.height=G.H;

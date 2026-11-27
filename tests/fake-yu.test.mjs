@@ -369,3 +369,65 @@ test("an unreadable save: the title says so and a cleared song writes nothing ov
   app.ctx.get("saveProfile")();
   assert.equal(saves, 0, "nothing is written over the unreadable save");
 });
+
+/* text calls of one frame with the height each one returned */
+function recordHeights(game) {
+  const calls = [], draw = game.g.text;
+  game.g.text = function (str, x, y, o) { const h = draw.call(game.g, str, x, y, o); calls.push({ str: String(str), y, h }); return h; };
+  return calls;
+}
+
+test("act cards: the closing line stays on the paper in both languages", async () => {
+  for (const lang of ["zh", "en"]) {
+    const h = harness(APP, 7, lang);
+    await h.frame(12);
+    const calls = recordHeights(h.game);
+    const card = h.app.ctx.get("drawActCard"), view = h.app.ctx.get("storyView");
+    for (const n of [1, 2, 3]) {
+      calls.length = 0;
+      view.cardAt = -10;                     /* the curtains fully in */
+      card(h.game.g, n);
+      const last = calls[calls.length - 1];
+      /* g.window(8, 22, 144, 96): the paper ends at y 116, the frame line is 117 */
+      assert.ok(last.y + last.h <= 116, `${lang} act ${n}: "${last.str}" ends at ${last.y + last.h}, below the paper`);
+    }
+  }
+});
+
+test("how to play: every page's text ends above its picture", async () => {
+  for (const lang of ["zh", "en"]) {
+    const h = harness(APP, 7, lang);
+    await h.frame(12);
+    h.game.go("howto", {}, { fade: false });
+    await h.frame(30);
+    const calls = recordHeights(h.game);
+    for (let p = 0; p < 4; p++) {
+      h.app.ctx.get("(howPage = " + p + ")");
+      calls.length = 0;
+      await h.frame(1);
+      const body = calls.find((c) => c.y === 25);
+      assert.ok(body, `${lang} page ${p + 1}: no body text`);
+      /* each page's picture starts at y 84 */
+      assert.ok(body.y + body.h <= 84, `${lang} page ${p + 1}: the text ends at ${body.y + body.h}, under the picture`);
+    }
+  }
+});
+
+test("song list: no DARK on a MID band", async () => {
+  const h = harness(APP, 7, "en");
+  await h.frame(12);
+  h.game.go("select", {}, { fade: false });
+  await h.frame(30);
+  const img = h.image(), DARK = [0x4a, 0x5a, 0x32], MID = [0x7d, 0x8a, 0x58];
+  const at = (x, y) => { const o = (y * W + x) * 4; return [img.data[o], img.data[o + 1], img.data[o + 2]]; };
+  const same = (a, b) => a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+  let bands = 0, dark = 0;
+  for (let row = 0; row < 4; row++) {
+    const y0 = 20 + row * 23;
+    if (!same(at(3, y0 + 1), MID)) continue;   /* only the MID bands */
+    bands++;
+    for (let y = y0; y < y0 + 22; y++) for (let x = 2; x < 158; x++) if (same(at(x, y), DARK)) dark++;
+  }
+  assert.ok(bands >= 1, "the list shows at least one MID band");
+  assert.equal(dark, 0, "DARK pixels on a MID band");
+});
