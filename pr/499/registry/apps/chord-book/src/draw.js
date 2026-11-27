@@ -21,6 +21,14 @@ var Draw = (function () {
     "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"]
   };
 
+  /* 3 x 5 letters for the degree map, so "b13" fits between two strings */
+  var SMALL = {
+    "1": ["010", "110", "010", "010", "111"], "2": ["110", "001", "010", "100", "111"], "3": ["110", "001", "010", "001", "110"],
+    "4": ["101", "101", "111", "001", "001"], "5": ["111", "100", "110", "001", "110"], "6": ["011", "100", "110", "101", "010"],
+    "7": ["111", "001", "010", "010", "010"], "9": ["010", "101", "011", "001", "110"],
+    "R": ["110", "101", "110", "101", "101"], "b": ["100", "100", "110", "101", "110"], "#": ["101", "111", "101", "111", "101"]
+  };
+
   function Buf(w, h) { this.w = w; this.h = h; this.px = new Uint8Array(w * h); this.px.fill(PAPER); }
   Buf.prototype.set = function (x, y, t) { if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.px[y * this.w + x] = t; };
   Buf.prototype.rect = function (x, y, w, h, t) { for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) this.set(x + i, y + j, t); };
@@ -37,6 +45,12 @@ var Draw = (function () {
     for (var k = 0; k < s.length; k++) {
       var g = GLYPH[s[k]];
       if (g) for (var j = 0; j < 7; j++) for (var i = 0; i < 5; i++) if (g[j][i] === "1") this.set(x + k * 6 + i, y + j, t);
+    }
+  };
+  Buf.prototype.small = function (s, x, y, t) {
+    for (var k = 0; k < s.length; k++) {
+      var g = SMALL[s[k]];
+      if (g) for (var j = 0; j < 5; j++) for (var i = 0; i < 3; i++) if (g[j][i] === "1") this.set(x + k * 4 + i, y + j, t);
     }
   };
   Buf.prototype.cross = function (cx, cy, t) { for (var i = -3; i <= 3; i++) { this.set(cx + i, cy + i, t); this.set(cx + i, cy - i, t); } };
@@ -77,6 +91,45 @@ var Draw = (function () {
       if (f && !inBarre) b.text(f === 5 ? "T" : String(f), cx - 2, cy - 3, PAPER);
     }
     return b;
+  }
+
+  /* The degree map (1.2.0): the box's five frets (and the open strings when the box starts at the nut) with every place
+     named by its degree above the root, so a note to add can be found by the hand: the notes the voicing plays in ink
+     tiles, the chord's other tones in dark, every other note in mid. The grid is mid so the names read over it. */
+  function rowsOf(frets) {
+    var base = baseFret(frets), out = [];
+    if (base === 1) out.push(0);
+    for (var f = base; f < base + 5; f++) out.push(f);
+    return out;
+  }
+  function mapY(f, base) { return f === 0 ? 6 : TOP + (f - base) * FS + FS / 2 | 0; }
+  function map(v, c) {
+    var b = new Buf(BOX_W, BOX_H), frets = v.frets, base = baseFret(frets), rows = rowsOf(frets), s, i;
+    for (s = 0; s < 6; s++) b.rect(SX + s * SS, TOP, 1, 5 * FS + 1, MID);
+    for (i = 0; i <= 5; i++) b.rect(SX, TOP + i * FS, 5 * SS + 1, 1, MID);
+    if (base === 1) b.rect(SX, TOP - 3, 5 * SS + 1, 4, INK);
+    else b.text(String(base), base < 10 ? SX - 11 : SX - 17, TOP + 5, INK);
+    for (s = 0; s < 6; s++) {
+      var x = SX + s * SS;
+      if (frets[s] < 0 && base > 1) b.cross(x, 6, INK);
+      for (i = 0; i < rows.length; i++) {
+        var f = rows[i], y = mapY(f, base), d = Chords.degree(c, (Chords.OPEN[s] + f) % 12), w = d.lab.length * 4 - 1;
+        var on = frets[s] === f;
+        b.rect(x - 6, y - 4, 13, 9, on ? INK : PAPER);
+        b.small(d.lab, x - (w >> 1), y - 2, on ? PAPER : d.tone ? DARK : MID);
+      }
+    }
+    return b;
+  }
+  /* which string and fret a point of the map (in buffer pixels) is on, or null */
+  function mapAt(v, bx, by) {
+    var frets = v.frets, base = baseFret(frets), rows = rowsOf(frets), s = Math.round((bx - SX) / SS);
+    if (s < 0 || s > 5 || Math.abs(bx - (SX + s * SS)) > 7) return null;
+    for (var i = 0; i < rows.length; i++) {
+      var y = mapY(rows[i], base);
+      if (by >= y - (rows[i] === 0 ? 6 : FS / 2) && by < y + (rows[i] === 0 ? 5 : FS / 2)) return { s: s, f: rows[i] };
+    }
+    return null;
   }
 
   /* The neck: low E at the bottom as you look down at a guitar on your lap, the nut at the left, 15 frets. Every
@@ -134,5 +187,5 @@ var Draw = (function () {
     return k;
   }
 
-  return { Buf: Buf, box: box, neck: neck, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
+  return { Buf: Buf, box: box, map: map, mapAt: mapAt, neck: neck, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
 })();

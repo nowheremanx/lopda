@@ -678,8 +678,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/chord-book/index.html",
-      "sha256": "4e6224ae75450fa351166cd700f0235f40036f5c2a98a92f33730a979b3f5062",
-      "bytes": 81844
+      "sha256": "9243dd0346f19d69a8d604641320c26eabdd3e1f98eb6a3bf7890a32db05f949",
+      "bytes": 86228
     },
     {
       "spec": "lopda/1",

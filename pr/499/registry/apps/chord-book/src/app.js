@@ -5,7 +5,7 @@
   "use strict";
   var EN = PAD.lang === "en";
   var T = EN ? {
-    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck",
+    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
@@ -14,7 +14,7 @@
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}"
   } : {
-    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板",
+    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
@@ -29,7 +29,7 @@
   function sfx(n) { try { PAD.sfx(n); } catch (e) {} }
 
   /* ---------------- state and save (section 5) ---------------- */
-  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
+  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", map: false, vol: 2, recent: [] };
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
   var saveTimer = 0;
   function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
@@ -41,6 +41,7 @@
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
     if (s.view === "neck" || s.view === "box") set.view = s.view;
+    set.map = s.map === true;
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
     if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
   }
@@ -73,8 +74,8 @@
     var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    $("view").textContent = set.view === "neck" ? t("neck") : t("box");
-    $("view").classList.toggle("on", set.view === "neck");
+    $("view").textContent = set.map ? t("degrees") : set.view === "neck" ? t("neck") : t("box");
+    $("view").classList.toggle("on", set.map || set.view === "neck");
     $("line").textContent = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) + " · " +
       (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
     /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
@@ -94,7 +95,7 @@
     var cur = current(), c = chord();
     if (!cur.v) return;
     var w = wrap.clientWidth, h = wrap.clientHeight;
-    var b = set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
+    var b = set.map ? Draw.map(cur.v, c) : set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
     Draw.paint(cv, b, Math.max(1, w), Math.max(1, h));
   }
   function step(d) {
@@ -120,7 +121,16 @@
     if (!Guitar.play(notesOf(v), arp ? 0.18 : 0.012)) sfx(Guitar.level() ? "tap" : "err");
   }
 
-  /* the diagram: a tap strums, a swipe changes the voicing */
+  /* the diagram: a tap opens the degree map; on the map a tap plays the note under the finger (ringing with what was
+     strummed, so a note to add can be heard against the chord), and a tap beside it closes the map. A swipe changes
+     the voicing either way. Strumming is the 扫弦 button's job. */
+  function tapPicture(e) {
+    if (!set.map) { toggleMap(); return; }
+    var v = current().v, r = cv.getBoundingClientRect();
+    var hit = v && r.width ? Draw.mapAt(v, (e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height) : null;
+    if (!hit) { toggleMap(); return; }
+    if (!Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+  }
   (function () {
     var x0 = null, y0 = 0;
     wrap.addEventListener("pointerdown", function (e) { x0 = e.clientX; y0 = e.clientY; });
@@ -130,7 +140,7 @@
       var dx = e.clientX - x0, dy = e.clientY - y0;
       x0 = null;
       if (Math.abs(dx) > 36 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
-      else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) strum(false);
+      else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) tapPicture(e);
     });
   })();
   /* the strum button: a short press strums, a long one (decided on release, where the phone lets sound start) arpeggiates */
@@ -155,7 +165,6 @@
   })();
   $("prev").addEventListener("click", function () { step(-1); });
   $("next").addEventListener("click", function () { step(1); });
-  function toggleSort() { setSort(set.sort === "pos" ? "common" : "pos"); }
   function setSort(to) {
     var v = current().v;
     set.sort = to;
@@ -164,7 +173,12 @@
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
     sfx("tick"); store(); show();
   }
-  $("view").addEventListener("click", function () { set.view = set.view === "neck" ? "box" : "neck"; sfx("tick"); store(); show(); });
+  /* the header's view button: box and neck; while the degree map is open it reads 度数 and closes it */
+  $("view").addEventListener("click", function () {
+    if (set.map) set.map = false; else set.view = set.view === "neck" ? "box" : "neck";
+    sfx("tick"); store(); show();
+  });
+  function toggleMap() { set.map = !set.map; sfx("tick"); store(); show(); }
   $("cname").parentNode.addEventListener("click", function () { openPicker(); });
 
   /* ---------------- the picker (section 3.3) ---------------- */
@@ -430,7 +444,7 @@
     else if (k === "down") stepQual(1);
     else if (k === "a") strum(false);
     else if (k === "start") openPicker();
-    else if (k === "select") toggleSort();
+    else if (k === "select") toggleMap();
   });
 
   var resizeTimer = 0;
