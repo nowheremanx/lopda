@@ -1,4 +1,5 @@
-// registry/apps/rain-station: a save from another version of the story is never written over (#392).
+// registry/apps/rain-station: a save from another version of the story is never written over (#392), the choice and
+// title rows (#394, #395, #396) and the end song (#398).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
@@ -70,4 +71,52 @@ test("the title teaches no B: it has none (#395)", async () => {
     assert.ok(said.length > 0);
     assert.ok(!said.some((s) => /B/.test(s) && !/^[A-Z][a-z]/.test(s)), `title texts: ${said.join(" | ")}`);
   }
+});
+
+test("a tap beside a choice's rows picks nothing but answers; the box says to tap a line, and fits (#396)", async () => {
+  const t = bootWith({});
+  await t.run(10);
+  const STORY = t.app.ctx.get("STORY"), at = STORY.findIndex((s) => s.choice);
+  const t2 = bootWith({ story: { v: t.app.ctx.get("SAVE_VERSION"), at, flags: {}, scene: null, stage: {} } });
+  await t2.run(10);
+  await t2.tap("a");                                  /* 继续 */
+  await t2.run(40);
+  assert.equal(t2.app.ctx.get("cur").kind, "choice");
+  const game = t2.app.ctx.get("game"), g = game.g, BOX_Y = t2.app.ctx.get("BOX_Y"), sfx = [];
+  const play = game.sfx; game.sfx = (s) => { sfx.push(s); return play.call(game, s); };
+  t2.app.pointer("pointerdown", 80, BOX_Y + 14); await t2.run(2); t2.app.pointer("pointerup", 80, BOX_Y + 14); await t2.run(4);
+  assert.equal(t2.app.ctx.get("cur").kind, "choice", "still choosing");
+  assert.equal(t2.app.ctx.get("S").at, at);
+  assert.deepEqual(sfx, ["tick"]);
+  for (const lang of ["zh", "en"]) {
+    game.lang = lang;
+    const text = g.text, said = [];
+    g.text = function (s) { said.push(String(s)); return text.apply(g, arguments); };
+    await t2.run(1);
+    g.text = text;
+    const hint = said.filter((s) => /点上面|Tap a line|回看|log/.test(s));
+    assert.equal(hint.length, 2, `${lang}: ${said.join(" | ")}`);
+    hint.forEach((s) => assert.ok(g.measure(s) <= 156, `${lang} "${s}" is ${g.measure(s)} px`));
+  }
+});
+
+test("the end song plays on over the title; a new reading stops it (#398)", async () => {
+  const t = bootWith({});
+  await t.run(10);
+  const STORY = t.app.ctx.get("STORY"), end = STORY.findIndex((s) => s.end);
+  const t2 = bootWith({ story: { v: t.app.ctx.get("SAVE_VERSION"), at: end, flags: {}, scene: null, stage: {} } });
+  const stops2 = [];
+  t2.app.ctx.get("PAD").music = { play() {}, stop: () => stops2.push(1) };
+  await t2.run(10);
+  await t2.tap("a");
+  await t2.run(40);
+  assert.equal(t2.app.ctx.get("cur").kind, "end");
+  const before = stops2.length;
+  await t2.run(120);                                 /* past the card's 1.5 s hold */
+  await t2.tap("a");
+  await t2.run(40);
+  assert.equal(stops2.length, before, "going back to the title does not stop the song");
+  await t2.tap("a");                                 /* 开始 */
+  await t2.run(40);
+  assert.ok(stops2.length > before, "a new reading stops it");
 });
