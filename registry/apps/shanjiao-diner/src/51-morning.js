@@ -81,7 +81,8 @@ function morningAct(i) {
         S.flags.opened = 1;
         save();
         game.sfx("ok");
-        autoService();
+        /* the regulars' scenes play over the morning before the ledger: stay busy until it goes */
+        busy = autoService() === true;
       } else if (c === 0) {
         S.flags.opened = 1;
         save();

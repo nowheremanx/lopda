@@ -23,9 +23,11 @@ var Snd = (function () {
   var NEW = typeof PAD !== "undefined" && !!PAD.music;
 
   /* ---------- effects ---------- */
-  var sq = function (duty, from, to, ms, vol, o) { return Object.assign({ wave: "square", duty: duty, from: from, to: to, ms: ms, attack: 2, vol: vol }, o); };
-  var tri = function (from, to, ms, vol, o) { return Object.assign({ wave: "triangle", from: from, to: to, ms: ms, attack: 2, vol: vol }, o); };
-  var nz = function (from, to, ms, vol, o) { return Object.assign({ wave: "noise", from: from, to: to, ms: ms, attack: 2, vol: vol }, o); };
+  /* every effect starts with an attack of at least 4 ms: a 2 ms edge clicks on the phone's speaker (sdk/UI.md
+     section 7) */
+  var sq = function (duty, from, to, ms, vol, o) { return Object.assign({ wave: "square", duty: duty, from: from, to: to, ms: ms, attack: 4, vol: vol }, o); };
+  var tri = function (from, to, ms, vol, o) { return Object.assign({ wave: "triangle", from: from, to: to, ms: ms, attack: 4, vol: vol }, o); };
+  var nz = function (from, to, ms, vol, o) { return Object.assign({ wave: "noise", from: from, to: to, ms: ms, attack: 4, vol: vol }, o); };
   var at = function (ms, s) { return Object.assign({ at: ms }, s); };
   var vib = function (depth, rate) { return { vibrato: { depth: depth, rate: rate } }; };
   /* the five notes of D 宫 (D E F# A B, high): one for each element's orb in 七级浮屠 */
@@ -37,7 +39,8 @@ var Snd = (function () {
     noHit: { old: "hit", s: [] },                                                              /* a pill: no blow, no sound */
     down: { old: "tick", s: [nz(700, 60, 450, 0.6)] },                                         /* a foe falls */
     bossDown: { old: "tick", s: [nz(400, 30, 1300, 0.8, { attack: 20 })] },
-    weak: { old: "coin", s: [sq(1, 1568, 1568, 70, 0.5), at(60, sq(1, 2093, 2093, 140, 0.5))] },     /* 克制 */
+    /* 克制: heard on every weak hit, so a soft triangle chime a fifth apart under 1.2 kHz, not a bright square */
+    weak: { old: "coin", s: [tri(784, 784, 80, 0.45), at(60, tri(1175, 1175, 160, 0.45, { decay: 140 }))] },
     encounter: { old: "hit", s: [nz(300, 3000, 260, 0.6, { attack: 120 })] },                 /* into a fight: a rising rush */
     encTick: { old: "tick", s: [sq(0, 880, 880, 40, 0.4)] },
     roar: { old: "lose", s: [sq(3, 110, 70, 1000, 0.6, Object.assign({ attack: 80 }, vib(1.5, 7))), nz(250, 60, 900, 0.7, { attack: 40 })] },
@@ -49,7 +52,8 @@ var Snd = (function () {
 
     /* ---- the hero's spells (src/spells.js) ---- */
     /* 飞剑诀: the halo of swords rings out; each launch is a hiss through the air */
-    swordCast: { old: "ok", s: [sq(0, 1400, 2800, 260, 0.35, Object.assign({ attack: 20 }, vib(0.2, 16)))] },
+    /* the first spell and the one cast most, so a triangle that rises to 1.2 kHz, not a square to 2.8 kHz */
+    swordCast: { old: "ok", s: [tri(600, 1175, 260, 0.4, Object.assign({ attack: 20, decay: 200 }, vib(0.2, 16)))] },
     swordFly: { old: "tick", s: [nz(2600, 7000, 70, 0.45)] },
     /* 寒潮: a low swell, the wash of the wave, the crack of frost */
     tideCast: { old: "ok", s: [tri(110, 330, 600, 0.7, { attack: 200 })] },
