@@ -991,16 +991,15 @@ $("set-restore-file").onchange=function(){
     });
   },function(){ sfx("err"); okBox(tr("rs.unreadable")); });
 };
-/* saved: the answer of a 先备份 just before; false (cancelled or failed) puts a warning under the question, so the player
-   knows there is still no copy of the current data before agreeing to replace it (issue #414) */
+/* saved: the answer of a 先备份 just before. Once the player asked for a copy first, the restore waits for one: after a
+   cancelled or failed backup only 先备份 (again) and 取消 are offered, with a line saying why (issue #414, owner 2026-11-27) */
 function askRestore(saved){
-  var bk=BS.backup, when=new Date(bk.manifest.created);
+  var bk=BS.backup, when=new Date(bk.manifest.created), msg;
   BS.busy=true;
-  box(tr("rs.ask",{when:isNaN(when) ? "?" : when.getFullYear()+"/"+LP.fmt(when.getTime()), docs:bk.docs.length, files:bk.files.length, size:sizeText(BS.file.size)}),[
-    {label:tr("rs.go"), main:true, go:function(){ sfx("tap"); sureRestore(); }},
-    {label:tr("rs.first"), go:function(){ sfx("tap"); startBackup(askRestore); }},
-    {label:tr("common.cancel"), go:function(){ sfx("tap"); closeBox(); }}
-  ],saved===false ? tr("rs.nocopy") : "");
+  msg=tr("rs.ask",{when:isNaN(when) ? "?" : when.getFullYear()+"/"+LP.fmt(when.getTime()), docs:bk.docs.length, files:bk.files.length, size:sizeText(BS.file.size)});
+  var first={label:tr("rs.first"), go:function(){ sfx("tap"); startBackup(askRestore); }}, cancel={label:tr("common.cancel"), go:function(){ sfx("tap"); closeBox(); }};
+  if(saved===false){ first.main=true; box(msg,[first,cancel],tr("rs.nocopy")); return; }
+  box(msg,[{label:tr("rs.go"), main:true, go:function(){ sfx("tap"); sureRestore(); }},first,cancel]);
 }
 function sureRestore(){
   box(tr("rs.sure"),[
