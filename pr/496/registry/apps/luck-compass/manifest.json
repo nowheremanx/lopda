@@ -5,15 +5,15 @@
   "glyph": "玄",
   "category": "life",
   "version": "2.0.1",
-  "description": "老黄历、每日一签、罗盘、八卦、八字，一间小小的旧历书铺。旧书上的说法，图个吉利。",
+  "description": "老黄历、每日一签、罗盘、八卦，一间小小的旧历书铺。旧书上的说法，图个吉利。",
   "i18n": {
     "zh": {
       "name": "玄机阁",
-      "description": "老黄历、每日一签、罗盘、八卦、八字，一间小小的旧历书铺。旧书上的说法，图个吉利。"
+      "description": "老黄历、每日一签、罗盘、八卦，一间小小的旧历书铺。旧书上的说法，图个吉利。"
     },
     "en": {
       "name": "Oracle",
-      "description": "An old almanac shop: almanac, fortune slip, compass, I Ching, birth chart."
+      "description": "An old almanac shop: the almanac, a fortune slip, a compass and the I Ching."
     }
   },
   "author": "Haowei Wu",
