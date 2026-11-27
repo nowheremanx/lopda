@@ -916,7 +916,9 @@ function updateDone() {
 
 /* ---------------- title and calendar input ---------------- */
 
-var TITLE_ROW_Y = [78, 104], TITLE_ROW_H = 22;
+/* The owner's picture fills the top 104 rows; the two choices sit side by side under it, each
+   77 x 22 (44 css px tall at the smallest screen), then the footer from y 128. */
+var TITLE_ROW_X = [2, 81], TITLE_ROW_Y = 105, TITLE_ROW_W = 77, TITLE_ROW_H = 22;
 
 function chooseTitle(i) {
   game.sfx("tap");
@@ -925,16 +927,17 @@ function chooseTitle(i) {
 }
 
 function titleHit(x, y) {
-  if (x < 4 || x > 156) return -1;
-  for (var i = 0; i < TITLE_ROW_Y.length; i++) {
-    if (y >= TITLE_ROW_Y[i] && y < TITLE_ROW_Y[i] + TITLE_ROW_H) return i;
+  if (y < TITLE_ROW_Y || y >= TITLE_ROW_Y + TITLE_ROW_H) return -1;
+  for (var i = 0; i < TITLE_ROW_X.length; i++) {
+    if (x >= TITLE_ROW_X[i] && x < TITLE_ROW_X[i] + TITLE_ROW_W) return i;
   }
   return -1;
 }
 
 function updateTitle() {
-  if (game.repeat("up", 0.32, 0.09)) { titleSel = (titleSel + 1) % 2; game.sfx("move"); }
-  else if (game.repeat("down", 0.32, 0.09)) { titleSel = (titleSel + 1) % 2; game.sfx("move"); }
+  /* Two choices side by side: any direction moves to the other one. */
+  if (game.repeat("left", 0.32, 0.09) || game.repeat("right", 0.32, 0.09) ||
+      game.repeat("up", 0.32, 0.09) || game.repeat("down", 0.32, 0.09)) { titleSel = (titleSel + 1) % 2; game.sfx("move"); }
   if (game.pressed("a") || game.pressed("start")) chooseTitle(titleSel);
   else if (game.pointer.pressed) {
     var hit = titleHit(game.pointer.x, game.pointer.y);
@@ -1331,31 +1334,6 @@ function drawTallyStrip(g, x, y) {
   }
 }
 
-/* lopix12 has no 2x size, so the title's name is drawn once, read back and doubled.
-   The doubled glyphs span cx-w .. cx+w, so the name is centred on cx (not on the 1x copy). */
-function drawText2x(g, str, cx, y, color) {
-  var w = g.measure(str), sx = Math.round(cx - w / 2), dx = Math.round(cx - w), pts = [], yy, xx;
-  g.text(str, sx, y, { color: color });
-  for (yy = 0; yy < 12; yy++) {
-    for (xx = 0; xx < w; xx++) {
-      if (g.get(sx + xx, y + yy) === color) pts.push([xx, yy]);
-    }
-  }
-  g.rect(dx, y, 2 * w, 24, g.PAPER);
-  for (var i = 0; i < pts.length; i++) {
-    g.rect(dx + pts[i][0] * 2, y + pts[i][1] * 2, 2, 2, color);
-  }
-}
-
-function drawSpriteScale(g, s, x, y, k) {
-  for (var sy = 0; sy < s.h; sy++) {
-    for (var sx = 0; sx < s.w; sx++) {
-      var v = s.px[sy * s.w + sx];
-      if (v <= 3) g.rect(x + sx * k, y + sy * k, k, k, v);
-    }
-  }
-}
-
 function drawTri(g, x, y, dir, color) {
   for (var i = 0; i < 6; i++) {
     /* A left arrow keeps its base on the right; a right arrow keeps it on the left. */
@@ -1363,37 +1341,45 @@ function drawTri(g, x, y, dir, color) {
   }
 }
 
+/* lopix12 has no 2x size: the name is drawn once at 1x where the footer goes (the footer covers it
+   later in the frame), read back, and doubled onto the picture's flat dark block, top left, as paper
+   with an ink shadow one pixel down and right. */
+function drawTitleName(g, name) {
+  var w = g.measure(name), pts = [], x, y, i;
+  g.text(name, 0, 130, { color: g.INK });
+  for (y = 0; y < 12; y++) for (x = 0; x < w; x++) if (g.get(x, 130 + y) === g.INK) pts.push([x, y]);
+  var bw = Math.max(2 * w + 12, 78), x0 = 2 + Math.round((bw - 2 * w) / 2);
+  g.rect(2, 2, bw, 32, g.DARK);
+  for (i = 0; i < pts.length; i++) g.rect(x0 + 1 + pts[i][0] * 2, 7 + pts[i][1] * 2, 2, 2, g.INK);
+  for (i = 0; i < pts.length; i++) g.rect(x0 + pts[i][0] * 2, 6 + pts[i][1] * 2, 2, 2, g.PAPER);
+}
+
 function drawTitle(g) {
-  drawSpriteScale(g, ART.box, 56, 2, 3);
-  drawText2x(g, T({ zh: "每日推箱", en: "DailyBox" }), 80, 54, g.INK);
+  g.sprite(BOX_TITLE_ART.picture(), 0, 0);
+  drawTitleName(g, T({ zh: "每日推箱", en: "DailyBox" }));
 
   var labels = [T({ zh: "今天", en: "Today" }), T({ zh: "日历", en: "Calendar" })];
   var todayRec = saved.days[dayKey(new Date())];
   for (var i = 0; i < 2; i++) {
-    var y = TITLE_ROW_Y[i], x = 4, w = 152, h = TITLE_ROW_H;
-    if (i === titleSel) {
-      g.rect(x, y, w, h, g.INK);
-      g.text(labels[i], x + 10, y + 4, { color: g.PAPER });
-    } else {
-      g.frame(x, y, w, h, g.MID);
-      g.text(labels[i], x + 10, y + 4);
-    }
+    var x = TITLE_ROW_X[i], y = TITLE_ROW_Y, w = TITLE_ROW_W, h = TITLE_ROW_H, sel = i === titleSel;
+    g.rect(x, y, w, h, sel ? g.INK : g.PAPER);
+    if (!sel) g.frame(x, y, w, h, g.DARK);
     if (i === 0) {
       var date = new Date();
-      var dateStr = (date.getMonth() + 1) + "/" + date.getDate();
-      g.text(dateStr, x + w - (todayRec ? 22 : 10), y + 4,
-        { align: "right", color: i === titleSel ? g.PAPER : g.INK });
-      /* The ✓ the brief asks for is a stamp sprite, not a character in the font. On the selected
-         ink row a tone map keeps the check visible (ink body -> paper, paper check -> ink). */
+      g.text(labels[i], x + 5, y + 5, { color: sel ? g.PAPER : g.INK });
+      g.text((date.getMonth() + 1) + "/" + date.getDate(), x + w - (todayRec ? 16 : 5), y + 5,
+        { align: "right", color: sel ? g.PAPER : g.INK });
+      /* The solved check is a stamp sprite; on the selected ink row a tone map keeps it visible. */
       if (todayRec) {
-        g.sprite(ART.stamp, x + w - 18, y + 5,
-          i === titleSel ? { map: [g.PAPER, g.PAPER, g.PAPER, g.INK] } : null);
+        g.sprite(ART.stamp, x + w - 14, y + 6, sel ? { map: [g.PAPER, g.PAPER, g.PAPER, g.INK] } : null);
       }
+    } else {
+      g.text(labels[i], x + w / 2, y + 5, { align: "center", color: sel ? g.PAPER : g.INK });
     }
   }
 
   g.rect(0, 128, 160, 16, g.INK);
-  g.text(T({ zh: "↑↓ 选   A 好", en: "Up/Down  A select" }), 80, 131,
+  g.text(T({ zh: "←→ 选   A 好", en: "Left/Right  A select" }), 80, 131,
     { align: "center", color: g.PAPER });
 }
 
