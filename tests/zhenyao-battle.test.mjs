@@ -257,3 +257,96 @@ test("the field menu and the skip question take taps (#459)", async () => {
   for (let i = 0; i < 10 && !done; i++) await z.run(1);
   assert.equal(done, true, "a tap on 是 skips the cutscene");
 });
+
+test("Down from 防御 lands on 逃跑, the short last row (#465)", async () => {
+  const z = await tapGame();
+  z.get("ZT.fight(0, 0)");
+  let n = 0;
+  for (; n < 2000 && !(z.menu() && z.menu().kind === "cmd"); n++) await z.run(1);
+  z.menu().i = 3;                              // 防御
+  await z.press("ArrowDown");
+  assert.equal(z.menu().i, 4, "逃跑");
+  await z.press("ArrowDown");
+  assert.equal(z.menu().i, 4, "nothing below the last row");
+  await z.press("ArrowUp");
+  assert.equal(z.menu().i, 2, "Up from 逃跑 is 物品, the cell above it");
+});
+
+test("a pill for a full bar is refused in battle as on the map, and kept (#464)", async () => {
+  const z = await tapGame();
+  z.get("ZT.fight(0, 0)");
+  let n = 0;
+  for (; n < 2000 && !(z.menu() && z.menu().kind === "cmd"); n++) await z.run(1);
+  const S = z.get("Battle.S()"), h = S.b.hero, s = z.get("Rules").stats(h.level);
+  h.hp = s.maxHp; h.items.pill = 2;
+  z.menu().i = 2;                              // 物品
+  await z.press("x");
+  for (n = 0; n < 50 && z.menu().kind !== "list"; n++) await z.run(1);
+  assert.equal(z.menu().kind, "list");
+  assert.match(z.menu().items[0].info, /已满/, "the list says the bar is full");
+  await z.press("x");                          // 回春丹
+  for (n = 0; n < 200 && !(z.menu() && z.menu().kind === "cmd"); n++) await z.run(1);
+  assert.equal(h.items.pill, 2, "the pill is kept");
+  assert.equal(z.menu().kind, "cmd", "back to the commands, the turn not spent");
+});
+
+test("a spell for all shows what the living foes fear, and the list marks 克制 (#462)", async () => {
+  const z = await tapGame();
+  z.get("ZT.fight(0, 0)");
+  let n = 0;
+  for (; n < 2000 && !(z.menu() && z.menu().kind === "cmd"); n++) await z.run(1);
+  const S = z.get("Battle.S()"), Rules = z.get("Rules"), B = z.get("BATTLE");
+  S.b.hero.level = 10; S.b.hero.mp = 999;
+  const ids = Rules.spellsAt(10), weak = S.b.foes.map((f) => f.weak);
+  z.menu().i = 1;                              // 法术
+  await z.press("x");
+  for (n = 0; n < 50 && z.menu().kind !== "list"; n++) await z.run(1);
+  const items = z.menu().items;
+  ids.forEach((id, k) => {
+    const el = B.SPELLS[id].element;
+    assert.equal(/克制/.test(items[k].info), !!el && weak.includes(el), id + ": " + items[k].info);
+  });
+  const all = ids.findIndex((id) => B.SPELLS[id].target === "all");
+  const drawn = [];
+  const g = z.get("game").g, text = g.text;
+  g.text = function (t) { drawn.push(String(t)); return text.apply(g, arguments); };
+  for (let k = 0; k < all; k++) await z.press("ArrowDown");
+  await z.press("x");
+  for (n = 0; n < 50 && z.menu().kind !== "target"; n++) await z.run(1);
+  await z.run(2);
+  g.text = text;
+  const fear = drawn.find((t) => t.startsWith("怕"));
+  assert.ok(fear, "the panel for all names a weakness");
+  for (const w of weak) assert.ok(fear.includes(B.ELEMENTS[w].name), fear);
+});
+
+test("演武 names its way out: 逃跑 reads 离开 and the opening says how it works (#463)", async () => {
+  const z = await tapGame();
+  const said = [];
+  z.get("game").go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: z.get("galleryHero")(), demo: true, back: "title", from: new Uint8Array(z.get("R").image.px) }, { fade: false });
+  let n = 0;
+  for (; n < 3000 && !(z.menu() && z.menu().kind === "cmd"); n++) {
+    await z.run(1);
+    const m = z.get("Battle.S()") && z.get("Battle.S()").msg;
+    if (m && !said.includes(m)) said.push(m);
+  }
+  assert.ok(said.some((m) => m.includes("离开")), said.join(" | "));
+  const drawn = [];
+  const g = z.get("game").g, text = g.text;
+  g.text = function (t) { drawn.push(String(t)); return text.apply(g, arguments); };
+  await z.run(2);
+  g.text = text;
+  assert.ok(drawn.includes("离开") && !drawn.includes("逃跑"), "the command reads 离开");
+});
+
+test("克制 and 飞剑诀 stay soft: triangle, under 1.2 kHz, attack 3 ms or more (#461)", () => {
+  const ctx = vm.createContext({ console, Object, PAD: { music: {} } });
+  vm.runInContext(read("registry/apps/zhenyao-tower/src/sound.js") + "\nthis.Snd = Snd;", ctx);
+  for (const name of ["weak", "swordCast"]) {
+    for (const s of ctx.Snd.FX[name].s) {
+      assert.notEqual(s.wave, "square", name);
+      assert.ok(Math.max(s.from, s.to) <= 1200, name + " top note");
+      assert.ok(s.attack >= 3, name + " attack");
+    }
+  }
+});

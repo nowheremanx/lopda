@@ -243,10 +243,10 @@ test("the lines menu counts collected lines toward the sixteen", async () => {
   const texts = [];
   const text = game.g.text;
   game.g.text = function (s) { texts.push(String(s)); return text.apply(game.g, arguments); };
-  game.push("gallery");
+  game.push("menu");
   await run(app, 2);
-  assert.ok(texts.includes("1 / " + QS.QUOTES.length),
-    "the line count shows the real total: " + texts.join(" | "));
+  assert.ok(texts.includes("语录 1 / " + QS.QUOTES.length),
+    "the 语录 row shows the real total: " + texts.join(" | "));
 });
 
 /* ---------------- touch, the summit tally, and the handbook's dates (DeepSeek review #430 #431 #433) ---------------- */
@@ -358,4 +358,34 @@ test("the handbook writes a line with the summit and the day it was given, not t
   await run(app, 2);
   assert.equal(store.sisyphus.got["7"].n, 6);
   assert.match(store.sisyphus.got["7"].d, /^\d{4}年/);
+});
+
+test("in English the note's frame, its title and its date are English; the line stays in both (#432)", () => {
+  const q = QS.byId["7"];
+  const text = QS.noteText(q, { n: 3, d: "2026年11月26日" }, "en");
+  assert.ok(text.startsWith("Nov 26, 2026 · Summit 3"), text);
+  assert.ok(text.includes(q.zh) && text.includes(q.en));
+  assert.ok(text.includes("Albert Camus, The Myth of Sisyphus"));
+  assert.ok(!/[次登顶抄于加缪]/.test(text.replace(q.zh, "")), "no Chinese outside the line");
+  assert.match(QS.noteText(q, null, "en"), /^Copied [A-Z][a-z]{2} \d{1,2}, \d{4}/);
+  assert.equal(QS.noteTitle("en"), "A Manual of Happiness");
+  assert.equal(QS.noteTitle("zh"), "幸福手册", "the Chinese handbook keeps its name");
+  assert.equal(QS.dayText("not a day", "en"), "not a day");
+});
+
+test("the gallery's corner is where the card sits, and its hint names the paging keys (#434)", async () => {
+  const { pad } = makePad();
+  pad.lang = "en";
+  const app = boot(APP, { pad, seed: 1 });
+  await run(app, 10);
+  const S = app.ctx.get("S"), game = app.ctx.get("game");
+  S.seen = ["16", "3", "7"];
+  const g = game.g, text = g.text, drawn = [];
+  g.text = function (s) { drawn.push(String(s)); return text.apply(g, arguments); };
+  game.push("gallery");
+  await run(app, 3);
+  assert.ok(drawn.includes("↑↓ 1 / 3"), drawn.join(" | "));
+  assert.ok(drawn.includes("The Manual") && drawn.includes("A WRITE    B BACK") && drawn.includes("The Myth of Sisyphus"), drawn.join(" | "));
+  assert.ok(!drawn.some((s) => /[一-鿿]/.test(s) && !QS.QUOTES.some((q) => q.zh.includes(s))), "no fixed Chinese text: " + drawn.join(" | "));
+  g.text = text;
 });

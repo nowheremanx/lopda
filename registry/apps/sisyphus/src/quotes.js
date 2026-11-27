@@ -67,20 +67,42 @@ var QS = (function () {
     return byId[id];
   }
 
+  /* the day as it is kept in a save: "2026年11月26日", whatever the language */
   function dateText(d) {
     return d.getFullYear() + "年" + (d.getMonth() + 1) + "月" + d.getDate() + "日";
   }
 
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  /* a kept day shown in the player's language; anything it cannot read stays as it is */
+  function dayText(kept, lang) {
+    if (lang !== "en") return kept;
+    var m = /^(\d{4})年(\d{1,2})月(\d{1,2})日$/.exec(kept);
+    if (!m || +m[2] < 1 || +m[2] > 12) return kept;
+    return MONTHS[+m[2] - 1] + " " + (+m[3]) + ", " + m[1];
+  }
+
+  /* the note's title: the player's language picks it, the zh one is the original
+     name (older handbooks keep growing under it) */
+  function noteTitle(lang) {
+    return lang === "en" ? "A Manual of Happiness" : "幸福手册";
+  }
+
   /* at: {n, d} for the summit and the day the line was given (a bare number is
      today's summit n). Without it, the note says only the day it was copied, so the
-     handbook never claims a summit or a day it does not know. */
-  function noteText(q, at) {
+     handbook never claims a summit or a day it does not know. The line itself is
+     written in both languages, as on the card; the frame around it follows lang. */
+  function noteText(q, at, lang) {
+    var en = lang === "en";
     if (typeof at === "number") at = { n: at, d: dateText(new Date()) };
-    var head = at && at.n > 0 && at.d ? at.d + " · 第 " + at.n + " 次登顶" : "抄于 " + dateText(new Date());
+    var today = dayText(dateText(new Date()), lang);
+    var head = at && at.n > 0 && at.d
+      ? (en ? dayText(at.d, lang) + " · Summit " + at.n : at.d + " · 第 " + at.n + " 次登顶")
+      : (en ? "Copied " + today : "抄于 " + today);
     return head + "\n\n"
       + "「" + q.zh + "」\n"
       + "\"" + q.en + "\"\n\n"
-      + "—— 加缪《西西弗斯神话》";
+      + (en ? "— Albert Camus, The Myth of Sisyphus" : "—— 加缪《西西弗斯神话》");
   }
 
   /* a saved got record: only lines in the seen list, each {n > 0, d a short string} */
@@ -100,5 +122,5 @@ var QS = (function () {
     return out;
   }
 
-  return { QUOTES: QUOTES, byId: byId, next: next, noteText: noteText, dateText: dateText, cleanGot: cleanGot, seenList: seenList };
+  return { QUOTES: QUOTES, byId: byId, next: next, noteText: noteText, noteTitle: noteTitle, dateText: dateText, dayText: dayText, cleanGot: cleanGot, seenList: seenList };
 })();

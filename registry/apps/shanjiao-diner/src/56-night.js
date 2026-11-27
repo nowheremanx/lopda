@@ -160,7 +160,10 @@ game.scene("night", {
     g.text(DATA.WEATHER[next].name, 174, 140, { color: g.DARK });
     UI.text(g, "总客 " + S.stats.served, 126, 160, { color: g.DARK, fit: 78 });
     UI.text(g, "总入 " + S.stats.earned, 126, 174, { color: g.DARK, fit: 78 });
-    UI.text(g, "第七天 山神宴", 126, 192, { color: g.DARK, fit: 78 });
+    /* the feast is the week's goal: count down to it, and on the night itself say how many of its three dishes
+       reached the right guest (S.flags.vip, which the ending and the last choice read) */
+    var feast = S.day >= 7 ? "宴席对上 " + Math.min(3, S.flags.vip || 0) + "/3" : S.day === 6 ? "明天山神宴" : "离山神宴 " + (7 - S.day) + " 天";
+    UI.text(g, feast, 126, 192, { color: g.DARK, fit: 78 });
     UI.footer(g, S.day === 7 ? "A 结局" : (NIGHT_STORY && !NIGHT_STORY_DONE ? "A 听她说" : "A 睡吧"));
     UI.toast(g);
   }

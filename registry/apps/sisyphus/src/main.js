@@ -112,7 +112,7 @@ function setAmbience(level) {
 function appendNote(q, at, done) {
   if (!PAD.notes || !PAD.notes.append) { done("denied"); return; }
   try {
-    var p = PAD.notes.append("幸福手册", QS.noteText(q, at));
+    var p = PAD.notes.append(QS.noteTitle(game.lang), QS.noteText(q, at, game.lang));
     if (p && p.then) {
       p.then(function (r) { done(r === "saved" ? "saved" : "denied"); })
         .catch(function () { done("denied"); });
@@ -159,7 +159,7 @@ game.scene("title", {
    text keeps full contrast all the way to the top (no text in dark on dithered ink). */
 function drawRunHud(g) {
   if (S.summits > 0) {
-    var label = T({ zh: "第 " + S.summits + " 次", en: String(S.summits) });
+    var label = T({ zh: "第 " + S.summits + " 次", en: "Summit " + S.summits });
     var light = ART.skyTop(S) >= 1.75;
     var w = g.measure(label);
     g.rect(153 - w - 2, 3, w + 4, g.lineHeight + 1, light ? 3 : 0);
@@ -367,6 +367,19 @@ function openQuote() {
 /* A tap on a card (ART.card): "a" on the left half of the hint row under the
    bottom rule, where 「A …」 is written; "b" on its right half, where 「B …」 is;
    "body" anywhere above; null with no tap this frame. */
+/* the card's fixed words in the player's language; hint is the row's A / B text */
+function cardWords(hint) {
+  return {
+    source: T({ zh: "加缪《西西弗斯神话》", en: "The Myth of Sisyphus" }),
+    hint: hint,
+    saving: T({ zh: "写入中…", en: "Writing…" }),
+    saved: T({ zh: "已写入幸福手册", en: "Written to the Manual" }),
+    denied: T({ zh: "没有写入", en: "Not written" })
+  };
+}
+
+function galleryTitle() { return T({ zh: "幸福手册", en: "The Manual" }); }
+
 function cardTap() {
   var p = game.pointer;
   if (!p.pressed) return null;
@@ -412,7 +425,8 @@ game.scene("quote", {
   },
   draw: function (g) {
     S.time = game.time;
-    ART.card(g, S.quote, "山顶", "第 " + S.quoteN + " 次", S.quoteReveal, S.quoteStatus, "A 记下    B 让它过去");
+    ART.card(g, S.quote, T({ zh: "山顶", en: "Summit" }), T({ zh: "第 " + S.quoteN + " 次", en: "No. " + S.quoteN }),
+      S.quoteReveal, S.quoteStatus, cardWords(T({ zh: "A 记下    B 让它过去", en: "A KEEP    B LET GO" })));
   }
 });
 
@@ -538,7 +552,8 @@ function openMenu() {
 }
 
 function menuItems() {
-  return [T({ zh: "继续", en: "Resume" }), T({ zh: "语录", en: "Lines" }), T({ zh: "关于", en: "About" })];
+  var got = QS.seenList(S).length + " / " + QS.QUOTES.length;
+  return [T({ zh: "继续", en: "Resume" }), T({ zh: "语录 ", en: "Lines " }) + got, T({ zh: "关于", en: "About" })];
 }
 
 game.scene("menu", {
@@ -635,7 +650,7 @@ game.scene("gallery", {
     if (!S.galleryList.length) {
       g.clear(3);
       g.frame(3, 3, 154, 172, 0);
-      g.text("幸福手册", 12, 10, { color: 1 });
+      g.text(galleryTitle(), 12, 10, { color: 1 });
       g.line(12, 27, 147, 27, 1);
       g.text(T({ zh: "还没有语录。", en: "No lines yet." }), 13, 44, { color: 0 });
       g.text(T({ zh: "去山顶。", en: "Go to the summit." }), 13, 60, { color: 1 });
@@ -643,7 +658,11 @@ game.scene("gallery", {
       return;
     }
     var q = S.galleryList[S.galleryIndex];
-    ART.card(g, q, "幸福手册", S.galleryList.length + " / " + QS.QUOTES.length, 1, S.galleryStatus, "A 写入    B 返回");
+    /* the right corner is where this card sits among the collected lines (the
+       collected count against all sixteen is on the pause menu's 语录 row); ↑↓ pages */
+    var n = S.galleryList.length, at = (S.galleryIndex + 1) + " / " + n;
+    ART.card(g, q, galleryTitle(), n > 1 ? "↑↓ " + at : at, 1, S.galleryStatus,
+      cardWords(T({ zh: "A 写入    B 返回", en: "A WRITE    B BACK" })));
     if (S.galleryList.length > 1 && !S.galleryStatus) {
       for (var a = 0; a < 4; a++) {
         g.rect(8 - a, 84 + a, 1, 7 - 2 * a, 1);   // ‹
@@ -659,11 +678,11 @@ function aboutPages() {
     T({ zh: "西西弗斯 / Sisyphus", en: "Sisyphus / 西西弗斯" }),
     T({ zh: "推石上山。它滚下去。再推。", en: "Push the stone. It falls. Push again." }),
     T({ zh: "灵感来自加缪《西西弗斯神话》。中英译文为本作自译。",
-      en: "After Albert Camus, Le Mythe de Sisyphe. Translations for this work." }),
+      en: "After Albert Camus, The Myth of Sisyphus. The Chinese and English translations are this work's own." }),
     T({ zh: "按住 A / B 或屏幕推石。停太久，石头会滚回去。",
       en: "Hold A / B or the screen. Rest too long and the stone rolls back." }),
     T({ zh: "山顶的语录可以写入记事本「幸福手册」。",
-      en: "At the summit, a line can be written into Notes, in 'A Manual of Happiness'." }),
+      en: "At the summit, a line can be written into a note called 'A Manual of Happiness'." }),
     T({ zh: "没有终点。", en: "There is no end." })
   ];
 }

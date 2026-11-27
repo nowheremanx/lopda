@@ -335,7 +335,7 @@ var Battle = (function () {
         var x = cmdCell(i).x, y = cmdCell(i).y;
         if (i === m.i) g.arrow(x - 8, y + 3, "right");
         if (c[0] === "flee" && S.b.boss) offText(g, c[1], x, y);
-        else g.text(c[1], x, y);
+        else g.text(c[0] === "flee" && S.args.demo ? "离开" : c[1], x, y);
       });
       g.rect(110, 104, 1, 36, g.MID);
       g.text("Lv" + S.b.hero.level, 135, 105, { align: "center" });
@@ -363,8 +363,13 @@ var Battle = (function () {
         if (p) g.arrow(p[0] - 3, p[1] - 9 + (Math.floor(t * 4) % 2), "down");
       });
       g.window(0, 112, 160, 32);
-      if (m.all) g.text("全体", 80, 120, { align: "center" });
-      else {
+      if (m.all) {
+        /* every living foe's weakness, once each, so a spell for all shows what it would 克 just like one for one */
+        var fear = [];
+        ids.forEach(function (i) { var w = BATTLE.ELEMENTS[S.b.foes[i].weak].name; if (fear.indexOf(w) < 0) fear.push(w); });
+        g.text("全体", 6, 120);
+        g.text("怕" + fear.join("·"), 154, 120, { align: "right", color: g.DARK });
+      } else {
         var f = S.b.foes[m.i], weak = BATTLE.ELEMENTS[f.weak].name;
         g.text(f.name, 6, 116);
         g.text("怕" + weak, 154, 116, { align: "right", color: g.DARK });
@@ -402,7 +407,11 @@ var Battle = (function () {
     return poll(function () {
       var m = S.menu, d = game.dir(), i = m.i;
       if (d.x) i = (i % 2 === 0 ? i + 1 : i - 1);
-      if (d.y) i = i + d.y * 2;
+      if (d.y) {
+        i = i + d.y * 2;
+        /* the last row is shorter (逃跑 alone): Down from the cell above its gap lands on 逃跑 (sdk/UI.md section 5) */
+        if (i >= CMDS.length && Math.floor(m.i / 2) < Math.floor((CMDS.length - 1) / 2)) i = CMDS.length - 1;
+      }
       if (i !== m.i && i >= 0 && i < CMDS.length) { m.i = i; game.sfx("move"); }
       /* a tap runs the command it lands on, never the one under the arrow; a tap elsewhere does nothing */
       if (game.pointer.pressed) {
@@ -483,8 +492,10 @@ var Battle = (function () {
         var ids = Rules.spellsAt(hero.level);
         var items = ids.map(function (id) {
           var sp = BATTLE.SPELLS[id];
+          /* 克制 when the spell's element is what one of the living foes fears: the five elements taught where they are used */
+          var hits = sp.element && Rules.alive(S.b).some(function (f) { return f.weak === sp.element; });
           return { text: sp.name, right: String(sp.mp),
-            info: (sp.element ? BATTLE.ELEMENTS[sp.element].name + " · " : "五行 · ") + (sp.target === "all" ? "全体" : "单体"),
+            info: (sp.element ? BATTLE.ELEMENTS[sp.element].name + " · " : "五行 · ") + (sp.target === "all" ? "全体" : "单体") + (hits ? " · 克制" : ""),
             off: hero.mp < sp.mp };
         });
         for (;;) {
@@ -496,11 +507,19 @@ var Battle = (function () {
           if (tg >= 0) return { type: "spell", id: ids[k], target: tg };
         }
       } else if (cmd === "item") {
+        /* a pill for a full bar is refused here as on the map (main.js): err and the reason, and the pill stays */
+        var st = Rules.stats(hero.level), full = function (it) { return it.hp ? hero.hp >= st.maxHp : hero.mp >= st.maxMp; };
         var its = BATTLE.ITEM_ORDER.map(function (id) {
           var it = BATTLE.ITEMS[id];
-          return { text: it.name, right: "x" + (hero.items[id] || 0), info: it.hp ? "回复体力 " + it.hp : "回复法力 " + it.mp, off: !(hero.items[id] > 0) };
+          return { text: it.name, right: "x" + (hero.items[id] || 0),
+            info: (it.hp ? "回复体力 " + it.hp : "回复法力 " + it.mp) + (hero.items[id] > 0 && full(it) ? " · 已满" : ""), off: !(hero.items[id] > 0) };
         });
         var j = await chooseList(its, 0);
+        if (j >= 0 && full(BATTLE.ITEMS[BATTLE.ITEM_ORDER[j]])) {
+          game.sfx("err");
+          await say(BATTLE.ITEMS[BATTLE.ITEM_ORDER[j]].hp ? "体力已经满了" : "法力已经满了", 0.8);
+          continue;
+        }
         if (j >= 0) return { type: "item", id: BATTLE.ITEM_ORDER[j] };
       } else if (cmd === "defend") return { type: "defend" };
       else if (cmd === "flee") {
@@ -516,6 +535,12 @@ var Battle = (function () {
     await ANIM.intro(S, args.from);
     if (b.boss) await ANIM.bossIntro(S);
     await say(b.boss ? b.foes[0].name + "现身了！" : b.foes.length === 1 ? b.foes[0].name + "出现了！" : "出现了" + "一两三"[b.foes.length - 1] + "只妖怪！", 1.1);
+    /* 演武 has no win: the dummies only take hits, so it says so and names the way out */
+    if (args.demo) {
+      await say("木桩只挨打，不会倒下。", 1.4);
+      await say("打它怕的五行，伤害加倍。", 1.4);
+      await say("练够了，选「离开」。", 1.4);
+    }
     var result = null;
     while (!result) {
       var act = await heroTurn();

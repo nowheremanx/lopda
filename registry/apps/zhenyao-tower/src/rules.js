@@ -66,7 +66,7 @@ var Rules = (function () {
 
   /* an item taken from the bag, in a fight or on the map: heals up to the maximum. Returns {hp, mp} gained,
      or null (and changes nothing) when there is none left, or when it would do nothing because that bar is full
-     (a battle passes anyway: the menu there has always let you waste one) */
+     (a battle passes anyway, so Rules never refuses a chosen action; the battle menu refuses a full bar itself) */
   function useItem(hero, id, anyway) {
     var it = B.ITEMS[id], s = stats(hero.level);
     if (!it || !(hero.items[id] > 0)) return null;
