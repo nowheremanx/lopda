@@ -56,7 +56,7 @@ var T={
 };
 /* the player: st is the station being played (a saved one, or a directory result heard before it is saved: preview) */
 var E={el:null, st:null, preview:false, state:"off", err:"", tries:0, since:0, gen:0, watch:0, retry:0,
-  sleepAt:0, sleepMin:0, primed:false, stopping:false, muted:false, msReady:false, resolved:{}};
+  sleepAt:0, sleepMin:0, primed:false, held:false, stopping:false, muted:false, msReady:false, resolved:{}};
 
 function byId(id){ return document.getElementById(id); }
 function el(tag,cls,text){ var e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
@@ -145,7 +145,7 @@ function player(){
   a.addEventListener("playing",function(){
     if(a.src===silentUrl || !E.st) return;
     clearTimeout(E.watch); clearTimeout(E.retry);
-    E.tries=0; E.err=""; E.resuming=false; E.interrupted=false; E.movedAt=Date.now();
+    E.tries=0; E.err=""; E.resuming=false; E.interrupted=false; E.held=false; E.movedAt=Date.now();
     if(!E.since) E.since=Date.now();
     setState("playing");
     hiss(0);
@@ -274,12 +274,14 @@ function silenceEl(){
 }
 /* how: "pause" keeps the lock screen's card so its play button can bring the station back */
 function stop(how){
-  E.gen++; E.interrupted=false; E.resuming=false;
+  E.gen++; E.interrupted=false; E.resuming=false; E.held=false;
   clearTimeout(E.watch); clearTimeout(E.retry);
   /* the lock screen's pause keeps the src (iOS drops the Now Playing card of an element with none); play dials again */
   if(how==="pause" && E.st && E.el){
     E.stopping=true; try{ E.el.pause(); }catch(e){} E.stopping=false;
     hiss(0); E.since=0; E.tries=0; E.err="";
+    /* the player's own pause: the readout says paused, not interrupted */
+    E.held=true;
     setState("paused"); msState("paused");
     return;
   }
@@ -474,7 +476,7 @@ function stateText(){
   if(E.state==="tuning") return E.tries ? tr("tuner.state.retry",{n:E.tries,max:RETRIES}) : tr("tuner.state.tuning");
   if(E.state==="buffering") return E.tries ? tr("tuner.state.retry",{n:E.tries,max:RETRIES}) : tr("tuner.state.buffering");
   if(E.state==="playing") return tr("tuner.state.playing");
-  if(E.state==="paused") return tr("tuner.state.paused");
+  if(E.state==="paused") return tr(E.held ? "tuner.state.held" : "tuner.state.paused");
   if(E.state==="nosignal") return tr("tuner.err."+(E.err||"net"));
   return tr("tuner.state.off");
 }
