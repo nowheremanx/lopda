@@ -9995,7 +9995,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   assert.deepEqual(await f.evaluate(() => [...PAD.say.languages]), ["zh", "en", "ja"]);
   const insideScreen = async () => f.evaluate(() => {
     const root = document.documentElement;
-    const visible = ["header", "main", "#meta", "#card", "#prompt", "#options", "#controls", "#status"]
+    const visible = ["header", "main", "#meta", "#home", "#tally", "#card", "#prompt", "#options", "#controls", "#status"]
       .map((s) => document.querySelector(s)).filter((el) => getComputedStyle(el).display !== "none");
     return { size: [root.clientWidth, root.clientHeight], inside: visible.every((el) => {
       const r = el.getBoundingClientRect();
@@ -10003,14 +10003,24 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
     }) };
   });
   assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
-  assert.equal(await f.evaluate(() => document.body.classList.contains("list")), true, "the app opens on the kana list");
+  assert.equal(await f.evaluate(() => document.body.classList.contains("home")), true, "the app opens on its home screen");
+  assert.equal(await f.textContent("#review-label"), "Review 8 today", "a fresh save offers eight new kana a day");
+  await p.locator('#pad [data-b="b"]').click();
+  assert.equal(await f.evaluate(() => document.body.classList.contains("home")), true, "B on home does nothing");
+  await f.click("#row-table");
+  await f.waitForFunction(() => document.body.classList.contains("list"));
   assert.equal(await f.locator("#reference button").count(), 71);
   await p.locator('#pad [data-b="b"]').click();
-  assert.equal(await f.evaluate(() => document.body.classList.contains("list")), true, "B on the list does not start a quiz");
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  assert.equal(await f.evaluate(() => document.body.classList.contains("quiz")), false, "B on the table goes home, not into a quiz");
+  await f.click("#row-table");
+  await f.waitForFunction(() => document.body.classList.contains("list"));
   await p.locator('#pad [data-b="start"]').click();
   await f.waitForFunction(() => document.body.classList.contains("quiz"));
   assert.equal(await f.textContent("#count"), "1/71", "START begins a quiz for the selected kana");
   await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
   assert.equal(await f.locator("#view").textContent(), "START Quiz");
 
@@ -10074,7 +10084,7 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   await p.locator('#pad [data-b="start"]').click();
   await f.waitForFunction(() => document.body.classList.contains("quiz"));
   assert.equal(await f.locator("#options button").count(), 4);
-  assert.equal(await f.textContent("#guide"), "Arrows choose · A answer · B list");
+  assert.equal(await f.textContent("#guide"), "Arrows choose · A answer · B home");
   assert.equal(await f.textContent("#prompt"), "Choose this kana's romaji");
   assert.equal(await f.textContent("#count"), "38/71", "START quiz tests the list cursor kana");
   assert.deepEqual(await insideScreen(), { size: [331, 359], inside: true });
@@ -10100,8 +10110,10 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   await f.locator(`#options button[data-index="${target}"]`).click();
   await f.waitForFunction(() => /Correct|正确/.test(document.getElementById("status").textContent), null, { timeout: 3000 });
   await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
-  assert.equal(await f.locator("#reference button[aria-selected='true']").getAttribute("aria-label"), "よ yo", "B exits quiz to the list cursor");
+  assert.equal(await f.locator("#reference button[aria-selected='true']").getAttribute("aria-label"), "よ yo", "B exits the quiz to home, and the table keeps the kana it was asking about");
   assert.deepEqual(errors, []);
 
   const zh = await page(t, { locale: "zh-CN" });
@@ -10110,9 +10122,12 @@ test("kana-cards: browse both kana scripts, read Japanese aloud when supported, 
   let zhFrame;
   await until(zh.p, async () => { zhFrame = zh.p.frames().find((x) => x !== zh.p.mainFrame()); return zhFrame && await zhFrame.evaluate(() => !!window.PAD).catch(() => false); }, "Chinese kana app");
   await zh.p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await zhFrame.waitForFunction(() => document.body.classList.contains("home"));
+  await zhFrame.click("#row-table");
+  await zhFrame.waitForFunction(() => document.body.classList.contains("list"));
   await zh.p.locator('#pad [data-b="start"]').click();
   await zhFrame.waitForFunction(() => document.body.classList.contains("quiz"));
-  assert.equal(await zhFrame.textContent("#guide"), "↑↓←→ 选项 · A 确认 · B 字表");
+  assert.equal(await zhFrame.textContent("#guide"), "↑↓←→ 选项 · A 确认 · B 首页");
   assert.equal(await zhFrame.textContent("#prompt"), "选出这个假名的罗马字");
   const zhNoOverlap = await zhFrame.evaluate(() => {
     const items = ["#meta", "#card", "#prompt", "#options", "#controls", "#status"]
@@ -10131,6 +10146,8 @@ test("kana-cards: the guide row stays put while only the kana grid scrolls", { s
   let f;
   await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
   const geo = () => f.evaluate(() => {
     const meta = document.querySelector("#meta").getBoundingClientRect();
@@ -10156,6 +10173,8 @@ test("kana-cards: opening the app scrolls the saved kana into view", { skip, tim
   await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
   await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
 
   /* put the cursor on the very last kana, then reopen the app */
@@ -10167,7 +10186,9 @@ test("kana-cards: opening the app scrolls the saved kana into view", { skip, tim
   }, null, { timeout: 5000 });
   await p.reload({ waitUntil: "load" });
   await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
-  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD && document.body.classList.contains("list")).catch(() => false); }, "reopened kana app");
+  await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD && document.body.classList.contains("home")).catch(() => false); }, "reopened kana app");
+  await f.click("#row-table");
+  await f.waitForFunction(() => document.body.classList.contains("list"));
   const opened = await f.evaluate(() => {
     const ref = document.querySelector("#reference");
     const selected = document.querySelector("#reference button[aria-selected='true']");
@@ -10191,6 +10212,8 @@ test("kana-cards: a miss waits for confirmation, and the score shows on the card
   await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
   await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
 
   await p.locator('#pad [data-b="a"]').click();
@@ -10214,6 +10237,8 @@ test("kana-cards: a miss waits for confirmation, and the score shows on the card
   assert.notEqual(Number((await f.textContent("#count")).split("/")[0]) - 1, target, "confirming moves to a different kana");
 
   await p.locator('#pad [data-b="b"]').click();
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
   await f.locator("#reference button[aria-label='あ a']").click();
   await f.waitForFunction(() => document.body.classList.contains("card"));
@@ -10233,6 +10258,8 @@ test("kana-cards: a quiz round asks each kana at most twice", { skip, timeout: 6
   let f;
   await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD).catch(() => false); }, "kana app");
   await f.waitForFunction(() => document.documentElement.lang === "en", null, { timeout: 5000 });
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
   await f.waitForFunction(() => document.body.classList.contains("list"));
   /* make the round deterministic (the lowest eligible kana each time) and skip the answer pause */
   await f.evaluate(() => {
@@ -10257,7 +10284,7 @@ test("kana-cards: a quiz round asks each kana at most twice", { skip, timeout: 6
       /twice/.test(document.getElementById("status").textContent), before, { timeout: 3000 });
   }
   assert.equal(Object.keys(seen).length, 71, "the round covers every kana");
-  assert.equal(await f.textContent("#status"), "Every kana has been asked twice this round (B list)");
+  assert.equal(await f.textContent("#status"), "Every kana has been asked twice this round (B home)");
   assert.deepEqual(errors, []);
 });
 
@@ -10268,6 +10295,9 @@ test("kana-cards: the header buttons hold their place as the count grows", { ski
   await p.waitForFunction(() => /loaded |load failed/.test(document.getElementById("log").textContent), null, { timeout: 5000 });
   let f;
   await until(p, async () => { f = p.frames().find((x) => x !== p.mainFrame()); return f && await f.evaluate(() => !!window.PAD && !!PAD.say).catch(() => false); }, "kana app");
+  await f.waitForFunction(() => document.body.classList.contains("home"));
+  await f.click("#row-table");
+  await f.waitForFunction(() => document.body.classList.contains("list"));
   await f.waitForFunction(() => document.querySelector("#count").textContent === "1/71");
   const boxes = () => f.evaluate(() => ["#script", "#view", "#count"].map((s) => {
     const r = document.querySelector(s).getBoundingClientRect();
