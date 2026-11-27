@@ -83,7 +83,7 @@ var PUFF=[".mm..","mppm.",".mm.."];
 var NAME_EMOJI=/[\p{Extended_Pictographic}\u{1F1E6}-\u{1F1FF}\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}]/gu;
 
 var P={
-  save:null, loaded:false, nostore:false, readTried:false, readFailed:false, inView:false,
+  save:null, loaded:false, nostore:false, writeFailed:false, retryTimer:0, caughtAt:0, aLabel:null, readTried:false, readFailed:false, inView:false,
   refs:null, souv:[], usage:null, resumeOuting:false,
   sub:null, sel:0, menuSel:0, frame:0, go:null,
   anim:0, hold:0, roomHold:0, roomAt:null, holdFired:false,
@@ -261,6 +261,7 @@ function packOf(save){
   var sp=save && save.species;
   return Art.PACKS[sp] || Art.PACKS[defaultSpecies()];
 }
+var WRITE_RETRY_MS=10000;
 function saveSoon(){
   if(P.restoring || P.nostore || !P.refs || !P.save) return;
   if(P.saveTimer) return;
@@ -270,7 +271,16 @@ function saveNow(){
   if(P.saveTimer){ clearTimeout(P.saveTimer); P.saveTimer=0; }
   if(P.restoring || P.nostore || !P.refs || !P.save) return;
   var data=JSON.parse(JSON.stringify(P.save));
-  P.refs.doc.set(data).catch(function(){ P.nostore=true; LP.setStatus("status.unsaved"); });
+  /* A failed write is not a failed read: nothing on disk is newer than what is in memory, so the next change
+     simply writes again (and one retry is queued in case nothing changes). Only a failed read turns saving off,
+     because writing then could overwrite a pet we never saw. The status says 未存档 until a write lands. */
+  P.refs.doc.set(data).then(function(){
+    if(P.writeFailed){ P.writeFailed=false; if(!P.readFailed) LP.setStatus("status.saved"); }
+  },function(){
+    P.writeFailed=true;
+    LP.setStatus("status.unsaved");
+    if(!P.retryTimer) P.retryTimer=setTimeout(function(){ P.retryTimer=0; saveSoon(); },WRITE_RETRY_MS);
+  });
 }
 /* A failed plantedAt write can leave a grow item on the shelf with no start; begin now rather than lose it. */
 function repairShelf(){
@@ -376,8 +386,10 @@ function handleEvents(events){
   if(sleeping) noteWants();
   else announceNeed(wantsOf());
 }
+var CATCH_MS=60000;
 function refreshTime(){
   if(!P.save) return;
+  P.caughtAt=now();
   if(P.save.stage==="egg"){
     /* an egg is not left alone for days: it does not age, travel or go out before it hatches */
     P.save.travel=false;
@@ -1554,9 +1566,11 @@ function restartPet(){
 
 /* ---------- the four sub-screens ---------- */
 function openLook(){ P.sub="look"; P.confirmStage=0; renderKeys(); beep("tap"); render(); }
-/* The box is a month index: newest month first, 5 x 5 pictures a page, A opens one. The newest souvenir
+/* The box is a month index: newest month first, 5 x 3 pictures a page, A opens one. The newest souvenir
    is the first picture, so opening the box after an outing shows what was brought back. */
-var SOUV_PER_PAGE=25, SOUV_COLS=5;
+/* 5 x 3 a page: each picture sits in a 44 px button with 8 px between them (sdk/UI.md 3), which is what the
+   room's 240 px panel holds under its title and footer; a month of daily finds is two or three pages */
+var SOUV_COLS=5, SOUV_ROWS=3, SOUV_PER_PAGE=SOUV_COLS*SOUV_ROWS;
 function souvDay(s){
   if(s && s.day && /^\d{4}-\d{2}-\d{2}$/.test(s.day)) return s.day;
   return dayKey((s && s.at) || now());
@@ -1816,7 +1830,7 @@ function nav(dir,btn){
     if(btn==="up" || btn==="down"){
       row+=btn==="down"?1:-1;
       idx=row*SOUV_COLS+col;
-      if(row>=0 && row<SOUV_COLS && idx<n) P.boxSel=idx;
+      if(row>=0 && row<SOUV_ROWS && idx<n) P.boxSel=idx;
     } else {
       idx=P.boxSel+(btn==="left"?-1:(btn==="right"?1:dir));
       if(idx<0){
@@ -2627,7 +2641,11 @@ function renderPanel(){
   else if(P.sub==="word") buildWord(panel);
   else if(P.sub==="go") buildGo(panel);
   if(P.sub==="look" && P.confirmStage){
-    LP.resetConfirm("pet-confirm","pet-confirm-btn",tr("pet.look.restart"),restartPet);
+    /* a finger and A walk the same two steps: tapping 重新开始 arms the question exactly as A does, so the next A
+       answers it (confirmNext reads the stage), and 取消 steps back to the first button */
+    LP.resetConfirm("pet-confirm","pet-confirm-btn",tr("pet.look.restart"),restartPet,undefined,function(armed){
+      P.confirmStage=armed ? 2 : 1;
+    });
     if(P.confirmStage===2){
       var arm=$("pet-confirm-btn");
       if(arm) arm.click();
@@ -2637,15 +2655,21 @@ function renderPanel(){
 
 /* ---------- the screen ---------- */
 function render(){
+  /* the A label follows the room: an outing that starts or ends on the clock changes it without a key press */
+  if(P.inView && P.aLabel!==null && aKeyLabel()!==P.aLabel) renderKeys();
   if(P.sub==="game" && P.game) renderGame();
   else { renderRoom(); renderIcons(); }
   renderEggLine();
   renderPanel();
+  fitRoom();                                   /* the egg line and the keys come and go: the room's height follows */
   var away=$("pet-away");
   if(away){
-    var trv=!!(P.save && P.save.travel);
-    away.hidden=!trv || P.sub==="game";
+    /* the room is empty in two cases, and each says why: away on a trip (A calls it home) or out for the day's
+       walk (nothing to do but wait; it walks back in on its own) */
+    var trv=!!(P.save && P.save.travel), out=!trv && !!(P.outing && P.outing.phase==="out");
+    away.hidden=!(trv || out) || P.sub==="game";
     if(trv) away.textContent=tr("pet.away")+" · "+tr("pet.away.hint");
+    else if(out) away.textContent=tr("pet.out")+" · "+tr("pet.out.hint");
   }
   if(P.sub==="game") silenceWeather();
   else if(!P.sub && P.lastScene) syncWeatherSound(P.lastScene.weather);
@@ -2672,6 +2696,7 @@ function aKeyLabel(){
   if(P.sub==="go") return "pet.go.yes";
   if(!P.save || isEgg()) return "";
   if(P.save.travel) return "pet.act.call";
+  if(P.outing) return "";                  /* out or walking back: no icon acts, so A promises nothing */
   switch(P.sel){
     case 0: return "pet.act.feed";
     case 1: return "pet.act.play";
@@ -2692,6 +2717,7 @@ function renderKeys(){
   var wrap=$("pet-keys");
   if(!wrap) return;
   var label=aKeyLabel(), egg=isEgg();
+  P.aLabel=label;
   /* While it is an egg the soft keys are hidden, not greyed: a calm screen with HOME as the only way out. The
      naming field needs the room for the phone's keyboard, so the keys only come back on the confirm question. */
   var hide=egg || (P.sub==="name" && !(P.naming && P.naming.confirm));
@@ -2760,6 +2786,11 @@ function tick(){
   if(P.save && P.save.today && P.save.today.day!==dayKey(t)){
     if(P.outing) P.outing=null;              /* the previous day's outing does not spill into the new one */
     refreshTime();
+  } else if(P.save && t-P.caughtAt>=CATCH_MS){
+    /* time passes while you watch too: the same catch-up as coming back, once a minute, so hunger, joy and a
+       mess arrive on screen when they are due and not only on the next visit (catchUp counts minutes exactly,
+       so a minute's steps add up to the same numbers as one long absence) */
+    refreshTime();
   }
   if(P.save && P.save.stage==="egg" && !P.sub && !P.save.travel){
     if(!P.hatching){
@@ -2803,6 +2834,22 @@ function tick(){
   settleLamp();
   render();
 }
+
+/* The room is 324 x 240 CSS px (2 px a room pixel). On a window narrower or shorter than the smallest LCD it
+   would be cut at the edges, panels and their buttons too, so it shrinks as one piece, like a smaller screen:
+   nothing moves, the pointer mapping reads the drawn box (roomPoint). At normal sizes the scale is 1 and no
+   transform is set. */
+var ROOM_CSS_W=324, ROOM_CSS_H=240;
+function fitRoom(){
+  var stage=$("pet-stage"), room=stage && stage.firstElementChild;
+  if(!room || !P.inView) return;
+  var w=stage.clientWidth, h=stage.clientHeight;
+  if(!w || !h) return;
+  var k=Math.min(1,w/ROOM_CSS_W,h/ROOM_CSS_H);
+  var tf=k<0.999 ? "scale("+k.toFixed(4)+")" : "";
+  if(room.style.transform!==tf) room.style.transform=tf;
+}
+window.addEventListener("resize",function(){ if(P.inView) fitRoom(); });
 
 /* ---------- hooks ---------- */
 function enter(){
