@@ -455,7 +455,9 @@ var ART = (function () {
     }
   }
 
-  function card(g, q, left, right, amount, status, hintText) {
+  /* words: the card's fixed text in the player's language, {source, hint, saving,
+     saved, denied}; the line itself is always shown in both languages */
+  function card(g, q, left, right, amount, status, words) {
     reveal(g, amount);
     if (amount < 0.72) return;
     g.frame(3, 3, 154, 172, 0);
@@ -471,11 +473,11 @@ var ART = (function () {
     for (var j = 0; j < en.length; j++) { g.text(en[j], 13, y, { color: 1 }); y += g.lineHeight; }
 
     g.line(12, 138, 147, 138, 1);
-    g.text("加缪《西西弗斯神话》", 13, 141, { color: 1 });
-    var hint = hintText || "A 记下    B 让它过去";
-    if (status === "saving") hint = "写入中…";
-    else if (status === "saved") hint = "已写入幸福手册";
-    else if (status === "denied") hint = "没有写入";
+    g.text(words.source, 13, 141, { color: 1 });
+    var hint = words.hint;
+    if (status === "saving") hint = words.saving;
+    else if (status === "saved") hint = words.saved;
+    else if (status === "denied") hint = words.denied;
     g.text(hint, 13, 157, { color: 0 });
   }
 

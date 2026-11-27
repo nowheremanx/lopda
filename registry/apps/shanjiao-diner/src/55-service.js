@@ -99,15 +99,30 @@ function buildSchedule() {
   return list;
 }
 
+/* The regulars' scenes for the guests who were served but whose scene has not
+ * been seen yet, one after another, then resolve.  The evening plays them as
+ * they finish eating; 自动结算 and an early close (or the clock running out
+ * while someone still eats) play the rest here, so no way of ending the night
+ * skips a regular's story or the heart and the coins it gives. */
+function playStories(list) {
+  return list.reduce(function (p, st) {
+    return p.then(function () {
+      if (S.day === 7) return seen("svc7_" + st.who) ? null : FestivalStory(st.who, st.dish, false);
+      return seen("svc_" + st.who) ? null : ServiceStory(st.who, st.dish);
+    });
+  }, Promise.resolve());
+}
+
 /* The whole evening without the walk: use the same schedule and the same
- * stock, serve whoever can be served, and go straight to the ledger. */
+ * stock, serve whoever can be served, play the served regulars' scenes, and go
+ * to the ledger. */
 function autoService() {
   if (!S || !S.menu.length) return false;
   var list = buildSchedule();
   var stock = {};
   for (var id in S.stock) if (Object.prototype.hasOwnProperty.call(S.stock, id)) stock[id] = S.stock[id];
   var served = 0, lost = 0, earned = 0, tips = 0, satisfied = 0, missed = 0;
-  var vip = 0, vipFail = 0, critic = false;
+  var vip = 0, vipFail = 0, stories = [];
   for (var i = 0; i < list.length; i++) {
     var sc = list[i], d = DATA.DISHES[sc.dish];
     if (!d) continue;
@@ -124,7 +139,8 @@ function autoService() {
                  (sc.who === "ahe" && sc.dish === "mushroom_soup");
         if (ok) vip++; else vipFail++;
       }
-      if (sc.who === "critic" && sc.dish === "mushroom_pot") critic = true;
+      /* 陆先生's thirty coins and the reputation come from his scene, as in the evening */
+      if (sc.who) stories.push({ who: sc.who, dish: sc.dish });
     } else {
       lost++;
     }
@@ -134,7 +150,6 @@ function autoService() {
   S.flags.vipFail = (S.flags.vipFail || 0) + vipFail;
   var rep = Math.round(served / 2) - lost;
   addRep(rep);
-  if (critic && !S.flags.criticGood) { S.money += 30; addRep(2); S.flags.criticGood = 1; }
   S.flags.opened = 1;
   S.lastLedger = {
     served: served, lost: lost, earned: earned, tips: tips,
@@ -145,7 +160,7 @@ function autoService() {
   S.phase = "night";
   save();
   sayToast("自动结算：客 " + served + "　走 " + lost);
-  game.go("night");
+  playStories(stories).then(function () { save(); game.go("night"); });
   return true;
 }
 
@@ -328,7 +343,10 @@ function finishService(early) {
   S.stats.tips += SERV.tips;
   serviceLive = false;
   save();
-  game.go("night");
+  /* the guests paid just now have not had their scene yet */
+  var pending = SERV.storyQueue.filter(function (st) { return !st.lost; });
+  SERV.storyQueue = [];
+  playStories(pending).then(function () { save(); game.go("night"); });
 }
 
 game.scene("service", {

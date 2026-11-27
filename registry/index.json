@@ -70,7 +70,7 @@
       ],
       "version": "1.0.1",
       "released": "2026-11-26",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "第一人称迷宫射击：空间站失联了，带着铆钉枪一层层往下，找门卡、躲光弹、关掉核心。",
       "i18n": {
         "en": {
@@ -131,9 +131,9 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.3",
+      "version": "0.4.4",
       "released": "2026-10-10",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -144,8 +144,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "ac047fc0c3e758f509e5b413d3c00427c547d0d0fd3b5f79c6d9283047ef942b",
-      "bytes": 305748
+      "sha256": "d391eddf3757b59b7e8b8e22104ee9a73abd4a7ca069089d0a69750c270438e5",
+      "bytes": 308295
     },
     {
       "spec": "lopda/1",
@@ -172,9 +172,9 @@
         "................",
         "................"
       ],
-      "version": "0.1.4",
+      "version": "0.1.5",
       "released": "2026-10-28",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
       "i18n": {
         "en": {
@@ -185,8 +185,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "2d7e16ab1364dacb67f3cdf47e7bd143e7b4d3afdb97d461ce8d80abf75a8d75",
-      "bytes": 245842
+      "sha256": "18b155dc70a911856113e269aff9d45ab7d50aee7bd8c402c8129023d630e95f",
+      "bytes": 247352
     },
     {
       "spec": "lopda/1",
@@ -295,9 +295,9 @@
         "................",
         "................"
       ],
-      "version": "0.2.1",
+      "version": "0.2.2",
       "released": "2026-10-27",
-      "updated": "2026-11-27",
+      "updated": "2026-11-26",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -311,8 +311,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "a44db4d55ba8302d918255363ed4ead0778d1570519b529f72df4e29e73effa6",
-      "bytes": 101837
+      "sha256": "2c5c3d82bdb44c9e3558161127309caedae2dd9ff3a7fa939e132ab46975fa0b",
+      "bytes": 104066
     },
     {
       "spec": "lopda/1",

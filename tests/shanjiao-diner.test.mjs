@@ -484,3 +484,48 @@ test("every ending's lines stay on one line inside their windows (#426)", async 
     for (let i = 1; i < ys.length; i++) assert.ok(ys[i] - ys[i - 1] >= g.lineHeight, `${c.kind}: rows at ${ys[i - 1]} and ${ys[i]} overlap`);
   }
 });
+
+test("自动结算 still plays the served regular's scene and its heart before the ledger (#428)", async () => {
+  const { app, listeners } = await bootDiner(5);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");
+  await tick(80);
+  const game = app.ctx.get("game"), S = app.ctx.get("S");
+  S.seen.intro = 1;
+  game.pop(true);
+  await tick(3);
+  S.day = 1; S.menu = ["mushroom_soup"]; S.stock = { mushroom_soup: 9 }; S.flags.prepared = 1;
+  /* every heart given to 阿禾 tonight: the favourite dish's, then the one her scene's answer gives (0 or 1) */
+  app.ctx.get("(window.__hearts = [], addNpc = (function (o) { return function (id, n) { if (id === 'ahe') window.__hearts.push(n); return o(id, n); }; })(addNpc))");
+  assert.equal(app.ctx.get("autoService")(), true);
+  for (let i = 0; i < 400 && !S.lastLedger.rentDone; i++) { await press("a"); await tick(2); }
+  assert.equal(S.seen.svc_ahe, 1, "阿禾's soup scene was seen");
+  assert.equal(app.ctx.get("window.__hearts").length, 2, "the favourite dish and the scene's answer: " + app.ctx.get("window.__hearts"));
+  assert.equal(S.phase, "night");
+  assert.equal(S.lastLedger.auto, true);
+});
+
+test("the night ledger counts down to the feast and, on the seventh night, says how many dishes landed (#429)", async () => {
+  const { app, listeners } = await bootDiner(5);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");
+  await tick(80);
+  const game = app.ctx.get("game"), S = app.ctx.get("S");
+  S.seen.intro = 1;
+  game.pop(true);
+  await tick(3);
+  const g = game.g, text = g.text, drawn = [];
+  g.text = function (s) { drawn.push(String(s)); return text.apply(g, arguments); };
+  S.lastLedger = { served: 0, lost: 0, rentDone: 1 };
+  S.phase = "night";
+  game.go("night");
+  await tick(40);
+  assert.ok(drawn.some((s) => s === "离山神宴 6 天"), drawn.filter((s) => s.includes("宴")).join(" | "));
+  drawn.length = 0;
+  S.day = 7; S.flags.vip = 2;
+  await tick(3);
+  g.text = text;
+  assert.ok(drawn.some((s) => s === "宴席对上 2/3"), drawn.filter((s) => s.includes("宴")).join(" | "));
+});
