@@ -540,3 +540,36 @@ test("usesPad: aliases, brackets and destructuring still show the pad (#410)", (
     "var {isDown}=PAD", "const b=PAD.BUTTONS", "K.on(`press`,f)"]) assert.equal(T.usesPad(code), true, code);
   for (const code of ["", "PAD.save('k',1)", "addEventListener('keypress',f)", "PAD.sfx('tap')"]) assert.equal(T.usesPad(code), false, code);
 });
+
+/* ---------- 新建 then back with nothing written keeps nothing (#411) ---------- */
+
+test("a new script left with no code and its default name is not stored; one with code is", async () => {
+  const db = makeDB(), ctx = boot("zh-CN", db), T = ctx.LP.scripts._test, $ = ctx.LP.$;
+  const items = () => [...db.docs.keys()].filter((k) => k.startsWith(BASE + "/items/"));
+  const s = T.newScript(false);
+  $("script-name").value = s.name;
+  $("script-code").value = "   ";
+  assert.equal(T.blankNew(s), true);
+  $("script-back").onclick();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(items(), [], "the empty new script left no document");
+  assert.equal(T.state.current, null);
+
+  /* a name of its own counts as writing something */
+  const named = T.newScript(false);
+  $("script-name").value = "番茄";
+  $("script-code").value = "";
+  assert.equal(T.blankNew(named), false);
+
+  /* code counts too, and once stored the script is no longer new */
+  const s2 = T.newScript(false);
+  $("script-name").value = s2.name;
+  $("script-code").value = "<html>hi</html>";
+  assert.equal(T.blankNew(s2), false);
+  $("script-back").onclick();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(items(), [P_ITEMS(s2.id)]);
+  assert.equal(s2.fresh, false);
+  $("script-code").value = "";
+  assert.equal(T.blankNew(s2), false, "a stored script emptied by hand is the player's to delete");
+});
