@@ -49,7 +49,7 @@ var T={
   live:false, page:"dial", back:"dial",
   ref:null, loaded:false, loading:null,
   list:[], last:null,
-  pos:0, target:null, anim:0, drag:null,
+  pos:0, target:null, glide:null, anim:0, drag:null,
   menu:0, sel:0, editId:null, delArm:false,
   find:{q:"", rows:[], sel:0, busy:false, note:"", seq:0, loaded:false},
   addNote:"", ticker:0, scaleKey:""
@@ -375,7 +375,7 @@ function placeScale(){
 function glideTo(i,andTune){
   if(!T.list.length) return;
   i=clamp(i,0,T.list.length-1);
-  T.target=i;
+  T.target=i; T.glide={i:i, andTune:andTune};
   cancelAnimationFrame(T.anim);
   var from=T.pos, dist=Math.abs(i-from), dur=Math.min(600,160+dist*140), t0=performance.now();
   /* no frames come while the phone is locked or another program has the screen (lock-screen next / previous):
@@ -392,7 +392,7 @@ function glideTo(i,andTune){
     T.anim=0; arrive();
   })(t0);
   function arrive(){
-    T.pos=i; T.target=null; placeScale();
+    T.pos=i; T.target=null; T.glide=null; placeScale();
     var st=T.list[i];
     E.muted=false; level();
     if(!andTune){ moved(); hiss(0); renderReadout(); return; }
@@ -413,8 +413,11 @@ function bindDial(){
   var d=byId("tn-dial");
   d.addEventListener("pointerdown",function(e){
     if(!T.list.length) return;
+    /* a finger stops a glide where it is; a tap (no drag) lets it go on, or the station would stay muted under the
+       hiss with nothing left to bring the sound back (issue #454) */
+    var resume=T.anim ? T.glide : null;
     cancelAnimationFrame(T.anim); T.anim=0; T.target=null;
-    T.drag={id:e.pointerId, x:e.clientX, pos:T.pos, moved:false}; T.dragged=false;
+    T.drag={id:e.pointerId, x:e.clientX, pos:T.pos, moved:false, resume:resume}; T.dragged=false;
   });
   d.addEventListener("pointermove",function(e){
     var g=T.drag; if(!g || g.id!==e.pointerId) return;
@@ -437,6 +440,7 @@ function bindDial(){
     /* the click that follows a drag must not tune the label under the finger */
     T.dragged=g.moved;
     if(g.moved){ setTimeout(function(){ T.dragged=false; },0); glideTo(Math.round(T.pos),on()); }
+    else if(g.resume) glideTo(g.resume.i,g.resume.andTune);
   }
   d.addEventListener("pointerup",end);
   d.addEventListener("pointercancel",end);
@@ -513,21 +517,30 @@ function renderReadout(){
   renderKeys();
 }
 function sk(label,fn,disabled){ return {label:label, disabled:!!disabled, fn:fn}; }
+/* LP.softkeys builds new buttons each call; the dial redraws every second, and a button replaced under a finger never
+   gets its click. So the keys are only rebuilt when what they show changes (issue #455). Every key calls press(name),
+   which reads the page itself, so keeping the old buttons is safe. */
+function softkeys(k,keys){
+  var sig=["select","start","b","a"].map(function(n){ var v=keys[n]; return v ? v.label+(v.disabled?"\u0000":"") : "\u0001"; }).join("\u0002");
+  if(k.dataset.sig===sig && k.childNodes.length) return;
+  k.dataset.sig=sig;
+  LP.softkeys(k,keys);
+}
 function renderKeys(){
   var k=byId("tn-keys"), p=T.page, b=function(n){ return function(){ press(n); }; };
   var back=sk(tr("tuner.sk.back"),b("b"));
-  if(p==="dial") LP.softkeys(k,{select:sk(E.sleepMin ? tr("tuner.sk.sleepn",{m:E.sleepMin}) : tr("tuner.sk.sleep"),b("select")),
+  if(p==="dial") softkeys(k,{select:sk(E.sleepMin ? tr("tuner.sk.sleepn",{m:E.sleepMin}) : tr("tuner.sk.sleep"),b("select")),
     start:sk(tr("tuner.sk.menu"),b("start")), b:null, a:sk(on() ? tr("tuner.off") : tr("tuner.on"),b("a"),!T.list.length && !E.st)});
-  else if(p==="menu") LP.softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.open"),b("a"))});
-  else if(p==="list") LP.softkeys(k,{select:null,start:sk(tr("tuner.sk.edit"),b("start"),!T.list.length),b:back,a:sk(tr("tuner.sk.listen"),b("a"),!T.list.length)});
-  else if(p==="edit") LP.softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.save"),b("a"))});
-  else if(p==="add") LP.softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.add"),b("a"))});
+  else if(p==="menu") softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.open"),b("a"))});
+  else if(p==="list") softkeys(k,{select:null,start:sk(tr("tuner.sk.edit"),b("start"),!T.list.length),b:back,a:sk(tr("tuner.sk.listen"),b("a"),!T.list.length)});
+  else if(p==="edit") softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.save"),b("a"))});
+  else if(p==="add") softkeys(k,{select:null,start:null,b:back,a:sk(tr("tuner.sk.add"),b("a"))});
   else if(p==="find"){
     var r=T.find.rows[T.find.sel], has=r && saved(r.url);
-    LP.softkeys(k,{select:null,
+    softkeys(k,{select:null,
       start:sk(has ? tr("tuner.sk.kept") : tr("tuner.sk.keep"),b("start"),!r || !!has),b:back,a:sk(tr("tuner.sk.listen"),b("a"),!r)});
   }
-  else LP.softkeys(k,{select:null,start:null,b:back,a:null});
+  else softkeys(k,{select:null,start:null,b:back,a:null});
 }
 
 /* menu (START) */

@@ -77,7 +77,7 @@ function boot(lang, db) {
   const ctx = runScript("runtime/strings.js", {
     navigator: { languages: [lang], language: lang },
     document: { addEventListener() {}, createElement() { return el(); }, body: { appendChild() {}, removeChild() {} }, hidden: false },
-    setTimeout, clearTimeout,
+    setTimeout, clearTimeout, setInterval, clearInterval,
   });
   /* one element per id, like the real page: a test can set a textarea and read it back */
   const page = new Map(), $ = (id) => { if (!page.has(id)) page.set(id, el()); return page.get(id); };
@@ -387,4 +387,80 @@ test("saveCurrent: while a revise of this script streams, nothing is read from t
   assert.equal(await T.saveCurrent(true), true);
   assert.equal(db.docs.get(P_ITEMS("s9")).body, "STREAMING");
   assert.equal(db.docs.get(P_ITEMS("s9")).name, "P2");
+});
+
+/* ---------- 生成: the job's own script object, and what a stop leaves ---------- */
+
+/* LP.ai, as far as 生成 uses it: one ask at a time, its text pushed by the test, ended by finish() or fail() */
+function fakeAI(ctx) {
+  const ai = { on: () => true, err: () => "x", watch() {} };
+  ai.ask = (o) => {
+    let ok, no;
+    const job = new Promise((res, rej) => { ok = res; no = rej; });
+    job.stop = () => no({ code: "stopped" });
+    ai.text = (all) => o.onText(all, all);
+    ai.finish = ok; ai.fail = no;
+    return job;
+  };
+  ctx.LP.ai = ai;
+  return ai;
+}
+const settle = () => new Promise((r) => setTimeout(r, 0));
+const FULL = '<!doctype html>\n<html><head><title>Clock</title></head>\n<body>\n<script>\nvar n=0;\n</script>\n</body></html>';
+
+test("generate: reopening the script while the AI writes gives the job's object, so saving keeps the whole answer (#405)", async (t) => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test, $ = ctx.LP.$, ai = fakeAI(ctx);
+  T.generate();
+  t.after(() => clearInterval(T.stream.tick));
+  const s = T.state.current;
+  ai.text("<!doctype html>\n<html><head>");
+  /* ◂ while it writes: the half is saved and listed */
+  assert.equal(await T.saveCurrent(true), true);
+  assert.equal(db.docs.get(P_ITEMS(s.id)).body, "<!doctype html>\n<html><head>");
+  T.state.current = null;
+  /* tapped again in the list */
+  T.openScript(s.id);
+  await settle();
+  assert.equal(T.state.current, s, "the editor holds the job's own object, not a stored copy");
+  ai.finish(FULL);
+  await settle(); await settle();
+  assert.equal(db.docs.get(P_ITEMS(s.id)).body, FULL, "the finished answer is stored");
+  assert.equal($("script-code").value, FULL, "and shown");
+  /* 保存并运行 or a later autosave writes the editor back: still the whole answer */
+  assert.equal(await T.saveCurrent(true), true);
+  assert.equal(db.docs.get(P_ITEMS(s.id)).body, FULL);
+});
+
+test("generate: a stopped answer is kept on any way out, HOME as well as ◂ (#406)", async (t) => {
+  const db = makeDB(), ctx = boot("en-US", db), T = ctx.LP.scripts._test, $ = ctx.LP.$, ai = fakeAI(ctx);
+  T.generate();
+  const s = T.state.current;
+  ai.text("<!doctype html>\n<html><head><title>Half</title>");
+  $("script-code").value = "<!doctype html>\n<html><head><title>Half</title>";
+  T.stream.job.stop();
+  await settle();
+  assert.equal(db.docs.has(P_ITEMS(s.id)), false, "nothing is written while the editor stays open");
+  /* HOME: the editor's leave hook */
+  assert.equal(await T.flushSource(), true);
+  assert.equal(db.docs.get(P_ITEMS(s.id)).body, "<!doctype html>\n<html><head><title>Half</title>");
+
+  /* the editor was already left (HOME) while it wrote: the stop saves what came in at once */
+  const db2 = makeDB(), ctx2 = boot("en-US", db2), T2 = ctx2.LP.scripts._test, $2 = ctx2.LP.$, ai2 = fakeAI(ctx2);
+  T2.generate();
+  const s2 = T2.state.current;
+  ai2.text("<!doctype html>\n<html><head><title>Away</title>");
+  $2("v-script-edit").hidden = true;
+  ai2.fail({ code: "timeout" });
+  await settle(); await settle();
+  assert.equal(db2.docs.get(P_ITEMS(s2.id)).body, "<!doctype html>\n<html><head><title>Away</title>");
+  assert.equal(db2.docs.get(P_ITEMS(s2.id)).name, "Away", "named from its title, like a finished answer");
+
+  /* nothing came in: nothing is made */
+  const db3 = makeDB(), ctx3 = boot("en-US", db3), T3 = ctx3.LP.scripts._test, ai3 = fakeAI(ctx3);
+  T3.generate();
+  const s3 = T3.state.current;
+  ai3.fail({ code: "timeout" });
+  await settle();
+  assert.equal(await T3.flushSource(), true);
+  assert.equal(db3.docs.has(P_ITEMS(s3.id)), false);
 });

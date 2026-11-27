@@ -63,6 +63,12 @@ test("an unknown algorithm version is refused, never developed differently", () 
   assert.throws(() => D.develop(flat, opts({ v: D.VERSION + 1 })));
 });
 
+test("the versions a runtime can develop: its own and every older one it keeps, never a newer one (#303)", () => {
+  assert.equal(D.known(D.VERSION), true);
+  assert.equal(D.known(D.VERSION + 1), false);
+  for (let v = 1; v <= D.VERSION; v++) assert.equal(D.known(v), true, `v${v} must keep its code path`);
+});
+
 test("SUNNY is warmer than PORTRAIT", () => {
   const warmth = (stock) => { const m = mean(D.develop(gradient, opts({ stock })), 100, 100, 700, 600); return m[0] - m[2]; };
   assert.ok(warmth("sunny") > warmth("portrait") + 5, `sunny ${warmth("sunny")} portrait ${warmth("portrait")}`);
