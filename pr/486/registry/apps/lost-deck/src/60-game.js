@@ -135,6 +135,14 @@
       g.pixel(s.x, s.y, s.z > 0.75 ? 3 : s.z > 0.5 ? 2 : 1);
     }
   }
+  /* a tap on a menu row is that row chosen and A pressed (sdk/UI.md section 5); -1 when the tap misses every row */
+  function tapRow(y0, step, h, n, x0, x1) {
+    var pt = game.pointer;
+    if (!pt.pressed || pt.x < x0 || pt.x >= x1) return -1;
+    var i = Math.floor((pt.y - y0) / step);
+    return i >= 0 && i < n && pt.y - y0 - i * step < h ? i : -1;
+  }
+  function tapped() { return game.pointer.pressed; }
   function hint(str, y) { g.text(str, 80, y, { color: 3, align: "center" }); }
   function clock(sec) { sec = Math.max(0, Math.floor(sec)); var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
   function dname(d) { return T(d.name); }
@@ -147,7 +155,9 @@
       var items = titleItems();
       var d = game.dir();
       if (d.y) { titleSel = (titleSel + d.y + items.length) % items.length; sfx("tick"); }
-      if (game.pressed("a") || game.pressed("start")) {
+      var hit = tapRow(91, 16, 15, items.length, 30, 130);
+      if (hit >= 0) titleSel = hit;
+      if (game.pressed("a") || game.pressed("start") || hit >= 0) {
         sfx("ok");
         var it = items[titleSel];
         if (it.id === "go") startDeck(Math.min(save.unlocked, LD.DECKS.length) - 1);
@@ -181,7 +191,7 @@
 
   /* ---------------- controls ---------------- */
   game.scene("help", {
-    update: function () { if (game.pressed("b") || game.pointer.pressed) { sfx("tap"); game.go("title"); } },
+    update: function () { if (game.pressed("b") || game.pressed("a") || game.pressed("start") || tapped()) { sfx("tap"); game.go("title"); } },
     draw: function () {
       g.clear(3);
       g.text(t("操作", "Controls"), 80, 6, { align: "center" });
@@ -212,8 +222,10 @@
     update: function () {
       var d = game.dir(), n = LD.DECKS.length;
       if (d.y) { deckSel = (deckSel + d.y + n) % n; sfx("tick"); }
-      if (game.pressed("b")) { sfx("tap"); game.go("title"); }
-      if (game.pressed("a") || game.pressed("start")) {
+      if (game.pressed("b")) { sfx("tap"); game.go("title"); return; }
+      var top = Math.max(0, Math.min(deckSel - 3, n - 7)), hit = tapRow(21, 17, 16, Math.min(7, n - top), 0, 160);
+      if (hit >= 0) deckSel = top + hit;
+      if (game.pressed("a") || game.pressed("start") || hit >= 0) {
         if (deckSel < save.unlocked) { sfx("ok"); startDeck(deckSel); } else sfx("err");
       }
     },
@@ -239,7 +251,7 @@
       }
       var D2 = LD.DECKS[deckSel], b2 = save.best[D2.id];
       g.rect(0, 141, 160, 1, 0);
-      var line = deckSel >= save.unlocked ? t("先通过上一层", "Clear the deck before") :
+      var line = deckSel >= save.unlocked ? t("先通过上一层", "Clear deck {n} first", { n: deckSel }) :
         b2 ? t("最快 {a}  标准 {b}", "Best {a}  par {b}", { a: clock(b2.time), b: clock(D2.par) }) : t("标准 {b}", "Par {b}", { b: clock(D2.par) });
       g.text(line, 80, 145, { align: "center", color: 0 });
     }
@@ -295,7 +307,7 @@
     door: function () { sfx("door"); },
     locked: function (k) {
       sfx("err");
-      if (k === 4) say(t("闸门锁着。找开关，走过去就能拉。", "A shutter. Walk into its switch."));
+      if (k === 4) say(t("闸门锁着。找开关，走过去就能拉。", "A shutter. Find its switch and walk into it."));
       else say(t("要{c}门卡。", "Needs the {c} card.", { c: T(CARD_NAME[k]) }));
     },
     flip: function () {
@@ -494,7 +506,9 @@
       var d = game.dir();
       if (d.y) { pauseSel = (pauseSel + d.y + 3) % 3; sfx("tick"); }
       if (game.pressed("b") || game.pressed("start")) { sfx("tap"); game.pop(); return; }
-      if (game.pressed("a")) {
+      var hit = tapRow(87, 13, 13, 3, 0, 96);
+      if (hit >= 0) pauseSel = hit;
+      if (game.pressed("a") || hit >= 0) {
         sfx("ok");
         if (pauseSel === 0) game.pop();
         else if (pauseSel === 1) { game.pop(); game.go("play", null, { to: 0 }); }
@@ -558,7 +572,7 @@
     update: function (dt) {
       this.t += dt;
       if (this.t < 0.6) return;
-      if (game.pressed("a") || game.pressed("start")) { sfx("ok"); if (deckIdx + 1 < LD.DECKS.length) startDeck(deckIdx + 1); else game.go("title"); }
+      if (game.pressed("a") || game.pressed("start") || tapped()) { sfx("ok"); if (deckIdx + 1 < LD.DECKS.length) startDeck(deckIdx + 1); else game.go("title"); }
       else if (game.pressed("b")) { sfx("tap"); game.go("decks"); }
     },
     draw: function () {
@@ -590,7 +604,7 @@
     update: function (dt) {
       this.t += dt;
       if (this.t < 0.8) return;
-      if (game.pressed("a") || game.pressed("start")) { sfx("ok"); game.go("play", null, { to: 0 }); }
+      if (game.pressed("a") || game.pressed("start") || tapped()) { sfx("ok"); game.go("play", null, { to: 0 }); }
       else if (game.pressed("b")) { sfx("tap"); game.go("decks"); }
     },
     draw: function () {
@@ -607,7 +621,7 @@
     update: function (dt) {
       this.t += dt;
       var lines = LD.ENDING[game.lang] || LD.ENDING.zh, all = (lines.length - 1) / 0.7;
-      if (!(game.pressed("a") || game.pressed("start") || game.pressed("b"))) return;
+      if (!(game.pressed("a") || game.pressed("start") || game.pressed("b") || tapped())) return;
       if (this.t < all) { this.t = Math.max(this.t, all); return; }
       if (this.t > all + 0.5) { sfx("ok"); game.go("title"); }
     },
