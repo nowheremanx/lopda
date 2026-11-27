@@ -417,7 +417,7 @@ function freshDiary(k){
 function startEditor(write){
   var e=S.editing, ta=$("note-body");
   N.opts=false; N.ecur=-1; N.emojiSaid=false;
-  e.body=NT.dropEmoji(e.body);   /* a note written before 1.6.7 may hold some: shown without, saved without once edited */
+  e.body=NT.dropEmoji(e.body);   /* a note written before 1.6.8 may hold some: shown without, saved without once edited */
   ta.value=e.body;
   setState(e.fresh?"notes.fresh":"notes.saved");
   backLabel();
