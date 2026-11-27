@@ -144,6 +144,18 @@ function endDay() {
   S.stock = {};
   save();
 }
+/* The seventh morning's story adds a third action (src/58-event.js). */
+function apMax() { return S && S.day === 7 ? 3 : 2; }
+/* The morning's guest line counts who will really come.  On the seventh night
+ * the three feast guests come on top of the walk-ins, and a walk-in never eats
+ * a feast dish (dishPool in src/55-service.js): with only the three feast
+ * dishes cooked, no walk-in has anything to order and none comes. */
+function guestLine() {
+  var today = demandText(S.day === 7 ? 2 : 3) || "随意";
+  if (S.day !== 7) return "客 " + serveCount() + " 位　想吃 " + today;
+  if (S.flags.prepared && !dishPool().length) return "宴客 3 位　路人没有可点的菜";
+  return "宴客 3 + 路人 " + serveCount() + " 位　想吃 " + today;
+}
 function serveCount() {
   var base = 4 + DATA.WEATHER[S.weather].customers + Math.floor(S.rep / 3);
   return Math.max(3, Math.min(9, base));
