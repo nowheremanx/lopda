@@ -13,7 +13,8 @@ system sounds (`PAD.sfx`). Added later within v1, all optional: the player's lan
 (`PAD.lang`) and localized store text (manifest `i18n`), see section 6.1; files
 (`"permissions": ["files"]`, `PAD.exportFile`, `PAD.importFile`), see section 6.2; music, sound effects of the
 app's own and ambience (`PAD.music`, `PAD.sfx({...})`, `PAD.ambience`), see section 6.3; tilt, shake, heading and the
-microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`), see section 6.4;
+microphone's loudness and pitch (`"permissions": ["motion"]` / `["mic"]`, `PAD.motion`, `PAD.mic`; the pitch to 0.01 Hz
+as `hz` since runtime 1.7.0), see section 6.4;
 writing into the player's notes (`"permissions": ["notes"]`, `PAD.notes.append`) and speech (`PAD.say`), see section 6.5;
 one photo taken by the player (`"permissions": ["camera"]`, `PAD.camera.snap`), see section 6.6; the built-in
 dictionary's words and entries (`PAD.dict`) and the player's word book (`"permissions": ["wordbook"]`), see section 6.7;
@@ -188,7 +189,7 @@ PAD.on("tilt", fn)           // fn({x, y, heading, flat}), at most 30 a second; 
 PAD.on("shake", fn)          // fn()
 await PAD.mic.start()        // -> "on" | "denied" | "none"
 PAD.mic.stop()
-PAD.on("sound", fn)          // fn({level, pitch}), at most 20 a second
+PAD.on("sound", fn)          // fn({level, pitch, hz}), at most 20 a second
 
 // lopda/1 (section 6.5); undefined on runtimes before 0.26.0
 await PAD.notes.append(title, text)   // -> "saved" | "denied"   (needs "permissions": ["notes"])
@@ -421,6 +422,7 @@ if (PAD.mic) {
 | `shake` | one event per shake; at least 0.5 s between two |
 | `level` | loudness 0-1 (-60 dB of full scale is 0, full scale is 1) |
 | `pitch` | the main frequency in Hz, an integer from 50 to 1500, or `null` when no clear note is heard (breath, noise, silence) |
+| `hz` | the note to 0.01 Hz, for tuning (1 Hz is about 21 cents at 82 Hz). It also comes for a note too quiet for `pitch` (down to about -80 dB, where `pitch` stops at -40), with `pitch` then `null`; undefined when no note is heard. Runtime 1.7.0+; undefined before, so use `s.hz \|\| s.pitch` |
 
 `x`, `y`, `flat` and `level` come in steps of 1/32. `tilt` comes at most 30 times a second and `sound` at most 20 times, each
 only when a value changed: hold the last one between events.
@@ -431,7 +433,8 @@ shows its own dialog over it (`「迷宫」要用倾斜感应。 允许 / 不允
 does nothing while it is on). A, or a tap on 允许, allows it and the phone's own prompt may follow; B or 不允许 resolves
 `"denied"`, and the next `start()` asks again. An allowed app is remembered (the player can revoke it in Settings). The phone may still ask again after the handheld is reopened: then a one-line bar
 (`点一下开启倾斜感应`) waits for the player's tap, because the phone takes the answer only from a tap on the handheld
-itself. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
+itself. From runtime 1.7.0, a `start()` called right after a tap inside the app tries that tap first, so an app that
+starts the sensor from its own button usually skips the bar; the bar still comes when the phone refuses it. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
 or `"none"` (no such sensor: a desktop, an old phone). Without the permission there is no dialog: `"denied"` at once,
 an error in the dev harness, and the checker fails the app.
 

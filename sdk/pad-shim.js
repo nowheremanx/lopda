@@ -43,8 +43,8 @@
  *                           {pad:1, op:"linked", i, v}  v: an open or send result; "open" also carries initiator
  *                           {pad:1, op:"link", event:"message", data}
  *                           {pad:1, op:"link", event:"close", reason}
- *                           {pad:1, op:"tilt", x, y, heading, flat:{x, y}}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch}
- *                           (flat is runtime 0.35.0 and later; older runtimes send no flat)
+ *                           {pad:1, op:"tilt", x, y, heading, flat:{x, y}}  {pad:1, op:"shake"}  {pad:1, op:"sound", level, pitch, hz?}
+ *                           (flat is runtime 0.35.0 and later; older runtimes send no flat; hz is 1.7.0 and later)
  *                           {pad:1, op:"button", b, down}   (chin buttons, lopda/1)
  *                           {pad:1, op:"release-all"}
  */
@@ -429,7 +429,12 @@ function lopdaPadShim(opts) {
     }
     else if (d.op === "shake" && SENSORS) emit("shake");
     else if (d.op === "sound" && SENSORS && num(d.level, 0, 1))
-      emit("sound", { level: d.level, pitch: num(d.pitch, 1, 20000) ? d.pitch : null });
+    {
+      /* hz (runtime 1.7.0+): the note to 0.01 Hz, also for a note too quiet for pitch; older runtimes never send it */
+      var snd = { level: d.level, pitch: num(d.pitch, 1, 20000) ? d.pitch : null };
+      if (num(d.hz, 1, 20000)) snd.hz = d.hz;
+      emit("sound", snd);
+    }
     else if (d.op === "button") setButton(String(d.b), !!d.down);
     else if (d.op === "release-all") releaseAll();
   });

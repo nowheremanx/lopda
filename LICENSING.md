@@ -63,6 +63,10 @@ See `CONTRIBUTING.md`.
   qrcode-generator 1.4.4), MIT License, the browser file copied unchanged into
   `runtime/vendor/qrcode-generator/` with its license file. `runtime/qr.js` draws
   the code on the LCD; nothing leaves the device (see docs/decisions.md section 37).
+- Almanac auspicious/inauspicious-day table: lunar-javascript by 6tail, MIT
+  License; the 宜忌 table and lookup data are ported into
+  `registry/apps/luck-compass/src/almanac.js` (see its
+  `src/LICENSE-lunar-javascript`).
 - English-Chinese dictionary: `runtime/vendor/ecdict/` is an abridged ECDICT by
   skywind3000 (Linwei), MIT License, converted to StarDict by `tools/gen-ecdict.mjs`;
   licence files `runtime/vendor/ecdict/LICENSE` and `LICENSE-WordNet`. Review of the fields
