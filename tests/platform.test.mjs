@@ -381,6 +381,16 @@ test("files: binary values round-trip in their own database, apart from the docu
   assert.deepEqual(names, ["lopda-files", "lopda"]);
 });
 
+test("files.keys: only the keys under a prefix, values unread", async () => {
+  const { P } = platform();
+  await P.files.put("dict/a/index", { words: [] });
+  await P.files.put("dict/a/data", new Blob(["x"]));
+  await P.files.put("roll/r1/01.jpg", new Blob(["y"]));
+  assert.deepEqual((await P.files.keys("dict/")).sort(), ["dict/a/data", "dict/a/index"]);
+  assert.equal((await P.files.keys()).length, 3);
+  assert.deepEqual(await P.files.keys("font/"), []);
+});
+
 /* ---------------- whole-device dump and load ---------------- */
 
 async function fill(P) {
