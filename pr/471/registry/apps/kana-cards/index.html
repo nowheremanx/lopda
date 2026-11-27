@@ -88,10 +88,19 @@
   body.home main, body.tally main { justify-content: flex-start; }
   body.home #card, body.home #prompt, body.home #options, body.home #refwrap, body.home #controls,
   body.tally #card, body.tally #prompt, body.tally #options, body.tally #refwrap, body.tally #controls { display: none; }
-  #cover { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-  #bigkana { font-size: 48px; line-height: 1; }
-  #appname { font-size: 15px; letter-spacing: 2px; }
+  /* the cover picture at one CSS pixel per picture pixel, the name on its flat dark corner */
+  #cover { position: relative; flex: none; align-self: center; width: 160px; height: 160px; }
+  #cover canvas { display: block; width: 160px; height: 160px; image-rendering: pixelated; }
+  #appname { position: absolute; left: 10px; top: 10px; color: #a3ad7e; font-size: 16px; font-weight: bold; letter-spacing: 2px; }
   #rows { display: flex; flex-direction: column; gap: 6px; }
+  /* a short screen (331 x 359) has no room for the picture above the rows: they stand beside it */
+  @media (max-height: 459px) {
+    #home { flex-direction: row; flex-wrap: wrap; align-items: flex-start; max-width: 311px; }
+    #cover { align-self: flex-start; }
+    #rows { flex: 1; min-width: 0; }
+    #rows .row { padding: 0 6px; font-size: 14px; }
+    #streak { width: 100%; }
+  }
   #rows .row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px; background: #a3ad7e; color: #1f2a14; font-size: 15px; text-align: left; }
   #rows .row.selected { background: #1f2a14; color: #a3ad7e; }
   /* the stamp on a finished day is drawn, not typed: a bordered box, tipped a little */
@@ -120,7 +129,7 @@
 <main>
   <div id="meta"><span id="mode">首页</span><span id="guide">↑↓ 选择 · A 打开 · SELECT 切假名</span></div>
   <section id="home">
-    <div id="cover"><div id="bigkana">あ</div><div id="appname">五十音图</div></div>
+    <div id="cover"><canvas id="cover-art" width="160" height="160" aria-hidden="true"></canvas><div id="appname">五十音图</div></div>
     <div id="rows">
       <button id="row-review" class="row" type="button"><span id="review-label">今天复习 8 个</span><span id="stamp">完了</span></button>
       <button id="row-table" class="row" type="button"><span id="table-label">五十音表</span></button>
@@ -148,6 +157,107 @@
   </div>
   <div id="status" aria-live="polite"></div>
 </main>
+<script data-src="src/cover.js">
+/* 五十音图 / Kana: the cover picture on the home screen. MIT License.
+   160 x 160 tones (0 ink, 1 dark, 2 mid, 3 paper): flash cards with あ and ア, an inkstone and brush, a desk calendar,
+   blank cards pinned on the wall. Made from the owner's picture, reduced to the four tones; stored packed, 2 bits a
+   pixel. The app's name sits on the flat dark area top left, as text over the canvas. */
+var KANA_COVER = (function () {
+  var W = 160, H = 160;
+  var PIC = "" +
+    "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVqQAAAAAAAA" +
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABpAAAAAAAAAAAAAAAAAA" +
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGkAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+    "AAAAVUFVVVVVVVVVVVVVVVVQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVSqqqqqqqqqqqqqqqqkAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqqq" +
+    "qqqqqqqqqqqqqpAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVKoRpWqqqqqqqqqqqqQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVSqJVAqqqqqqqq" +
+    "qqqqkAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqiqEFaqqqqqqqqqqpAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVKoqgKQGqqqqqqqqqqQBpAB" +
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVSqKqqqpqlqqqqqqqqkAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqiqqqqKlFZaqqqqqpAGkAFVVVVVVVVV" +
+    "VVVVVVVVVVVVVVVVVVVVVZKoqqqqipaQQqqqqqqQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVSqKqqqoqWqFEqqqqqkAaQAVVVVVVVVVVVVVVVVVVV" +
+    "VVVVVVVVVVVVUqiqqqqKlqqqqGqqqpAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVKoqqqqipaqqqgqWqqQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVV" +
+    "VVWSqKqqqoqWqqqoKgBkUAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqiqqqqWlqqqqCqqqqAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVKoqqqq" +
+    "mpaqqqgqqqqgBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVSpaqqqpqWqqqoKqqqoAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqaqqqqalqqqqCqq" +
+    "qqAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVKmqqqqmpaqqqgqqqqgBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVSpqqqqpqWqqqoKqqqoAaQAVVV" +
+    "VVVVVVVVVVVVVVVVVVVVVVVVVVVVUqaqqqpalqqqqCqqqqAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVllKmqqqqCpaqqqgqqqqgBpABVVVVVVVVVVVV" +
+    "VVVVVVVVVVVVVVVVVVVSpqqqqhaWqqqoKqqqoAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqaqqqoalqqqqCqqqqAGkAFVVVVVVVVVVVVVVVVVVVVV" +
+    "VVVVVVVVVVKmqqqqKoaqqqgqqqqgBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVZRpaqqqiqaqqqoKqqqoAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV" +
+    "kamqqqoqmqqqqCqqqqAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGqqqqqGpqqqqhqqqqgBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRqqqqqhqa" +
+    "qqqoaqqqoAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUqqqqBYWmqqqqKqqqqAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGqqqqUFpqqqqhqqqqg" +
+    "BpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRqqqqqlqaqqqoqqqqoAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUaqqqqqqiqqqqGqqqqAGkAFVVVVV" +
+    "VVVVVVVVVVVVVVVVVVVVVVVVVZGqqqqqqpKqqqiqqqqgBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVZRqqqqqqqqqqqoaqqqoAaQAVVVVVVVVVVVVVVV" +
+    "VVVVVVVVVVVVVVVVUaqqqqqqqqQaqKqqqqAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGqqqqqqqqqVViqqqqgBpABVVVVVVVVVVVVVVVVVVVVVVVV" +
+    "VVVVVVVRqqqqqqqqpqoAaqqqoAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVWkaqqqqpqqqqqpaqpQZAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGq" +
+    "qqqqqqqqqqqqqqUQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRqqqqqqqqqqqqqqqqUAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUaqqqqqqqqqq" +
+    "qqqqqpAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGmqqqqqqqqqqqqqqqQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRqqqqqqqqqqqqqqqqkAaQ" +
+    "AVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUZZqqqmqqqqqqqqqqpAGkAFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVGaqqqqaqqqqqqqqqqQBpABVVVVVVVV" +
+    "VVVVVVVVVVVVVVVVVVVVVVZRWmqalqmpKqqqqqqpkAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUWqqqqmkFUaqqqqqqpAGkAFVVVVVVVVVVVVVVVVV" +
+    "VVVVVVVVVVVVVVGqqpmqpEFWVqqqqqqQBpABVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVRVqmmqaWQBRaqaqqqkAaQAVVVVVVVVVVVVVVVVVVVVVVVVVVV" +
+    "VVVVUaqqqqpSlkBRqaqqqpAGkAVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVUFqmpapkqKhQVRqqqqQBpAFlWWVZVVVVVllVVVVmVZVVVVaVlpVZVQAVaqq" +
+    "qlaqppAFWqqqkAaQBlVVVZlWVVZVlWZVVVWVVVVVVVVVVVABVAVlmWmGqqSqAVmqqpAGkAWVmVZlVZWVampWVZlqVlVVmVZqVVQAqWoAWmqmRqqpqoAa" +
+    "BaqQBpAGalWVmVVlaZmlppVZVmValVpVZZVFWqqplRVVmVpaqqqJUBGqkAaQBllVlqWVWVVWZWVlWVZlVWVaVlkBWqqqpVpBVmZaVqqqlqQRqpAGkAWa" +
+    "ZVmapmpqlZllWVWVmVVVVlUAaqqqqqmqUBVWGqZaqpKlQGqQBpAGVZVWVlZVmVVlVVVZVaZVVVVQWqqqqqpmqlpBaCqqVaqqpKUFkAaQBZWVVWmWlWVq" +
+    "ZVaVWaVqVVVQFqqqqqqqqqamlBgqqqpaqqlqRpAGkAaVlVVVVlWZVVVVlVWVVlVUFWqqqqqqqqqpapVEKqqqlaqqqgGQBpAGWZqWmmaqlmmlmmpWppak" +
+    "BqqqqqqqqqqqlqpaUKqqqqpVqqoBkAaQBlpqWZZmVqaVmWVZlZlUFaqqqqqqqqqqqmqqlZWqqqqqlaqqEZAGkAapmlqWZamaZlZlapVVRWqqqqqqqqqq" +
+    "qqqmqaqWqqqqqqWWqBGQBpAGmqWpWZZlqamallalQVqqqqqqqqqqqqqqqqmqlqqqqqqqpWgVkAaQBqmVmmZZmpmaZmZVECqqqqqqqqqqqqqqqqppqpKq" +
+    "qqqqqlqoUVAGkAWmalqZpmlaWVmlQFqqqqqqqqqqqqqqqqqqpqpWqqqqpBRVqFCQBpAFWVVZlmVmVZaVVFqqqqqqqqqqqqqqqqqqqqqpVqqqqqaRVaRQ" +
+    "UAaQBlWVaapaaaVWVAWqqqqqqqqqqqqqqqqqqqqqmkaqqqqVhZWkUFAGkAaVpZVmVlWVUAaqqqqqqqqqqqqqqqqqqqqqqqZaqqqqmVVaoVCQBpAFmVpV" +
+    "paWpVAKqqqqqqqqqqqqqqqqqqqqqqqqqWqqqqqWVVpFUUAaQBllaVVZlVQVqqqqqqqqqqqqqqqqqqqqqqqqqqhqqqqqqWVaRVFAGkAaqZqlmpUFaqqqq" +
+    "qqqqqqqqqqqqqqqqqqqqqqpqqqqqqqpalVQQBpAFqZaZlQBqqqqqqqqqqqqqqqqqqqqqqqqqqqqqGqqqqqqlqoVUEAaQBaZVZlAGqqqqqqqqqqqqqqqq" +
+    "qqqqqqqqqqqqqgaqqqqqpVqFVBAGkAZqlVQWqqqqqqqqqqqqqqqqqqqqqqqqqWqqqqqQaqqqqqVaRVUQBpAGVpQVaqqqqqqqqqqqqqqqqqqqqqqqqlRa" +
+    "qqqqpAaqqqqpWgVVEAaQBVRGqqqqqqqqqqqqqqqqqqqqqqqqqpFVVqqqqqpAaqqqlqoVVRAGkAQVqqqqqqqqqqqqqqqqqqqqqqqqqqgFQBSqqqqqpQaq" +
+    "qpVpFVUABpAFaqqqqqqqqqqqqqqqqqqqqqqqqqlAVAABGqqqqqpAaqpVaQVVQAaQBqqqqqqqqqqqqqqqqqqqqqqqqqpQVQABqVWqqqqqlQaqlalQVUAG" +
+    "kAaqqqqqqqqqqqqqqqqqqqqqqqqqAVAAAP4FaqqqqqlAaqWkVQFABpAGqqqqqqqqqqqqqqqqqqqqqqqqqgUABUb/gUaqqqqqlQaqpFVQAAaQBqqqqqqq" +
+    "qqqqqqqqqqqqqqqqqqoBUFQB6kBRqqqqqpVAaqBUQAAGkAaqqqqqqqqqqqqqqqqqqqqqqqqqBFRAAHkEFFqqqqqqVAaRVAAQBpAGqqqqqqqqqqqqqqqq" +
+    "qqqqqqqqqgUVAAAUFUFWqqqqqqlAkQAVUAaQBqqqqqqqqqqqqqqqqqqqqqqqqqoFVUAAABVQUaqqqqqllAABlZAGkAaqqqqqqqqqqqqqqpWqqqqqqqqq" +
+    "QVVUAAABVRVqqqqqqqlBVWZQBpAGqqqqqqqqqqqqqqVYaqqqqqqqqpBVFQAAABVRWqqqqqqplVVaUAaQBqqqqqqqqqqqqqkavhqqqqqqqqqkBUVAAAAF" +
+    "VBCqqqqqqmllVVAGkAaqqqqqqqqqqqoW//+aqqqqqqqqqkFRUAAAAVUEqqqqqqqWlZWQBpAGqqqqqqqqqqlFv///5qqVVWqqqqqQVBQAAAAVVGqqqqqq" +
+    "qqZVUAaQBqqqqqqqqqlWr/////mqmqoFVVVVUFUFQAAAAVUaqqqqqqqllZAGkAaqqqqqqqqAr//////9Kl//6uqv+qFFUVAAFUBVUqqqqqqqqmZQBpAG" +
+    "qqqqqqqQf////////xpf///////2kVRQAVQABVSqqqqqqqmpkAaQBqqqqqqqn////+r/r//VX///////9qRVFVUAAAFVSqqqqqqqqpAGkAaqqqqqqVv/" +
+    "///Q/gv/5F////////WpRVFAAAABFVWqqqqqqqmQBpAGqqqqqqhS////4OQf//0f/////1/0qlFUAAAAVkVUaqqqqqqqUAaQBqqqqqqoJP////QBe///" +
+    "S/6qAAAH/aqUVAAAFVVkVUaqqqqqqpAGkAaqqqqqqBm////kFtH//9v4ABVVAv2qqRQAAFalVRVVaqqqqqqQBpAGqqqqqqhGL//lQB/gVX/n/ga//Qf9" +
+    "qqpAAFaqqlVVVRqqqqqqkAaQBqqqqqqkFov/9AQfAAAf9P+/5vQf/WqqkAVqqqqVVBVAqqqqqpAGkAaqqqqqpBSb////AAD9B/0//+BRv/8qqqVWqqqq" +
+    "qVVFECqqqqqQBpAGqqqqqqQEJf///wFQ/0H/W//0F///KqqqqqqqqqqVVQUaqqqqkAaQBqqqqqqVARj///0B0P/Q/9b/9C///yqqqqqqqqqqqlUFWqqq" +
+    "qpAGkAaqqqqqlEBJf//4EJL/4P/0//R///8qqqqqqqqqqqqlQBqqqqqQBpAGqqqqqqQQUV//9HQC/+D//T/0f///KqqqqqqqqqqqqlVqqqqqkAaQBqqq" +
+    "qqqpFVSb/+T4B//Q//9v4P///1qqqqqqqqqqqqqqqqqqqpAGkAaqqqqqqkRFZ//g/gb/gv//m9H///+aqqqqqqqqqqqqqqqqqqqQBpAGqqqqqqpBARn/" +
+    "4P0A/0b//9JH////mqqqqqqqqqqqqqqqqqqqkAaQBqqqqqqqkUVZf+CkFX4b///0H////5qqqqqqqqqqqqqqqqqqqpAGkAaqqqqqqqRVVm/0AH/9f///" +
+    "/m/////WqqqqqqqqqqqqqqqqqqqQBpAGqqqqqqqoEFGb/QH///////9L////5qqqqqqqqqqqqqqqqqqqkAaQBqqqqqqqqgRUkv//////////2////+aq" +
+    "qqqqqqqqqqqqqqqqqpAGkAaqqqqqqqpFFWb//////////wv////mqqqqqqqqqqqqqqqqqqqQBpAGqqqqqqqqkQVZv////////5AL////pqqqqqqqqqqq" +
+    "qqqqqqqqkAaQBqqqqqqqqqRVRX////////kFC////7aqqqqqqqqqqqqqqqqqqpAGkAaqqqqqqqqkEVFf//////9VUC////+2qqqqqqqqqqqqqqqqqqqQ" +
+    "BpAGqqqqqqqqqgRUl/////6QVAAv///+9aqqqqqqqqqqqqqqqqqqkAaQBqqqqqqqqqpFFGX////pFUABL///+viqqqqqqqqqqqqqqqqqqpAGkAaqqqqq" +
+    "qqqqgRUY///5RVAVVBVV///9qqqqqqqqqqqqqqqqqqlQBpAGqqqqqqqqqpBURn//UVQBVUEAAABVUKqqqqqqqqqqqqqqqqqAUAaQBqqqqqqqqqqkERZe" +
+    "kBVAVVAVFmqaZVaqqqqqqqqqqqqqqqqkFVAGkAaqqqqqqqqqqRBFhBVQFVQFRBqqqqqqqqqqqqqqqqqqqqqlAVVQBpAGqqqqqqqqqqpERFFVFVQFUAUa" +
+    "qqqqqqqqqqqqqqqqqqqpVVVVUAaQBqqqqqqqqqqqkRUUBVQFVAFUGqqqqqqqqqqqqqqqqqqqhFVVVVAGkAaqqqqqqqqqqpFEQVUBVUBVQWqqqqqqqqqq" +
+    "qqqqqqqqpAVVVVVQBpAGqqqqqqqqqqqkUUUAVVBVUFqqqqqqqqqqqqqqqqqqlBVVVVVVUAaQBqqqqqqqqqqqqRBBVUBVQVaqqqqqqqqqqqqqqqqqpUVV" +
+    "VVVVVVAGkAaqqqqqqqqqqqlERVAFVBaqqqqqqqqqqqqqqqqqqlFVVVVVVVVQBpAGqqqqqqqqqqqqQQQBVQVqqqqqqqqqqqqqqqqqqpAVVVVVVVVVQAaQ" +
+    "BqqqqqqqqqqqqpBAVUFaqqqqqqqqqqqqqqqqqpRFVVVVVVVVUAAGkAaqqqqqqqqqqqqkFUBWqqqqqqqqqqqqqqqqqqVFVVVVVVVVUQAABpAGqqqqqqqq" +
+    "qqqqpAAVqqqqqqqqqqqqqqqqqqkAVVVVVVVVVAAAAAaQBqqqqqqqqqqqqqkBaqqqqqqqqqqqqqqqqqqkVVVVVVVVVVAAAAAGkAaqqqqqqqqqqqqqWqqq" +
+    "qqqqqqqqqqqqqqqlAVVVVVVVVVAAAAAABpAGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpQVVVVVVVVVAAAAAAAAaQBqqqqqqqqqqqqqqqqqqqqqqqqqqq" +
+    "qqqqlFVVVVVVVVUAAAAAAAAGkAaqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpBVVVVVVVVVQAAAAAAAABpAGqqqqqqqqqqqqqqqqqqqqqqqqqqqqpQFVVVVV" +
+    "VVVVAAAAAAAAAAaQBqqqqqqqqqqqqqqqqqqqqqqqqqqqqVVVVVVVVVVUAAAAAAAAAAAGkAaqqqqqqqqqqqqqqqqqqqqqqqqqqgBVVVVVVVVVAAAAAAAA" +
+    "AAAABpAGqqqqqqqqqqqqqqqqqqqqqqqqqpAVVVVVVVVVUAAAAAAAAAAAAAaQBqqqqqqqqqqqqqqqqqqqqqqqqpQFVVVVVVVVVAAAAAAAAAAAAAAGkAaq" +
+    "qqqqqqqqqqqqqqqqqqqqqqVEVVVVVVVVVAAAAAAAAAAAAAAABpAGqqqqqqqqqqqqqqqqqqqqqqpRVVVVVVVVVQAAAAAAAAAAAAAAAAaQBqqqqqqqqqqq" +
+    "qqqqqqqqqqqQFVVVVVVVVVAAAAAAAAAAAAAAAAAGkAVVVVVVVVVVVVVVVVVVVVVUAVUVVVVVFRQAAAAAAAAAAAAAAAAABpAAAAAAAAAAAAAAAAAAAAAA" +
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+    "AAAAAAAAAAAAAAAAAAAABpAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAalVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV" +
+    "VVVVVVVVVVVaqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqg==";
+  /* the four tones as RGB, the same values as the page's CSS */
+  var TONES = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
+  /* into a canvas with putImageData only (drawImage from a canvas swaps red and blue on Safari) */
+  function draw(canvas) {
+    if (!canvas || !canvas.getContext) return;
+    var g = canvas.getContext("2d");
+    if (!g || !g.createImageData) return;
+    canvas.width = W; canvas.height = H;
+    var img = g.createImageData(W, H), px = img.data, b = atob(PIC), i, t, o;
+    for (i = 0; i < W * H; i++) {
+      t = TONES[(b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3];
+      o = i * 4;
+      px[o] = t[0]; px[o + 1] = t[1]; px[o + 2] = t[2]; px[o + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
+  }
+  return { W: W, H: H, draw: draw };
+})();
+</script>
 <script data-src="src/srs.js">
 /* 五十音图 / Kana: the daily review's rules, with no DOM, no PAD and no clock of its own.
    The caller passes today as "YYYY-MM-DD", so the app and the tests run this same copy.
@@ -386,7 +496,7 @@ var KanaSRS = (function () {
   var promptEl = document.getElementById("prompt"), optionsEl = document.getElementById("options");
   var referenceEl = document.getElementById("reference"), viewBtn = document.getElementById("view");
   var cueTop = document.getElementById("cue-top"), cueBottom = document.getElementById("cue-bottom");
-  var tallyEl = document.getElementById("tally"), bigkanaEl = document.getElementById("bigkana");
+  var tallyEl = document.getElementById("tally"), coverEl = document.getElementById("cover-art");
   var appnameEl = document.getElementById("appname"), reviewLabel = document.getElementById("review-label");
   var stampEl = document.getElementById("stamp"), tableLabel = document.getElementById("table-label");
   var quizLabel = document.getElementById("quiz-label"), streakEl = document.getElementById("streak");
@@ -461,7 +571,6 @@ var KanaSRS = (function () {
   }
   function renderHome() {
     var n = reviewCount();
-    bigkanaEl.textContent = table()[0];
     appnameEl.textContent = TXT.title;
     reviewLabel.textContent = n > 0 ? TXT.reviewCount.replace("{n}", String(n)) : TXT.allDone;
     stampEl.style.display = n > 0 ? "none" : "inline-block";
@@ -853,6 +962,7 @@ var KanaSRS = (function () {
     lastDay = todayKey();
     render();
   });
+  KANA_COVER.draw(coverEl);
   render();
   if (typeof PAD !== "undefined" && PAD.load) {
     PAD.load(KEY).then(function (saved) {
