@@ -92,9 +92,12 @@ var Chords = (function () {
   function tones(c) {
     var Q = qual(c.q), out = [];
     if (c.bass !== null && c.bass !== undefined && Q.iv.map(function (i) { return mod12(c.root + i); }).indexOf(c.bass) < 0)
-      out.push({ pc: c.bass, lab: "/" });
-    for (var i = 0; i < Q.iv.length; i++) out.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i] });
-    return out;
+      out.push({ pc: c.bass, lab: "/", iv: null });
+    /* listed as they stack up from the root: a 9 is a ninth (14 semitones), not a second, so it comes last */
+    var up = [];
+    for (var i = 0; i < Q.iv.length; i++) up.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i], iv: Q.lab[i] === "9" ? Q.iv[i] + 12 : Q.iv[i] });
+    up.sort(function (a, b) { return a.iv - b.iv; });
+    return out.concat(up);
   }
 
   /* ---------------- the hand-written shapes (section 2.3) ---------------- */
