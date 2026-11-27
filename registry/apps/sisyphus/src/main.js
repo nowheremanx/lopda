@@ -22,6 +22,7 @@ var S = {
   idle: 0,
   summits: 0,
   seen: [],
+  got: {},
   deck: [],
   lastQuote: null,
   weather: "clear",
@@ -48,6 +49,7 @@ function saveState() {
   game.save("sisyphus", {
     summits: S.summits,
     seen: S.seen,
+    got: S.got,
     deck: S.deck,
     lastQuote: S.lastQuote
   });
@@ -57,6 +59,7 @@ game.load("sisyphus").then(function (v) {
   if (v && typeof v === "object") {
     S.summits = Math.max(0, v.summits | 0);
     S.seen = Array.isArray(v.seen) ? v.seen.filter(function (id) { return !!QS.byId[id]; }) : [];
+    S.got = QS.cleanGot(v.got, S.seen);
     S.deck = Array.isArray(v.deck) ? v.deck.filter(function (id) { return !!QS.byId[id]; }) : [];
     S.lastQuote = QS.byId[v.lastQuote] ? v.lastQuote : null;
   }
@@ -104,10 +107,12 @@ function setAmbience(level) {
 }
 
 /* ---------------- notes ---------------- */
-function appendNote(q, n, done) {
+/* at: {n, d}, the summit and the day the line was given, or null when the save
+   is older than that record (QS.noteText then writes only the day it was copied) */
+function appendNote(q, at, done) {
   if (!PAD.notes || !PAD.notes.append) { done("denied"); return; }
   try {
-    var p = PAD.notes.append("幸福手册", QS.noteText(q, n));
+    var p = PAD.notes.append("幸福手册", QS.noteText(q, at));
     if (p && p.then) {
       p.then(function (r) { done(r === "saved" ? "saved" : "denied"); })
         .catch(function () { done("denied"); });
@@ -148,9 +153,17 @@ game.scene("title", {
 
 /* ---------------- climb ---------------- */
 /* the tally of summits, quiet in the top corner; before the first one the mountain is enough */
+/* The sky behind it darkens from paper to ink on the way up, so the tally sits on a
+   flat tag of the sky's own end of the scale: paper with ink text while the sky is
+   light, ink with paper text once it is dark. It stays quiet against the sky and the
+   text keeps full contrast all the way to the top (no text in dark on dithered ink). */
 function drawRunHud(g) {
   if (S.summits > 0) {
-    g.text(T({ zh: "第 " + S.summits + " 次", en: String(S.summits) }), 153, 4, { align: "right", color: 1 });
+    var label = T({ zh: "第 " + S.summits + " 次", en: String(S.summits) });
+    var light = ART.skyTop(S) >= 1.75;
+    var w = g.measure(label);
+    g.rect(153 - w - 2, 3, w + 4, g.lineHeight + 1, light ? 3 : 0);
+    g.text(label, 153, 4, { align: "right", color: light ? 0 : 3 });
   }
 }
 
@@ -341,6 +354,9 @@ function openQuote() {
   var q = QS.next(S);
   S.summits = n;
   if (S.seen.indexOf(q.id) < 0) S.seen.push(q.id);
+  /* the summit and the day a line was first given, so the gallery can write it
+     into the handbook as it happened, not as today */
+  if (!S.got[q.id]) S.got[q.id] = { n: n, d: QS.dateText(new Date()) };
   S.quote = q;
   S.quoteN = n;
   saveState();
@@ -348,6 +364,16 @@ function openQuote() {
 }
 
 /* ---------------- quote card ---------------- */
+/* A tap on a card (ART.card): "a" on the left half of the hint row under the
+   bottom rule, where 「A …」 is written; "b" on its right half, where 「B …」 is;
+   "body" anywhere above; null with no tap this frame. */
+function cardTap() {
+  var p = game.pointer;
+  if (!p.pressed) return null;
+  if (p.y >= 150) return p.x < 80 ? "a" : "b";
+  return "body";
+}
+
 game.scene("quote", {
   enter: function (args) {
     S.quote = args.q;
@@ -365,20 +391,22 @@ game.scene("quote", {
     if (S.quoteSaving) return;
     if (S.quoteStatus === "saved" || S.quoteStatus === "denied") {
       S.doneT += dt;
-      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b")) game.pop(S.quoteStatus);
+      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b") || game.pointer.pressed) game.pop(S.quoteStatus);
       return;
     }
     if (S.quoteT < 0.72) return;
-    if (game.pressed("a")) {
+    /* touch: the 「A 记下」 half of the hint row writes, a tap anywhere else lets it pass */
+    var tap = cardTap();
+    if (game.pressed("a") || tap === "a") {
       S.quoteSaving = true;
       S.quoteStatus = "saving";
-      appendNote(S.quote, S.quoteN, function (r) {
+      appendNote(S.quote, { n: S.quoteN, d: QS.dateText(new Date()) }, function (r) {
         S.quoteStatus = r;
         S.quoteSaving = false;
         S.doneT = 0;
         if (r === "saved") SFX.chime(game); else SFX.denied(game);
       });
-    } else if (game.pressed("b")) {
+    } else if (game.pressed("b") || tap) {
       game.pop("skip");
     }
   },
@@ -521,8 +549,16 @@ game.scene("menu", {
     var items = menuItems();
     if (game.pressed("up")) { S.menuIndex = (S.menuIndex + items.length - 1) % items.length; SFX.move(game); }
     if (game.pressed("down")) { S.menuIndex = (S.menuIndex + 1) % items.length; SFX.move(game); }
+    /* touch: a tap on a row selects it and acts like A; a tap outside the window is B */
+    var act = game.pressed("a");
+    if (game.pointer.pressed) {
+      var p = game.pointer, row = Math.floor((p.y - 69) / 16);
+      if (p.x >= 10 && p.x < 150 && p.y >= 46 && p.y < 134) {
+        if (p.x >= 18 && p.x < 142 && row >= 0 && row < items.length && p.y < 69 + items.length * 16) { S.menuIndex = row; act = true; }
+      } else { SFX.click(game); game.pop(); return; }
+    }
     if (game.pressed("b")) { SFX.click(game); game.pop(); return; }
-    if (game.pressed("a")) {
+    if (act) {
       SFX.click(game);
       if (S.menuIndex === 0) game.pop();
       else if (S.menuIndex === 1) game.push("gallery");
@@ -566,23 +602,27 @@ game.scene("gallery", {
     if (S.gallerySaving) return;
     if (S.galleryStatus === "saved" || S.galleryStatus === "denied") {
       S.galleryDone += dt;
-      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b")) {
+      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
         S.galleryStatus = null; S.galleryDone = 0;
       }
       return;
     }
     if (!S.galleryList.length) {
-      if (game.pressed("b") || game.pressed("start")) { SFX.click(game); game.pop(); }
+      if (game.pressed("b") || game.pressed("start") || game.pointer.pressed) { SFX.click(game); game.pop(); }
       return;
     }
-    if (game.pressed("up")) { S.galleryIndex = (S.galleryIndex + S.galleryList.length - 1) % S.galleryList.length; SFX.move(game); }
-    if (game.pressed("down")) { S.galleryIndex = (S.galleryIndex + 1) % S.galleryList.length; SFX.move(game); }
-    if (game.pressed("b")) { SFX.click(game); game.pop(); return; }
-    if (game.pressed("a")) {
+    /* touch: the hint row is A on its left half and B on its right; above it, the
+       left half of the card turns back a page and the right half forward (the ‹ ›) */
+    var tap = cardTap(), back = tap === "body" && game.pointer.x < 80, fwd = tap === "body" && !back;
+    if (game.pressed("up") || back) { S.galleryIndex = (S.galleryIndex + S.galleryList.length - 1) % S.galleryList.length; SFX.move(game); }
+    if (game.pressed("down") || fwd) { S.galleryIndex = (S.galleryIndex + 1) % S.galleryList.length; SFX.move(game); }
+    if (game.pressed("b") || tap === "b") { SFX.click(game); game.pop(); return; }
+    if (game.pressed("a") || tap === "a") {
       SFX.click(game);
       S.gallerySaving = true;
       S.galleryStatus = "saving";
-      appendNote(S.galleryList[S.galleryIndex], Math.max(1, S.summits), function (r) {
+      var q = S.galleryList[S.galleryIndex];
+      appendNote(q, S.got[q.id] || null, function (r) {
         S.galleryStatus = r;
         S.gallerySaving = false;
         S.galleryDone = 0;
@@ -604,6 +644,12 @@ game.scene("gallery", {
     }
     var q = S.galleryList[S.galleryIndex];
     ART.card(g, q, "幸福手册", S.galleryList.length + " / " + QS.QUOTES.length, 1, S.galleryStatus, "A 写入    B 返回");
+    if (S.galleryList.length > 1 && !S.galleryStatus) {
+      for (var a = 0; a < 4; a++) {
+        g.rect(8 - a, 84 + a, 1, 7 - 2 * a, 1);   // ‹
+        g.rect(151 + a, 84 + a, 1, 7 - 2 * a, 1); // ›
+      }
+    }
   }
 });
 
