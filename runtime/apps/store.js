@@ -66,7 +66,7 @@ function loadRegistry(force){
     if(!r.ok) throw new Error("HTTP "+r.status);
     return r.json();
   }).then(function(idx){
-    if(!idx || (idx.spec!=="lopda/0" && idx.spec!=="lopda/1") || !Array.isArray(idx.apps)) throw new Error(tr("store.badindex"));
+    if(!idx || (idx.spec!=="lopda/0" && idx.spec!=="lopda/1") || !Array.isArray(idx.apps)) throw errCode("badindex",tr("store.badindex"));
     S.registry=idx; $("store-state").textContent=tr("store.count",{n:idx.apps.length});
     /* icons and localized names are metadata: refresh them on installed apps whose code is unchanged */
     idx.apps.forEach(function(r){
@@ -78,7 +78,7 @@ function loadRegistry(force){
     preinstall();
   }).catch(function(e){
     $("store-state").textContent=tr("store.offline");
-    if(!$("v-store").hidden) toast(tr("store.cantreach",{msg:e.message}));
+    if(!$("v-store").hidden) toast(tr("store.cantreach",{msg:netMsg(e)}));
   }).then(function(){ regLoading=null; });
   return regLoading;
 }
@@ -171,19 +171,23 @@ function storeItem(r){
   var tile=document.createElement("span"); tile.className="tile"; fillTile(tile,r);
   var body=document.createElement("div"); body.className="store-body";
   var t=document.createElement("b"); t.textContent=appName(r)+" v"+r.version;
-  var badge=isUpdated(r) ? "store.updatebadge" : (isNew(r) ? "store.new" : "");
+  /* 更新 is a new version of an app on this phone; one never installed is at most 新 (issue #325) */
+  var a=installedOf(r.id);
+  var badge=a && isUpdated(r) ? "store.updatebadge" : (isNew(r) ? "store.new" : "");
   if(badge){ var nb=document.createElement("span"); nb.className="store-badge"; nb.textContent=tr(badge); nb.title=tr(badge+".title"); t.appendChild(document.createTextNode(" ")); t.appendChild(nb); }
   var d=document.createElement("span"); d.textContent=appDesc(r);
   var m=document.createElement("small"); m.textContent=(r.author||tr("store.anon"))+" · "+(r.license||"")+" · "+Math.max(1,Math.round((r.bytes||0)/1024))+" KB";
   body.appendChild(t); body.appendChild(d); body.appendChild(m);
   var perms=validPerms(r.permissions);
   if(perms.length) body.appendChild(permRow(perms));
-  var a=installedOf(r.id), btn=document.createElement("button"); btn.type="button";
+  var btn=document.createElement("button"); btn.type="button";
   if(!a){ btn.className="btn"; btn.textContent=tr("store.install"); }
   else if(a.sha256!==r.sha256){ btn.className="btn"; btn.textContent=tr("store.update"); }
+  /* its code was found missing when it was opened: the same version is downloaded again (issue #466) */
+  else if(a.missing){ btn.className="btn"; btn.textContent=tr("store.reinstall"); }
   else { btn.className="btn ghost"; btn.textContent=tr("store.open"); }
   if(updating) btn.disabled=true;   /* one update at a time */
-  else btn.onclick=function(){ if(a && a.sha256===r.sha256) runApp(a); else install(r,btn); };
+  else btn.onclick=function(){ if(a && a.sha256===r.sha256 && !a.missing) runApp(a); else install(r,btn); };
   li.appendChild(tile); li.appendChild(body); li.appendChild(btn);
   return li;
 }
@@ -291,17 +295,19 @@ function install(r,btn,then){
 }
 /* btn: the store entry's button, which shows the download (none for a link, below); then: called once it is installed */
 function doInstall(r,btn,added,then){
+  var was=installedOf(r.id);
   if(btn){ btn.disabled=true; btn.textContent=tr("store.downloading"); }
   fetchApp(r).then(function(prev){
     added.filter(function(p){ return GRANTABLE.indexOf(p)>=0; }).forEach(function(p){ grant(r.id,p); });
-    toast(tr(prev?"store.updated":"store.installed",{name:appName(r)})); sfx("ok");
+    toast(tr(prev && !prev.missing ? "store.updated" : "store.installed",{name:appName(r)})); sfx("ok");
     S.revealApp=r.id;   /* the home screen scrolls this tile into view when it comes back */
     renderStore(true);
     if(!$("v-home").hidden) renderHome();
     if(then) then(installedOf(r.id));
   }).catch(function(e){
     if(e && e.code==="removed"){ toast(tr("store.removedmid",{name:appName(r)})); sfx("err"); renderStore(true); return; }
-    toast(tr("store.failed",{msg:e.message})); sfx("err");
+    /* an update that fails leaves the installed version as it was: say 更新失败, not 安装失败 (issue #443) */
+    toast(tr(was && !was.missing ? "store.updatefailed" : "store.failed",{msg:netMsg(e)})); sfx("err");
     if(btn){ btn.disabled=false; btn.textContent=tr("store.retry"); }
   });
 }
@@ -312,6 +318,15 @@ var removals={};
    that never answers must not hold the store. */
 var FETCH_MS=60000;
 function errCode(code,msg){ var e=new Error(msg); e.code=code; return e; }
+/* the reason in the player's words: our own errors carry a code and a message already; what fetch throws
+   ("Failed to fetch", "Load failed"...) is the browser's English and only ever means the network (issue #443) */
+function netMsg(e){
+  if(e && e.code) return e.message;
+  var m=/^HTTP (\d+)/.exec((e && e.message) || "");
+  if(m) return tr("store.http",{status:m[1]});
+  if(e && e.name==="SyntaxError") return tr("store.badindex");
+  return tr("store.nonet");
+}
 /* the app's file, given up after FETCH_MS or when extra.ctl.abort() is called (the store's 停止) */
 function fetchFile(url,ctl){
   var ac=typeof AbortController==="function" ? new AbortController() : null, why="", timer=0;
@@ -336,7 +351,7 @@ function fetchApp(r,extra){
   var gone=removals[r.id]||0;
   return fetchFile(new URL(r.path,REGISTRY).href,extra && extra.ctl).then(function(buf){
     return sha256hex(buf).then(function(h){
-      if(h!==r.sha256) throw new Error(tr("store.badhash"));
+      if(h!==r.sha256) throw errCode("badhash",tr("store.badhash"));
       return new TextDecoder().decode(buf);
     });
   }).then(function(html){
@@ -349,7 +364,7 @@ function fetchApp(r,extra){
     var pre=(extra && extra.preinstalled) || (prev && prev.preinstalled);
     if(pre) app.preinstalled=pre;
     return saveApp(app).then(function(ok){
-      if(!ok) throw new Error(tr("store.nostore"));
+      if(!ok) throw errCode("nostore",tr("store.nostore"));
       return prev;
     });
   });
@@ -391,8 +406,11 @@ function saveApp(app){
   /* an app read back from storage carries no html until it runs: a metadata refresh (icon, names) must leave the
      stored code alone, not write {sha256} over it (issue #322) */
   var code=app.html ? put(S.refs.code.doc(app.id),{html:app.html, sha256:app.sha256}) : Promise.resolve(true);
+  /* no code stored, no record either: a record without its code would show 打开 for an app that cannot start, and
+     after a failed update the old record still matches the old code (issue #466) */
   return code.then(function(okCode){
-    return put(S.refs.apps.doc(app.id),meta).then(function(ok){ if(ok && okCode) delete pending.apps[app.id]; return ok && okCode; });
+    if(!okCode) return false;
+    return put(S.refs.apps.doc(app.id),meta).then(function(ok){ if(ok) delete pending.apps[app.id]; return ok; });
   });
 }
 function loadHtml(a){
@@ -548,7 +566,9 @@ function runApp(a){
   freshRunFrame('<body style="margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:#a3ad7e;color:#1f2a14;font:16px monospace">'+tr("run.loading")+'</body>');
   loadHtml(a).then(function(h){
     if(S.running!==a) return;
-    if(h) start(h); else toast(tr("run.missing"));
+    if(h){ start(h); return; }
+    /* the store offers 重新安装 for it from now on (issue #466) */
+    a.missing=true; toast(tr("run.missing"));
   }).catch(function(e){ if(S.running===a) toast(tr("run.loadfail",{code:(e&&e.code)||tr("common.unknown")})); });
 }
 $("run-back").onclick=function(){ show(S.running && S.running.back || "home"); };

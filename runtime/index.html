@@ -125,7 +125,6 @@
       </div>
       <div class="settings">
         <div class="set-sense" id="set-sense">
-          <span data-i18n="set.sense">传感器与权限</span>
           <ul class="set-sense-list" id="set-sense-list"></ul>
           <p class="hint" id="set-sense-note" data-i18n="set.sense.note">撤销以后，这个程序下次要用时会再问一次。</p>
         </div>
@@ -1010,6 +1009,8 @@
   </div>
 </div>
 
+<!-- a phone held sideways in a browser tab: the handheld is drawn upright only (issue #335) -->
+<div class="rotate" id="rotate" role="alert" hidden><p data-i18n="rotate.note">把手机竖过来用</p></div>
 <script src="../sdk/pad-shim.js"></script>
 <script src="strings.js"></script>
 <script src="platform.js"></script>

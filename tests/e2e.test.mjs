@@ -505,7 +505,8 @@ test("store: search finds an app by either language, ignores case, and clearing 
     "crossing": { released: "2026-10-20", updated: "2026-10-26" },
     "luck-compass": { released: "2026-10-24" },
     "fake-yu": { released: "2026-10-01", updated: "2026-10-28" },
-    "gomoku": { released: "2026-10-07", updated: "2026-10-12" }
+    "gomoku": { released: "2026-10-07", updated: "2026-10-12" },
+    "calculator": { released: "2026-10-01", updated: "2026-10-27" }
   };
   await p.route("**/registry/index.json*", async (r) => {
     const res = await r.fetch();
@@ -534,11 +535,14 @@ test("store: search finds an app by either language, ignores case, and clearing 
   await p.fill("#store-q", "PAPER");
   assert.match(await p.textContent("#store-list"), /纸塔/, "the English name finds it too");
   await p.fill("#store-q", "拼字");
-  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "更新", "a two-day-old version wears UPDATED");
+  /* 更新 is for an app on this phone (issue #325): 拼字格 is not installed, so its new version wears nothing */
+  assert.equal(await p.locator("#store-list .store-badge").count(), 0, "an app never installed wears no UPDATED");
+  await p.fill("#store-q", "计算器");
+  assert.equal((await p.locator("#store-list .store-item", { hasText: "计算器" }).locator(".store-badge").textContent()).trim(), "更新", "an installed app's two-day-old version wears UPDATED");
   await p.fill("#store-q", "罗盘");
   assert.equal((await p.textContent("#store-list .store-badge")).trim(), "新", "first published as 1.0.0: NEW, not UPDATED");
   await p.fill("#store-q", "滥竽");
-  assert.equal((await p.textContent("#store-list .store-badge")).trim(), "更新", "1.0.0 -> 2.0.0: UPDATED");
+  assert.equal(await p.locator("#store-list .store-badge").count(), 0, "1.0.0 -> 2.0.0 but not installed: no UPDATED, and too old for NEW");
   await p.fill("#store-q", "五子棋");
   assert.equal(await p.locator("#store-list .store-item").count(), 1);
   assert.equal(await p.locator("#store-list .store-badge").count(), 0, "an older app has no badge");
@@ -568,7 +572,7 @@ test("store: an app that asks for a capability shows its icons before install, a
   await item.locator("button").click();
   await p.waitForSelector("#file-ask .ask-perms");
   assert.equal(await p.locator("#file-ask .ask-perm").count(), 1);
-  assert.match(await p.textContent("#file-ask .ask-perm"), /话筒/);
+  assert.match(await p.textContent("#file-ask .ask-perm"), /麦克风/);
   /* a modal for VoiceOver: labelled by its question, the focus on the box (not on OK), back on the button after (#167) */
   assert.deepEqual(await p.evaluate(() => {
     const box = document.querySelector("#file-ask .box");
@@ -8039,7 +8043,7 @@ test("wake lock: held on a book page, a game, a running app; let go on HOME; ask
   await p.click("#cart-list .btn:not(.ghost)");
   await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
   await p.waitForFunction(() => window.__lock && !window.__lock.released);
-  await p.click("#cart-eject");
+  await p.click("#cart-eject"); await p.click("#cart-eject");
   assert.equal(await held(p), false, "ejecting lets go");
   await p.click("#cart-list .btn:not(.ghost)");
   await p.waitForFunction(() => !window.__lock.released);
@@ -9433,7 +9437,7 @@ test("cart: the battery save goes out as a .sav and comes back in; a wrong size 
   await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });
   await p.waitForTimeout(500);
   await p.click("#cart-save");
-  await p.click("#cart-eject");
+  await p.click("#cart-eject"); await p.click("#cart-eject");
   await p.waitForFunction(() => !document.querySelector("#cart-list li.cart-item .cart-acts .btn").disabled);
   let d = await doc();
   assert.equal(d.sram.length, 8192, "the core's battery file is the 8 KB RAM, no clock after it");
@@ -9519,7 +9523,7 @@ test("cart: the ROM in the emulator stays whole across eject, play again and a .
       return bad;
     }, SZ);
     assert.equal(bad, 0, "ROM bytes changed " + when);
-    await p.click("#cart-eject");
+    await p.click("#cart-eject"); await p.click("#cart-eject");
     await p.waitForSelector("#cart-lib:not([hidden])");
   };
   await playAndCheck("on the first start");
@@ -9572,6 +9576,10 @@ test("cart: the speed knob runs the game from 0.5x to 1.5x in tenths and starts 
   const slow = await pace();
   assert.ok(Math.abs(slow / one - 0.5) < 0.1, "0.5x runs at half speed: " + one.toFixed(2) + " -> " + slow.toFixed(2));
   /* nothing is kept: the next start is 1.0x again, after eject and after HOME */
+  await p.click("#cart-eject");
+  /* the first tap only asks (issue #299): the game keeps running */
+  assert.equal(await p.textContent("#cart-eject"), (await p.evaluate(() => document.documentElement.lang)).startsWith("zh") ? "确认退卡" : "Eject?");
+  assert.equal(await p.isVisible("#cart-play"), true, "one tap on 退卡 does not end the game");
   await p.click("#cart-eject");
   await p.click("#cart-list .btn:not(.ghost)");
   await p.waitForSelector("#cart-play:not([hidden])", { timeout: 10000 });

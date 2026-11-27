@@ -100,14 +100,14 @@ function saveMeta(){
   /* nothing has been read, or the read failed: writing here could erase the real meta */
   if(!r || !T.meta || !T.metaOk) return;
   /* started here and now: a HOME straight after a change still lands it (a deferred write can lose the race with the page) */
-  r.set.set(T.meta).then(null,function(e){ toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")})); });
+  r.set.set(T.meta).then(null,function(e){ toast(LP.saveFail(e)); });
 }
 function writeItem(data){
   var r=refs();
   if(!r || !T.id || !T.metaOk) return;
   r.items.doc(T.id).set(data).then(null,function(e){
     T.dirty=true;
-    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    toast(LP.saveFail(e));
   });
 }
 function writeProject(id,song){
@@ -117,7 +117,7 @@ function writeProject(id,song){
   data.updated=Date.now();
   song.updated=data.updated;
   return r.items.doc(id).set(data).then(function(){ return true; },function(e){
-    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    toast(LP.saveFail(e));
     return false;
   });
 }
@@ -331,7 +331,7 @@ function writeVersions(){
   var r=refs();
   if(!r || !T.id || !T.metaOk) return Promise.resolve(false);
   return r.versions.doc(T.id).set({v:1,versions:T.versions}).then(function(){ return true; },function(e){
-    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    toast(LP.saveFail(e));
     return false;
   });
 }
@@ -606,7 +606,7 @@ function deleteProjects(ids){
     renderAll();
     toast(tr("studio.proj.deleted"));
   },function(e){
-    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    toast(LP.saveFail(e));
   });
 }
 
@@ -3788,7 +3788,7 @@ function applyWorkspaceImport(){
     toast(tr("studio.workspace.imported"));
   },function(e){
     T.exporting=false;
-    toast(tr("common.savefail",{code:(e&&e.code)||tr("common.unknown")}));
+    toast(LP.saveFail(e));
   });
 }
 
