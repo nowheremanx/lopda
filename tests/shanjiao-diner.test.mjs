@@ -402,3 +402,85 @@ test("the title's save warnings fit the screen", async () => {
   assert.equal(lines.length, 4);
   for (const line of lines) assert.ok(g.measure(line) <= 204, `"${line}" is ${g.measure(line)} px`);
 });
+
+/* ---- DeepSeek review #424 #425 #426 #427 ---- */
+
+test("the seventh morning counts its three actions and the guests who will really come (#424, #425)", async () => {
+  const { app, listeners } = await bootDiner(9);
+  const { tick, press } = buttons(app, listeners);
+  await tick(6);
+  await press("a");
+  for (let i = 0; i < 90 && !app.ctx.get("S"); i++) await tick(1);
+  const S = app.ctx.get("S");
+  const apMax = app.ctx.get("apMax"), guestLine = app.ctx.get("guestLine"), buildSchedule = app.ctx.get("buildSchedule");
+  assert.equal(apMax(), 2, "an ordinary morning has two actions");
+  S.day = 7; S.ap = 3; S.flags.prepared = false; S.menu = []; S.stock = {};
+  assert.equal(apMax(), 3, "the seventh morning's story adds a third");
+  assert.match(guestLine(), /^宴客 3 \+ 路人 \d+ 位/, "before the menu: three feast guests and the walk-ins");
+  // only the three feast dishes cooked: no walk-in has anything to order
+  S.menu = ["god_soup", "grilled_fish", "mushroom_soup"];
+  S.stock = { god_soup: 1, grilled_fish: 1, mushroom_soup: 1 };
+  S.flags.prepared = 1;
+  assert.equal(guestLine(), "宴客 3 位　路人没有可点的菜");
+  const list = buildSchedule();
+  assert.deepEqual(list.map((c) => c.who).sort(), ["ahe", "po", "zhou"], "the evening really has only the three");
+  // a fourth dish for the walk-ins brings them back
+  S.menu = ["god_soup", "grilled_fish", "mushroom_soup", "pork"];
+  assert.match(guestLine(), /^宴客 3 \+ 路人/);
+  assert.ok(buildSchedule().some((c) => !c.who), "walk-ins come when there is a dish for them");
+  // the morning's second line says 3/3, never 3/2
+  const drawn = [];
+  const g = app.ctx.get("game").g, text = g.text;
+  g.text = function (s) { drawn.push(String(s)); return text.apply(g, arguments); };
+  app.ctx.get("game").go("morning");
+  await tick(40);
+  g.text = text;
+  assert.ok(drawn.some((s) => s.includes("行动 3/3")), "the morning shows 行动 3/3: " + drawn.filter((s) => s.includes("行动")).join(" | "));
+  assert.ok(!drawn.some((s) => s.includes("/2") && s.includes("行动 3")), "never 行动 3/2");
+});
+
+test("the help screen promises no START save (#427)", () => {
+  const src = read("registry/apps/shanjiao-diner/src/30-ui.js");
+  const block = src.match(/function help\(g, page\)[\s\S]*?var lines = \[([\s\S]*?)\];/)[1];
+  assert.ok(!/START[^"]*存档/.test(block.replace(/自动存档/g, "")), "START is not said to save");
+  assert.match(block, /自动存档/, "the help says saving is automatic");
+});
+
+test("every ending's lines stay on one line inside their windows (#426)", async () => {
+  const { app } = await bootDiner(10);
+  await new Promise((r) => setImmediate(r));
+  for (let i = 0; i < 6; i++) { app.frame(); await new Promise((r) => setImmediate(r)); }
+  const game = app.ctx.get("game");
+  const g = game.g;
+  const cases = [
+    { kind: "best", choice: "ahe", debt: 0 },
+    { kind: "good", choice: "shrine", debt: 0 },
+    { kind: "good", choice: "ahe", debt: 0 },
+    { kind: "normal", choice: null, debt: 0 },
+    { kind: "bad", choice: null, debt: 150 }
+  ];
+  for (const c of cases) {
+    const S = { stats: { served: 120, earned: 9999 }, rep: 12, debt: c.debt, flags: { finalChoice: c.choice } };
+    const drawn = [];
+    const proxy = new Proxy(g, {
+      get(t, prop) {
+        if (prop === "text") return (str, x, y, o) => { drawn.push({ str: String(str), y, h: t.text(str, x, y, o) }); };
+        const v = t[prop];
+        return typeof v === "function" ? v.bind(t) : v;
+      }
+    });
+    // the ending scene's own draw (src/59-ending.js), run with this state and kind as enter() would leave them
+    const run = new Function("S", "UI", "ART", "game", "g", "kind", "src", "var self = { kind: kind };" +
+      "var draw = eval('(' + src + ')'); draw.call(self, g);");
+    const src = read("registry/apps/shanjiao-diner/src/59-ending.js").match(/draw: (function \(g\) \{[\s\S]*?\n  \})/)[1];
+    run(S, app.ctx.get("UI"), app.ctx.get("ART"), game, proxy, c.kind, src);
+    assert.ok(drawn.length >= 5, `${c.kind}: the ending drew its text`);
+    for (const d of drawn) {
+      assert.ok(d.h <= g.lineHeight, `${c.kind}: "${d.str}" wraps (${d.h} px high)`);
+    }
+    const title = drawn.filter((d) => d.y < 52);
+    for (const d of title) assert.ok(d.y + g.lineHeight <= 52, `${c.kind}: "${d.str}" leaves the title box`);
+    const ys = drawn.filter((d) => d.y > 52).map((d) => d.y).sort((a, b) => a - b);
+    for (let i = 1; i < ys.length; i++) assert.ok(ys[i] - ys[i - 1] >= g.lineHeight, `${c.kind}: rows at ${ys[i - 1]} and ${ys[i]} overlap`);
+  }
+});

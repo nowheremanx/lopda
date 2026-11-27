@@ -44,11 +44,18 @@ var ART = (function () {
   }
 
   /* ---------------- sky ---------------- */
+  /* the tone value at the top of the sky: paper at the foot, ink near the summit */
+  function skyTop(s) {
+    var night = s.mode === "descent";
+    var day = night ? 1 : s.p;
+    var wet = s.weather === "rain";
+    return night ? 0.12 : 3.08 - 2.25 * day - (wet ? 0.28 : 0);
+  }
   function sky(g, s) {
     var night = s.mode === "descent";
     var day = night ? 1 : s.p;
     var wet = s.weather === "rain";
-    var topV = night ? 0.12 : 3.08 - 2.25 * day - (wet ? 0.28 : 0);
+    var topV = skyTop(s);
     var horV = night ? 0.92 : 1.85 + 1.15 * Math.sin(day * Math.PI) - (wet ? 0.30 : 0);
     var horizon = 116;
     for (var y = 0; y < H; y++) {
@@ -498,7 +505,7 @@ var ART = (function () {
 
   return {
     W: W, H: H, tone: tone, px: px, disc: disc, line2: line2,
-    sky: sky, ridges: ridges, cloudSea: cloudSea, terrain: terrain,
+    sky: sky, skyTop: skyTop, ridges: ridges, cloudSea: cloudSea, terrain: terrain,
     boulder: boulder, sisyphus: sisyphus, spawnDust: spawnDust, updateDust: updateDust, drawDust: drawDust,
     reveal: reveal, card: card, wipe: wipe, drawWorld: drawWorld
   };

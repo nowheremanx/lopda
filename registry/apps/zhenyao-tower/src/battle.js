@@ -317,14 +317,25 @@ var Battle = (function () {
   }
 
   var CMDS = [["attack", "攻击"], ["spell", "法术"], ["item", "物品"], ["defend", "防御"], ["flee", "逃跑"]];
+  /* where the command and list rows are, for menuDraw and for taps */
+  function cmdCell(i) { return { x: 16 + (i % 2) * 48, y: 105 + Math.floor(i / 2) * 13 }; }
+  /* the command under a tap: a cell runs from 8 px left of its word (the arrow) to the next column */
+  function cmdAt(px, py) {
+    for (var i = 0; i < CMDS.length; i++) {
+      var c = cmdCell(i);
+      if (px >= c.x - 8 && px < c.x + 40 && py >= c.y - 1 && py < c.y + 12) return i;
+    }
+    return -1;
+  }
   function menuDraw(g, m, s) {
     var t = game.time;
     if (m.kind === "cmd") {
       g.window(0, 100, 160, 44);
       CMDS.forEach(function (c, i) {
-        var x = 16 + (i % 2) * 48, y = 105 + Math.floor(i / 2) * 13;
+        var x = cmdCell(i).x, y = cmdCell(i).y;
         if (i === m.i) g.arrow(x - 8, y + 3, "right");
-        g.text(c[1], x, y, { color: c[0] === "flee" && S.b.boss ? g.MID : g.INK });
+        if (c[0] === "flee" && S.b.boss) offText(g, c[1], x, y);
+        else g.text(c[1], x, y);
       });
       g.rect(110, 104, 1, 36, g.MID);
       g.text("Lv" + S.b.hero.level, 135, 105, { align: "center" });
@@ -337,8 +348,9 @@ var Battle = (function () {
         if (!it) break;
         var y = 104 + r * 13;
         if (k === m.i) g.arrow(5, y + 3, "right");
-        g.text(it.text, 13, y, { color: it.off ? g.MID : g.INK });
-        if (it.right) g.text(it.right, 154, y, { align: "right", color: it.off ? g.MID : g.DARK });
+        if (it.off) offText(g, it.text, 13, y);
+        else g.text(it.text, 13, y);
+        if (it.right) g.text(it.right, 154, y, { align: "right", color: g.DARK });
       }
       if (m.top > 0) for (var u = 0; u < 4; u++) g.rect(153 - u, 102 + u, 1 + 2 * u, 1, g.INK);
       if (m.top + 3 < m.items.length && Math.floor(t * 3) % 2) g.arrow(150, 139, "down");
@@ -361,6 +373,27 @@ var Battle = (function () {
     }
   }
 
+  /* a row that can't be chosen: dark text struck through with a dotted line. Mid on paper is too faint to read
+     on a phone (sdk/UI.md section 4), and dark text alone is too close to ink to tell apart (section 7) */
+  function offText(g, text, x, y, o) {
+    o = o || {};
+    var w = g.measure(text), x0 = o.align === "right" ? x - w : x, ly = y + Math.round(g.lineHeight / 2) - 1;
+    g.text(text, x, y, { align: o.align, color: g.DARK });
+    for (var k = 0; k < w; k += 2) g.rect(x0 + k, ly, 1, 1, g.DARK);
+  }
+
+  /* the tap this frame on the list window: {row} for one of its three rows, {scroll: -1 | 1} for a scroll mark,
+     {out: true} above the window, null for none */
+  function listTap(m) {
+    var p = game.pointer;
+    if (!p.pressed) return null;
+    if (p.y < 100) return { out: true };
+    if (p.x >= 146 && p.y < 116 && m.top > 0) return { scroll: -1 };
+    if (p.x >= 146 && p.y >= 128 && m.top + 3 < m.items.length) return { scroll: 1 };
+    var r = Math.floor((p.y - 103) / 13);
+    return r >= 0 && r < 3 && m.items[m.top + r] ? { row: m.top + r } : null;
+  }
+
   /* resolve a promise when fn() returns something, checked once per update */
   function poll(fn) { return new Promise(function (res) { S.poll = function () { var v = fn(); if (v !== undefined) { S.poll = null; res(v); } }; }); }
 
@@ -371,7 +404,12 @@ var Battle = (function () {
       if (d.x) i = (i % 2 === 0 ? i + 1 : i - 1);
       if (d.y) i = i + d.y * 2;
       if (i !== m.i && i >= 0 && i < CMDS.length) { m.i = i; game.sfx("move"); }
-      if (game.ok()) { S.lastCmd = m.i; return CMDS[m.i][0]; }
+      /* a tap runs the command it lands on, never the one under the arrow; a tap elsewhere does nothing */
+      if (game.pointer.pressed) {
+        var hit = cmdAt(game.pointer.x, game.pointer.y);
+        if (hit >= 0) { m.i = S.lastCmd = hit; return CMDS[hit][0]; }
+      }
+      if (game.pressed("a") || game.pressed("start")) { S.lastCmd = m.i; return CMDS[m.i][0]; }
     });
   }
   /* items: [{text, right, info, off}]; resolves with an index, or -1 for B */
@@ -387,7 +425,17 @@ var Battle = (function () {
         if (m.i > m.top + 2) m.top = m.i - 2;
       }
       if (game.pressed("b")) { game.sfx("tap"); return -1; }
-      if (game.ok()) {
+      /* touch: a row is chosen like A, a scroll mark scrolls, a tap above the window is B */
+      var tap = listTap(m), pick = game.pressed("a") || game.pressed("start");
+      if (tap && tap.out) { game.sfx("tap"); return -1; }
+      if (tap && tap.scroll) {
+        m.top += tap.scroll;
+        m.i = Math.max(m.top, Math.min(m.top + 2, m.i));
+        game.sfx("move");
+        return;
+      }
+      if (tap && tap.row != null) { m.i = tap.row; pick = true; }
+      if (pick) {
         if (items[m.i].off) { game.sfx("err"); return; }
         game.sfx("ok");
         return m.i;
@@ -408,6 +456,16 @@ var Battle = (function () {
         if (L2[k] !== m.i) { m.i = L2[k]; game.sfx("move"); aim(); }
       }
       if (game.pressed("b")) { game.sfx("tap"); camTo({ x: HOME.x, yaw: HOME.yaw }, 0.25); return -1; }
+      /* touch: a tap on a foe picks that foe; a tap on the window below picks the one shown there */
+      if (game.pointer.pressed && !all) {
+        var px = game.pointer.x, py = game.pointer.y, near = -1, best = 24;
+        if (py < 112) live().forEach(function (i) {
+          var p = R.project(foeTop(i, 1.05));
+          if (p && Math.abs(p[0] - px) < best) { best = Math.abs(p[0] - px); near = i; }
+        });
+        if (near >= 0) { if (near !== m.i) { m.i = near; aim(); } }
+        else if (py < 112) return;
+      }
       if (game.ok()) { game.sfx("ok"); S.lastTarget = m.i; return m.i; }
     });
   }

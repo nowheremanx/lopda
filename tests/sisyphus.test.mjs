@@ -248,3 +248,114 @@ test("the lines menu counts collected lines toward the sixteen", async () => {
   assert.ok(texts.includes("1 / " + QS.QUOTES.length),
     "the line count shows the real total: " + texts.join(" | "));
 });
+
+/* ---------------- touch, the summit tally, and the handbook's dates (DeepSeek review #430 #431 #433) ---------------- */
+
+async function tap(app, x, y) {
+  app.pointer("pointerdown", x, y, 160, 178); await run(app, 2);
+  app.pointer("pointerup", x, y, 160, 178); await run(app, 1);
+}
+
+test("touch works on the pause menu, the lines and the summit card (#430)", async () => {
+  const { pad } = makePad({ sisyphus: { summits: 2, seen: ["16", "3"], deck: ["5"], lastQuote: "3" } });
+  const notes = [];
+  pad.notes = { append(title, text) { notes.push(text); return Promise.resolve("saved"); } };
+  const app = boot(APP, { pad, seed: 1 });
+  const S = app.ctx.get("S"), game = app.ctx.get("game");
+  await climbWithA(app, pad, S);
+  up(pad, "a");
+  await run(app, 20);
+  await press(app, pad, "start");
+  assert.equal(S.menuOpen, true, "START opens the pause menu");
+  await tap(app, 80, 75);                     /* the 继续 row */
+  assert.equal(S.menuOpen, false, "a tap on 继续 resumes");
+  await press(app, pad, "start");
+  await tap(app, 80, 4);                      /* outside the window */
+  assert.equal(S.menuOpen, false, "a tap outside the menu is B");
+  await press(app, pad, "start");
+  await tap(app, 80, 91);                     /* the 语录 row */
+  assert.equal(game.top() && S.galleryList.length, 2, "a tap on 语录 opens the lines");
+  assert.equal(S.galleryIndex, 0);
+  await tap(app, 120, 80);                    /* the right half of the card: the next line */
+  assert.equal(S.galleryIndex, 1, "the right half of the card turns forward");
+  await tap(app, 30, 80);
+  assert.equal(S.galleryIndex, 0, "the left half turns back");
+  await tap(app, 30, 160);                    /* 「A 写入」 */
+  for (let i = 0; i < 5 && S.gallerySaving; i++) await run(app, 1);
+  assert.equal(notes.length, 1, "a tap on 「A 写入」 writes the line");
+  await run(app, 60);                         /* the 已写入 line fades back to the hint */
+  await tap(app, 120, 160);                   /* 「B 返回」 */
+  assert.equal(S.menuOpen, true, "a tap on 「B 返回」 goes back to the menu");
+
+  /* the summit card: a tap on the card lets the line pass */
+  S.menuOpen && await press(app, pad, "b");
+  let popped = null;
+  game.push("quote", { q: QS.byId["5"], n: 3 }).then((r) => { popped = r; });
+  await run(app, 60);
+  await tap(app, 80, 80);
+  assert.equal(popped, "skip", "a tap on the card body lets the line pass");
+  popped = null;
+  game.push("quote", { q: QS.byId["5"], n: 3 }).then((r) => { popped = r; });
+  await run(app, 60);
+  await tap(app, 30, 160);
+  for (let i = 0; i < 70 && popped === null; i++) await run(app, 1);
+  assert.equal(popped, "saved", "a tap on 「A 记下」 writes the line");
+  assert.equal(notes.length, 2);
+});
+
+test("the summit tally sits on a tag that contrasts all the way up (#431)", async () => {
+  const { pad } = makePad({ sisyphus: { summits: 4, seen: ["16"], deck: [], lastQuote: "16" } });
+  const app = boot(APP, { pad, seed: 1 });
+  const S = app.ctx.get("S"), game = app.ctx.get("game"), ART = app.ctx.get("ART");
+  await run(app, 5);
+  const g = game.g, calls = [];
+  const { rect, text } = g;
+  g.rect = function (x, y, w, h, c) { calls.push({ k: "rect", y, c }); return rect.apply(g, arguments); };
+  g.text = function (s, x, y, o) { calls.push({ k: "text", s: String(s), c: o && o.color }); return text.apply(g, arguments); };
+  const drawHud = app.ctx.get("drawRunHud");
+  for (const [p, weather] of [[0.1, "clear"], [0.6, "clear"], [0.95, "clear"], [0.65, "rain"], [0.99, "rain"]]) {
+    S.mode = "climb"; S.p = p; S.weather = weather;
+    calls.length = 0;
+    drawHud(g);
+    const t = calls.find((c) => c.k === "text" && c.s === "第 4 次");
+    const tag = calls.find((c) => c.k === "rect" && c.y === 3);
+    assert.ok(t && tag, `the tally and its tag are drawn at p=${p}`);
+    assert.ok((t.c === 0 && tag.c === 3) || (t.c === 3 && tag.c === 0), `ink on paper or paper on ink at p=${p}: ${t.c} on ${tag.c}`);
+    /* the tag is the sky's own end of the scale, so it stays quiet */
+    const sky = ART.skyTop(S);
+    assert.equal(tag.c, sky >= 1.75 ? 3 : 0, `the tag follows the sky at p=${p} (sky ${sky.toFixed(2)})`);
+  }
+});
+
+test("the handbook writes a line with the summit and the day it was given, not today's (#433)", async () => {
+  const head = (t) => t.split("\n")[0];
+  const q = QS.byId["16"];
+  assert.equal(head(QS.noteText(q, { n: 1, d: "2026年3月2日" })), "2026年3月2日 · 第 1 次登顶");
+  assert.match(head(QS.noteText(q, null)), /^抄于 \d{4}年\d{1,2}月\d{1,2}日$/, "no record: only the day it was copied");
+  assert.equal(JSON.stringify(QS.cleanGot({ 16: { n: 1, d: "x" }, 3: { n: 0, d: "y" }, 9: { n: 2, d: "z" } }, ["16", "3"])), JSON.stringify({ 16: { n: 1, d: "x" } }));
+
+  const store = { sisyphus: { summits: 5, seen: ["16", "3"], got: { 16: { n: 1, d: "2026年3月2日" } }, deck: [], lastQuote: "3" } };
+  const { pad } = makePad(store);
+  const notes = [];
+  pad.notes = { append(title, text) { notes.push(text); return Promise.resolve("saved"); } };
+  const app = boot(APP, { pad, seed: 1 });
+  const S = app.ctx.get("S"), game = app.ctx.get("game");
+  await run(app, 5);
+  game.push("gallery");
+  await run(app, 2);
+  await press(app, pad, "a");                 /* line 16, given at the first summit */
+  await run(app, 60);
+  await press(app, pad, "down");
+  await press(app, pad, "a");                 /* line 3: an older save kept no record of it */
+  await run(app, 5);
+  assert.equal(notes.length, 2);
+  assert.equal(head(notes[0]), "2026年3月2日 · 第 1 次登顶", "the recorded summit and day, not summit 5 today");
+  assert.match(head(notes[1]), /^抄于 /, "without a record the note claims no summit");
+
+  /* a new line records its summit and day, and the record is saved */
+  S.summits = 5; S.deck = ["7"];
+  app.ctx.get("openQuote")();
+  await run(app, 2);
+  assert.equal(store.sisyphus.got["7"].n, 6);
+  assert.match(store.sisyphus.got["7"].d, /^\d{4}年/);
+});
