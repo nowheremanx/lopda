@@ -1433,10 +1433,13 @@ function advance() {
   if (cur.kind === "end") { game.musicStop(); game.go("title"); }
 }
 
-/* the rows a choice puts on screen, for taps */
+/* the rows a choice or the title menu puts on screen, for taps: 22 canvas px is 44 css px at the smallest
+   scale (2, on a 331 x 359 screen) and the 4 px between rows are 8, as sdk/UI.md section 3 asks */
+var ROW_H = 22, ROW_GAP = 4;
+function choiceBoxH(n) { return n * ROW_H + (n - 1) * ROW_GAP + 8; }
 function choiceRow(k, n) {
-  var h = n * game.g.lineHeight + 8, y = Math.floor((PIC_H - h) / 2) + 2;
-  return { x: 12, y: y + 4 + k * game.g.lineHeight, w: 136, h: game.g.lineHeight };
+  var y = Math.floor((PIC_H - choiceBoxH(n)) / 2) + 2;
+  return { x: 12, y: y + 4 + k * (ROW_H + ROW_GAP), w: 136, h: ROW_H };
 }
 function inside(r, x, y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
@@ -1541,11 +1544,11 @@ function drawSay(g) {
 
 function drawChoice(g) {
   var n = cur.items.length, r0 = choiceRow(0, n);
-  g.window(8, r0.y - 4, 144, n * g.lineHeight + 8);
+  g.window(8, r0.y - 4, 144, choiceBoxH(n));
   cur.items.forEach(function (c, k) {
     var r = choiceRow(k, n), on = k === cur.idx;
     if (on) g.rect(r.x, r.y, r.w, r.h, g.INK);
-    g.text(T(c), 16, r.y, { color: on ? g.PAPER : g.INK });
+    g.text(T(c), 16, r.y + 4, { color: on ? g.PAPER : g.INK });
   });
   drawBox(g);
   g.text(T({ zh: "↑↓ 选  A 确定", en: "Up/Dn  A: choose" }), 80, BOX_Y + 12, { align: "center", color: g.INK });
@@ -1575,7 +1578,7 @@ function drawLog(g) {
 
 /* the title: Start, or Continue and Start over when there is a save */
 var saved = null, loading = false, unreadable = false, newer = false, menuIdx = 0;
-function titleRow(k) { return { x: 44, y: BOX_Y + 6 + k * game.g.lineHeight, w: 72, h: game.g.lineHeight }; }
+function titleRow(k) { return { x: 28, y: BOX_Y + 3 + k * (ROW_H + ROW_GAP), w: 104, h: ROW_H }; }
 game.scene("title", {
   enter: function () {
     saved = null; loading = true; unreadable = false; newer = false; menuIdx = 0; heard = undefined;
@@ -1620,12 +1623,12 @@ game.scene("title", {
     items.forEach(function (s, k) {
       var r = titleRow(k), on = k === menuIdx;
       if (on) g.rect(r.x, r.y, r.w, r.h, g.INK);
-      g.text(s, 80, r.y, { align: "center", color: on ? g.PAPER : g.INK });
+      g.text(s, 80, r.y + 4, { align: "center", color: on ? g.PAPER : g.INK });
     });
+    /* only a warning goes under the menu (the menu has one row then); the title has no B, so it teaches none */
     var hint = unreadable ? { zh: "存档读不出，这次不存档", en: "Save unreadable: not saving" }
-      : newer ? { zh: "存档来自新版，这次不存档", en: "Newer save: not saving" }
-      : { zh: "A 前进  B 回看", en: "A: next   B: log" };
-    g.text(T(hint), 80, 128, { align: "center", color: g.INK });
+      : newer ? { zh: "存档来自新版，这次不存档", en: "Newer save: not saving" } : null;
+    if (hint) g.text(T(hint), 80, 124, { align: "center", color: g.INK });
   }
 });
 
