@@ -459,3 +459,45 @@ test("klotski app: an unreadable save is left alone and the title says so (#337)
   run(app, 3);
   assert.equal(saves, 0, "nothing is written over the unreadable save");
 });
+
+test("klotski app: the restart dialog's taps land on the rows it draws (#339)", async () => {
+  const { app, pad } = await bootApp();
+  const K = app.ctx.get("window").KLOTSKI;
+  assert.ok(K.open("k01"));
+  run(app, 5);
+  /* move one piece so a restart would show */
+  for (let i = 0; i < 10 && !K.state().moves; i++) { tapButton(app, pad, "select"); tapButton(app, pad, "right"); run(app, 10); }
+  const moved = K.state().moves;
+  assert.ok(moved > 0, "no piece moved");
+  const openConfirm = app.ctx.get("openConfirm"), updateConfirm = app.ctx.get("updateConfirm");
+  const y0 = app.ctx.get("CONFIRM_ROW_Y"), row = app.ctx.get("CONFIRM_ROW");
+  /* the bottom pixel row of Cancel (drawn 21 px tall) keeps the board */
+  openConfirm();
+  updateConfirm({ dist: 0, x0: 80, y0: y0 + 20 });
+  assert.equal(K.state().ui, "play");
+  assert.equal(K.state().moves, moved, "a tap on Cancel restarted the run");
+  /* the bottom pixel row of Restart restarts */
+  openConfirm();
+  updateConfirm({ dist: 0, x0: 80, y0: y0 + row + 20 });
+  assert.equal(K.state().moves, 0, "a tap on Restart's lower edge did nothing");
+});
+
+test("klotski app: a key pressed while a block is still sliding is played when the slide ends (#338)", async () => {
+  const { app, pad } = await bootApp();
+  const K = app.ctx.get("window").KLOTSKI;
+  assert.ok(K.open("k01"));
+  run(app, 5);
+  const table = app.ctx.get("table");
+  for (let i = 0; i < 10; i++) {
+    tapButton(app, pad, "select");
+    const before = K.state().pieces[K.state().selected];
+    pad.press("right"); run(app, 1); pad.release("right");
+    if (!table.anim && !table.queue.length) { run(app, 10); continue; }   /* this piece could not move right */
+    /* still sliding: the next key must not be lost */
+    pad.press("left"); run(app, 1); pad.release("left");
+    run(app, 30);
+    assert.deepEqual(K.state().pieces[K.state().selected], before, "the second key was dropped during the slide");
+    return;
+  }
+  assert.fail("no piece could move right");
+});
