@@ -173,6 +173,28 @@ test("strings: each string of a voicing names its pitch and its degree, low E fi
   assert.equal(show("C/E", "032010"), "E3@40 CR@48 E3@52 G5@55 CR@60 E3@64", "a bass that is a chord tone keeps its degree");
 });
 
+test("degree map: every place in the box's frets is named by its degree, the chord's own tones as the chord writes them", () => {
+  const deg = (name, note) => { const c = C.parse(name), d = C.degree(c, C.NAMES.indexOf(note)); return d.lab + (d.tone ? "" : "?"); };
+  assert.equal(deg("C", "F"), "11?", "a note to add is named as an extension: 11, not 4");
+  assert.equal(deg("Csus4", "F"), "4", "but a sus4's own fourth is a 4");
+  assert.equal(deg("C6", "A"), "6");
+  assert.equal(deg("C", "A"), "13?");
+  assert.equal(deg("C7", "Bb"), "b7");
+  assert.equal(deg("Cm", "Eb"), "b3");
+  assert.equal(deg("C", "C#"), "b9?");
+  /* the picture: four tones only; the open C's played notes sit in ink tiles, the hit test finds string and fret */
+  const c = C.parse("C"), v = C.voicings(c)[0];
+  assert.deepEqual([...v.frets], [-1, 3, 2, 0, 1, 0]);
+  const m = D.map(v, c);
+  assert.equal(m.w, D.BOX_W);
+  assert.ok(m.px.every((t) => t >= 0 && t <= 3));
+  assert.deepEqual({ ...D.mapAt(v, 34, 58) }, { s: 1, f: 3 }, "the A string at the third fret");
+  assert.deepEqual({ ...D.mapAt(v, 90, 6) }, { s: 5, f: 0 }, "the open high E, above the nut");
+  assert.equal(D.mapAt(v, 2, 50), null, "beside the strings is nothing");
+  assert.equal(m.px[58 * m.w + 34 - 6], 0, "a played note's tile is ink");
+  assert.equal(m.px[24 * m.w + 34 - 6], 3, "a note not played has a paper patch");
+});
+
 /* ---------------- the progressions (和弦连接, 1.2.0) ---------------- */
 
 test("progressions: every entry is whole, in both languages, and every chord in it is one the app knows", () => {

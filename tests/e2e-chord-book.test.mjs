@@ -208,14 +208,15 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
   }
 });
 
-test("chord-book: English words, and the strum plays without an error", { skip, timeout: 60000 }, async (t) => {
+test("chord-book: English words, the strum plays without an error, the degree map is named", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t, { lang: "en", size: LARGE });
   assert.equal(await text(p, "#strum"), "Strum");
 
   assert.equal(await text(p, "#qname"), "major");
   assert.match(await text(p, "#line"), /^x32010 · 1 \/ \d+ · open$/);
   await tap(p, "#strum");
-  await tap(p, "#pwrap");
+  await tap(p, "#pic");
+  assert.equal(await text(p, "#view"), "Degrees");
   await tap(p, "#chord");
   assert.equal(await text(p, "#tofind"), "Find by frets");
   assert.equal(await text(p, "#sortH"), "Shape order");
@@ -246,6 +247,43 @@ test("chord-book: each sounding string is a button with its note and degree that
   await p.evaluate(() => { window.__notes = []; });
   for (let i = 0; i < 5; i++) await tap(p, p.locator("#tones button").nth(i));
   assert.deepEqual(await p.evaluate(() => window.__notes.map((x) => x.notes[0])), [43, 52, 57, 60, 64]);
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book: a tap on the picture opens the degree map; a place on it plays its note, the view button closes it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push({ notes, ring: !!ring }); return play(notes, gap, ring); };
+  });
+  await tap(p, "#pic");
+  assert.equal(await text(p, "#view"), "度数");
+  assert.deepEqual(await p.evaluate(() => window.__notes), [], "the tap opened the map and played nothing");
+  /* a place on the map, in buffer pixels of the 104 x 104 box: the A string at fret 3 (C3), the high E at fret 1 (F4) */
+  const at = async (bx, by) => {
+    const b = await p.locator("#pic").boundingBox();
+    await p.touchscreen.tap(b.x + (bx + 0.5) * b.width / 104, b.y + (by + 0.5) * b.height / 104);
+    await p.waitForTimeout(80);
+  };
+  await at(34, 58);
+  await at(90, 24);
+  assert.deepEqual(await p.evaluate(() => window.__notes), [{ notes: [48], ring: true }, { notes: [65], ring: true }]);
+  /* a swipe still turns the voicing, and the map stays open */
+  await p.evaluate(() => window.__press("right"));
+  await p.waitForTimeout(80);
+  assert.match(await text(p, "#line"), /· 2 \/ /);
+  assert.equal(await text(p, "#view"), "度数");
+  /* the view button closes it back to the box; SELECT opens and closes it too, and it is saved */
+  await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "框图");
+  await p.evaluate(() => window.__press("select"));
+  await p.waitForTimeout(400);
+  assert.equal(await text(p, "#view"), "度数");
+  assert.equal(await p.evaluate(() => window.__saves.set.map), true);
+  await p.evaluate(() => window.__press("select"));
+  await p.waitForTimeout(80);
+  assert.equal(await text(p, "#view"), "框图");
   assert.deepEqual(errors, []);
 });
 
