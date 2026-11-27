@@ -340,7 +340,7 @@
       ],
       "version": "1.1.0",
       "released": "2026-10-24",
-      "updated": "2026-11-24",
+      "updated": "2026-11-26",
       "description": "每天一关推箱子：把箱子推到记号上，只能推不能拉。有最少步数、撤销和答案。",
       "i18n": {
         "zh": {
@@ -355,8 +355,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/daily-box/index.html",
-      "sha256": "5f8d8ecd00c3bd0382b7fdd647c8d673a6dad427ae7b6216f593001118a750e3",
-      "bytes": 182557
+      "sha256": "938c8223a66eedbe8ed4bc6de89d7fe687f81c6bf35f6637146d928567c152ed",
+      "bytes": 182554
     },
     {
       "spec": "lopda/1",

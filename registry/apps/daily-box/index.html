@@ -3530,7 +3530,7 @@ function drawHelp(g) {
   g.rect(x + 10, ty - 4, w - 20, 1, g.MID);
   ty += 2;
   var lines = helpLines();
-  /* 142 px of text room keeps every help line (the longest about 141 px) on on one line. */
+  /* 142 px of text room keeps every help line (the longest about 141 px) on one line. */
   for (var i = 0; i < lines.length; i++) {
     ty += g.text(lines[i], x + 7, ty, { width: w - 14 });
   }
