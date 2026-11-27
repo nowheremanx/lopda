@@ -1,6 +1,6 @@
 {
   "spec": "lopda/1",
-  "generated": "2026-11-26",
+  "generated": "2026-11-27",
   "apps": [
     {
       "spec": "lopda/1",
@@ -763,8 +763,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "eb29838dc7ba485620993940a71bdde3ab482127d70c5498a0e694f185e4222d",
-      "bytes": 18918
+      "sha256": "ddf6c0452f9757e1419ab65ed94f791891fa2026fd3bf0c954a22c2c3bbb4d74",
+      "bytes": 20003
     },
     {
       "spec": "lopda/1",

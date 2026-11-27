@@ -110,7 +110,7 @@ for (const locale of ["zh-CN", "en-US"]) {
         * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
       assert.equal(overlap, 0, `${a.id} and ${b.id} do not overlap`);
     }
-    assert.equal(layout.buttons.length, 11, "five buttons in each of the two rows, and the sheet number in the title");
+    assert.equal(layout.buttons.length, 10, "colours and width, tool / undo / redo / more, and the sheet number in the title");
 
     /* (b) the canvas takes what the tools leave: square, crisp, and larger than the 1.1.1 layout */
     assert.ok(layout.canvas.w >= 200, `canvas is at least 200 css px wide (got ${layout.canvas.w}; was 178 zh / 132 en)`);
@@ -153,7 +153,7 @@ async function drag(p, frame, [x0, y0], [x1, y1]) {
   await p.mouse.move(...at(x1, y1), { steps: 5 }); await p.mouse.up();
   await p.waitForTimeout(50);
 }
-const tool = async (app, id) => { await app.locator("#size").click(); await app.locator("#" + id).click(); };
+const tool = async (app, id) => { await app.locator("#tool").click(); await app.locator("#" + id).click(); };
 /* the app's own picture as a digit string: the canvas pixels read back into tones */
 const sheetDigits = (frame) => frame.evaluate(() => {
   const d = document.getElementById("cv").getContext("2d").getImageData(0, 0, 96, 96).data, T = [31, 74, 125, 163];
@@ -206,8 +206,8 @@ test("paint 1.3.0: fill, mirror, line and box", { skip, timeout: 60000 }, async 
   await p.waitForTimeout(200);
   /* a box outline, one undo step */
   await tool(app, "tbox");
-  assert.equal((await app.locator("#size").textContent()).trim(), "Box 1", "the tool button names the tool");
-  assert.ok(await app.locator("#sw0").isVisible(), "picking a tool brings the colours back");
+  assert.match((await app.locator("#tool").textContent()).trim(), /^Box/, "the tool button names the tool");
+  assert.ok(await app.locator("#toolpop").isHidden(), "picking a tool closes the menu");
   await drag(p, frame, [10, 10], [30, 30]);
   for (const [x, y] of [[10, 10], [30, 10], [30, 30], [10, 30], [20, 10], [10, 20]]) assert.deepEqual(await readPixel(frame, x, y), INK, `box edge ${x},${y}`);
   assert.deepEqual(await readPixel(frame, 20, 20), PAPER, "a box is only an outline");
@@ -246,8 +246,8 @@ test("paint 1.3.0: fill, mirror, line and box", { skip, timeout: 60000 }, async 
   assert.deepEqual(await readPixel(frame, 90, 60), PAPER, "and its mirror");
 
   /* the pen, tapped again, turns bold */
-  await tool(app, "tpen"); await tool(app, "tpen");
-  assert.equal((await app.locator("#size").textContent()).trim(), "Pen 3");
+  await tool(app, "tpen"); await app.locator("#size").click();
+  assert.equal((await app.locator("#size").textContent()).trim(), "Bold");
   await dot(p, frame, 20, 80);
   assert.deepEqual(await readPixel(frame, 19, 81), INK, "bold is 3 px");
   assert.deepEqual(await readPixel(frame, 75, 80), INK, "mirrored too");
@@ -255,15 +255,37 @@ test("paint 1.3.0: fill, mirror, line and box", { skip, timeout: 60000 }, async 
 });
 
 for (const locale of ["zh-CN", "en-US"]) {
-  test(`paint 1.3.0 tool row fits 331x359 (${locale})`, { skip, timeout: 60000 }, async (t) => {
+  test(`paint 1.3.0 menus fit 331x359 and close on an outside tap (${locale})`, { skip, timeout: 60000 }, async (t) => {
     const { p, app, frame, errors } = await open(t, locale);
-    await app.locator("#size").click();
-    const rows = await frame.evaluate(() => [...document.querySelectorAll("button")].filter((b) => b.offsetParent !== null)
-      .map((b) => { const r = b.getBoundingClientRect(); return { id: b.id, w: r.width, h: r.height, sw: b.scrollWidth, cw: b.clientWidth, y: r.y }; }));
-    for (const b of rows) { assert.ok(b.h >= 44 && b.w >= 44, `${b.id} ${b.w}x${b.h}`); assert.ok(b.sw <= b.cw, `${b.id} fits`); }
-    assert.ok(rows.some((b) => b.id === "tmir") && !rows.some((b) => b.id === "sw0"), "the tool row replaces the colours");
-    assert.ok(await frame.evaluate(() => document.scrollingElement.scrollHeight <= innerHeight), "no scrolling");
-    if (process.env.PAINT_SHOTS) await p.screenshot({ path: `${process.env.PAINT_SHOTS}/tools-${locale}.png`, clip: await p.locator("#app").boundingBox() });
+    for (const [btn, pop, items] of [["#tool", "#toolpop", 5], ["#more", "#morepop", 3]]) {
+      await app.locator(btn).click();
+      const r = await frame.evaluate((pop) => {
+        const box = document.querySelector(pop).getBoundingClientRect();
+        const items = [...document.querySelectorAll(pop + " button")].map((b) => {
+          const q = b.getBoundingClientRect(); return { id: b.id, w: q.width, h: q.height, sw: b.scrollWidth, cw: b.clientWidth };
+        });
+        return { top: box.top, bottom: box.bottom, row: document.getElementById("t2").getBoundingClientRect().top, items,
+          scroll: document.scrollingElement.scrollHeight <= innerHeight };
+      }, pop);
+      assert.equal(r.items.length, items);
+      for (const b of r.items) { assert.ok(b.h >= 44 && b.w >= 44, `${b.id} ${b.w}x${b.h}`); assert.ok(b.sw <= b.cw, `${b.id} fits`); }
+      assert.ok(r.top >= 0 && r.bottom <= r.row, `${pop} opens above the bottom row, on screen`);
+      assert.ok(r.scroll, "no scrolling");
+      if (process.env.PAINT_SHOTS) await p.screenshot({ path: `${process.env.PAINT_SHOTS}/${pop.slice(1)}-${locale}.png`, clip: await p.locator("#app").boundingBox() });
+      /* a tap outside (on the canvas) closes the menu and draws nothing */
+      await dot(p, frame, 48, 10);
+      assert.ok(await app.locator(pop).isHidden(), `${pop} closes`);
+      assert.deepEqual(await readPixel(frame, 48, 10), PAPER, "the closing tap did not draw");
+    }
+    /* clear: the first tap asks, closing forgets, two taps clear */
+    await dot(p, frame, 30, 30);
+    await app.locator("#more").click(); await app.locator("#clr").click();
+    assert.deepEqual(await readPixel(frame, 30, 30), INK, "one tap does not clear");
+    await dot(p, frame, 60, 60);
+    await app.locator("#more").click(); await app.locator("#clr").click();
+    assert.deepEqual(await readPixel(frame, 30, 30), INK, "the question was forgotten when the menu closed");
+    await app.locator("#clr").click();
+    assert.deepEqual(await readPixel(frame, 30, 30), PAPER, "the second tap clears");
     assert.deepEqual(errors, []);
   });
 }
