@@ -1346,7 +1346,21 @@ function changeBaziValue(amount) {
   }
   sfx("move");
 }
-function updateBazi() {
+var baziHeld = { dir: 0, t: 0, next: 0 };
+function baziHold(dir, dt) {
+  if (!dir) { baziHeld.dir = 0; return; }
+  if (dir !== baziHeld.dir || game.pressed(dir < 0 ? "left" : "right")) {                  /* a fresh press: one step now */
+    baziHeld.dir = dir; baziHeld.t = 0; baziHeld.next = 0.35;
+    changeBaziValue(dir);
+    return;
+  }
+  baziHeld.t += dt || 0;
+  if (baziHeld.t < baziHeld.next) return;
+  var fast = baziHeld.t > 1.2;
+  baziHeld.next = baziHeld.t + (fast ? 0.05 : 0.09);
+  changeBaziValue(dir * (fast && baziState.field === 0 ? 10 : 1));
+}
+function updateBazi(dt) {
   if (!baziState.loaded) return;
   if (!baziState.saved && !baziState.picker) beginBaziEdit();
   if (baziState.picker) {
@@ -1356,21 +1370,28 @@ function updateBazi() {
       else sfx("tap");
       return;
     }
-    if (game.pressed("left")) { baziState.field = (baziState.field + 3) % 4; sfx("move"); }
-    if (game.pressed("right")) { baziState.field = (baziState.field + 1) % 4; sfx("move"); }
-    if (game.pressed("up")) changeBaziValue(1);
-    if (game.pressed("down")) changeBaziValue(-1);
-    if (game.pressed("a")) saveBazi();
-    var p = game.pointer;
+    /* Up/Down pick the field, Left/Right change its value; holding a key (or a finger on an arrow) repeats,
+       and after a second the year moves ten at a time, so 1990 to 2020 is a short hold, not thirty presses. */
+    if (game.pressed("up")) { baziState.field = (baziState.field + 3) % 4; sfx("move"); }
+    if (game.pressed("down")) { baziState.field = (baziState.field + 1) % 4; sfx("move"); }
+    var p = game.pointer, dir = 0;
+    /* pressed() never misses a tap shorter than a frame; btn() carries the hold */
+    if (game.pressed("left") || game.btn("left")) dir = -1;
+    else if (game.pressed("right") || game.btn("right")) dir = 1;
     if (p.pressed) {
       var row = Math.floor((p.y - 44) / 38);
-      if (row >= 0 && row < 4) {
-        baziState.field = row;
-        if (p.x >= 12 && p.x < 54) changeBaziValue(1);
-        else if (p.x >= 162 && p.x < 204) changeBaziValue(-1);
-      }
-      if (p.y >= 208 && p.y < 239 && p.x > 150) saveBazi();
+      if (row >= 0 && row < 4 && p.y < 44 + 4 * 38) baziState.field = row;
+      if (p.y >= 208 && p.y < 239 && p.x > 150) { saveBazi(); return; }
     }
+    if (p.down && !dir) {
+      var heldRow = Math.floor((p.y - 44) / 38);
+      if (heldRow === baziState.field && heldRow >= 0 && heldRow < 4) {
+        if (p.x >= 12 && p.x < 54) dir = -1;
+        else if (p.x >= 162 && p.x < 204) dir = 1;
+      }
+    }
+    baziHold(dir, dt);
+    if (game.pressed("a")) saveBazi();
     return;
   }
   if (game.pressed("b")) { backToCounter(); return; }
@@ -1392,10 +1413,10 @@ function drawBaziPicker(g) {
     g.text(values[i], CX, y + 18, { align: "center", color: color });
     g.frame(12, y + 1, 40, 32, i === baziState.field ? g.PAPER : g.INK);
     g.frame(164, y + 1, 40, 32, i === baziState.field ? g.PAPER : g.INK);
-    g.line(27, y + 24, 32, y + 15, color);
-    g.line(32, y + 15, 37, y + 24, color);
-    g.line(179, y + 12, 184, y + 21, color);
-    g.line(184, y + 21, 189, y + 12, color);
+    g.line(36, y + 9, 28, y + 17, color);
+    g.line(28, y + 17, 36, y + 25, color);
+    g.line(180, y + 9, 188, y + 17, color);
+    g.line(188, y + 17, 180, y + 25, color);
   }
   if (baziState.failed) {
     var message = T({ zh: "存档读不出，这次不会保存",
@@ -1404,8 +1425,8 @@ function drawBaziPicker(g) {
     for (var line = 0; line < messageLines.length && line < 2; line++)
       g.text(messageLines[line], CX, 184 + line * 13, { align: "center", color: g.DARK });
   }
-  g.text(fitPageText(g, T({ zh: "←→选 ↑↓改 A确认 B返回",
-    en: "←→ field ↑↓ edit A save B back" }), W), CX, 214, { align: "center", color: g.INK });
+  g.text(fitPageText(g, T({ zh: "↑↓选 ←→改(按住快) A确认",
+    en: "↑↓ field ←→ edit A save" }), W), CX, 214, { align: "center", color: g.INK });
   g.text(fitPageText(g, HINT, W), CX, 229, { align: "center", color: g.DARK });
 }
 function drawBaziChart(g) {

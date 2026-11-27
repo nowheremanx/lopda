@@ -571,18 +571,35 @@ test("八字 picker saves a birth chart and shows its counter summary", async ()
   env.app.ctx.get("openSection")("bazi");
   assert.equal(env.app.ctx.get("baziState").picker, true);
   assert.ok(drawnLines(env.app).includes("八字 · 填写"));
-  for (let i = 0; i < 5; i++) env.press("down");
-  env.press("right");
-  for (let i = 0; i < 5; i++) env.press("up");
-  env.press("right");
-  env.press("right");
-  for (let i = 0; i < 7; i++) env.press("up");
+  /* Up/Down pick the field, Left/Right change the value */
+  for (let i = 0; i < 5; i++) env.press("left");
+  env.press("down");
+  for (let i = 0; i < 5; i++) env.press("right");
+  env.press("down");
+  env.press("down");
+  for (let i = 0; i < 7; i++) env.press("right");
   env.press("a");
   assert.deepEqual(env.saves.get("bazi"), { v: 1, y: 1985, m: 6, d: 1, hour: 11 });
   assert.equal(env.app.ctx.get("baziState").chart.dayMaster, "辛金");
   env.press("b");
   const counter = drawnLines(env.app);
   assert.ok(counter.includes("日主 辛金"));
+});
+
+test("八字 picker: holding Right speeds up, and the year then moves ten at a time", async () => {
+  const env = bootStored("zh");
+  await settle();
+  env.app.ctx.get("openSection")("bazi");
+  const state = env.app.ctx.get("baziState");
+  assert.equal(state.field, 0);
+  assert.equal(state.y, 1990);
+  env.app.ctx.get("game").btn = (name) => name === "right";   /* a held key, read every frame */
+  for (let i = 0; i < 30; i++) env.app.frame();                 /* half a second: a few single steps */
+  const slow = state.y;
+  assert.ok(slow > 1990 && slow < 1996, `half a second gave ${slow}`);
+  for (let i = 0; i < 90; i++) env.app.frame();                 /* two seconds in all: tens */
+  assert.ok(state.y >= 2030, `two seconds gave ${state.y}`);
+  assert.ok(state.y <= 2100);
 });
 
 test("八字 rejected reads are not saved; invalid schemas wait for A before overwrite", async () => {
