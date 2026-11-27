@@ -30,3 +30,13 @@ test("a smart run clears every seed, a basic run does not", () => {
   assert.equal(basic.ok, false, "the mine should not be cleared by grabbing only the obvious loot");
   assert.ok(basic.trace.some((r) => r.failed && r.n >= 5), "the basic run should get a few levels in");
 });
+
+test("the last level is not a lottery: the auto-player clears nearly every run seed (#347)", () => {
+  /* 24 seeds spread like the lab's own (tools/lao-zhang-sim.mjs --seeds): at most one may fail */
+  let fails = 0;
+  for (let i = 0; i < 24; i++) {
+    const run = simulateRun(GM, { seed: 424242 + i * 7919, base });
+    if (!run.ok) fails++;
+  }
+  assert.ok(fails <= 1, `${fails} of 24 seeded runs failed`);
+});

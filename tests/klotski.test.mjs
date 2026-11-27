@@ -501,3 +501,15 @@ test("klotski app: a key pressed while a block is still sliding is played when t
   }
   assert.fail("no piece could move right");
 });
+
+test("klotski app: the level list opens on the first level not cleared yet (#342)", async () => {
+  const levels = {};
+  for (const id of ["k01", "k02", "k03", "k04", "k05", "k06", "k07"]) levels[id] = { best: 30, clean: 0, plays: 1, last: 30, at: 1 };
+  const { app } = await bootApp({ klotski: { v: 1, levels, lessons: {}, current: {}, seenHelp: 1 } });
+  const game = app.ctx.get("game");
+  game.go("levels", null, { fade: false });
+  run(app, 3);
+  const list = app.ctx.get("levelList");
+  assert.equal(list.list[list.sel].id, "k08");
+  assert.ok(list.sel >= list.top && list.sel < list.top + 5, "the row is on the screen");
+});

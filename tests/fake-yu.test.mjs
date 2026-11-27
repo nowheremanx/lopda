@@ -431,3 +431,40 @@ test("song list: no DARK on a MID band", async () => {
   assert.ok(bands >= 1, "the list shows at least one MID band");
   assert.equal(dark, 0, "DARK pixels on a MID band");
 });
+
+test("story: all ten tunes played without the curtain still reaches the ending, not act one (#315)", async () => {
+  const h = harness(APP, 7, "zh");
+  await h.frame(6);
+  const profile = h.app.ctx.get("profile");
+  profile.story = 10; profile.truth = true; profile.finale = { rank: "A", failed: false };
+  h.app.ctx.get("startStory")();
+  await h.frame(90);
+  assert.equal(h.app.ctx.get("endingKey"), "trueSong", "the told truth and a good last tune");
+  assert.equal(profile.endings.trueSong, true, "the ending is recorded");
+  assert.equal(profile.story, 0, "the next story starts over");
+  assert.equal(profile.finale, undefined, "the last tune's result is used once");
+  /* a save from before the finale was kept: the last tune's best result stands in */
+  profile.story = 10; profile.truth = false; profile.best.serenade = { score: 1, rank: "C" };
+  h.app.ctx.get("startStory")();
+  await h.frame(90);
+  assert.equal(h.app.ctx.get("endingKey"), "horses");
+});
+
+test("pause: the notes the resume skips count as misses and stay in the total (#317)", async () => {
+  const h = harness(APP, 7, "zh");
+  await h.frame(6);
+  h.game.go("play", { i: 0 }, { fade: false });
+  await h.frame(2);
+  const P = h.app.ctx.get("P"), total = P.total;
+  /* stop just after the first note's time, before it is judged: the rest of its bar is skipped */
+  P.t = P.chart[0].t + 0.01;
+  h.app.ctx.get("openPause")(P);
+  P.pause.resumeBeat = h.app.ctx.get("nextResumeBeat")(P);
+  const resumeT = P.pause.resumeBeat * 60 / P.song.bpm;
+  const skipped = P.chart.filter((n) => n.t < resumeT - 0.001).length;
+  assert.ok(skipped > 0, "the bar holds notes");
+  h.app.ctx.get("finishCountdown")(P);
+  assert.equal(P.total, total, "the total keeps every note");
+  assert.equal(P.miss, skipped, "each skipped note is a miss");
+  assert.equal(P.suspicion, 0, "a pause raises no suspicion");
+});

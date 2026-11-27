@@ -11822,7 +11822,7 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
       outline: document.getElementById("cover-btn").classList.contains("outline"),
       title: document.getElementById("cover-text").textContent,
       size: [root.clientWidth, root.clientHeight],
-      fit: [document.getElementById("cover-text"), ...rows, detail, document.getElementById("cover-btn")].every((el) => {
+      fit: [document.getElementById("cover-text"), ...rows, detail, document.getElementById("cover-btn"), document.getElementById("cover-btn2")].every((el) => {
         const r = el.getBoundingClientRect();
         return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
       }),
@@ -11901,12 +11901,6 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   const backToNext = await cardState();
   assert.equal(backToNext.picked, -1, "Up from the first word goes back to NEXT");
   assert.equal(backToNext.detail, summary, "NEXT shows the summary again");
-  /* B on NEXT does nothing: the card stays, and no word book call is made */
-  await press("b");
-  const afterBNext = await cardState();
-  assert.equal(afterBNext.picked, -1, "B on NEXT leaves the cursor on NEXT");
-  assert.equal(await f.evaluate(() => game.phase), "done", "B on NEXT keeps the results card up");
-  assert.equal(afterBNext.detail, summary, "B on NEXT changes nothing");
   await press("up");
   const lastWord = await cardState();
   assert.equal(lastWord.picked, round.placed.length - 1, "Up from NEXT goes to the last word");
@@ -11917,8 +11911,17 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.equal(ring.picked, -1, "Down from the last word wraps to NEXT");
   assert.equal(ring.outline, false);
   assert.match(await p.textContent("#log"), /music play once/, "the clear plays its tune");
-  /* a word book call just before START shares the 10-a-second PAD.dict limit: the round waits out that window,
-     so the test does not need to pause here */
+  /* the card has a way back to the title (#302): a TITLE button beside NEXT, and B on NEXT does the same.
+     The round is saved already, so the title continues at round 2 and A there starts it. */
+  assert.equal(await f.evaluate(() => { const b = document.getElementById("cover-btn2"); return !b.hidden && getComputedStyle(b).display !== "none" ? b.textContent : ""; }),
+    "标题", "the results card offers TITLE");
+  const bookCallsBeforeB = await bookCalls();
+  await press("b");
+  await f.waitForFunction(() => game.phase === "title");
+  assert.equal(await bookCalls(), bookCallsBeforeB, "B on NEXT makes no word book call");
+  const continuedFromCard = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  assert.equal(continuedFromCard[0], "继续 · 第 2 关", "B on NEXT goes to the title, which continues at round 2");
+  await p.waitForTimeout(350);         /* the title's 300 ms tap guard */
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
 

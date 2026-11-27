@@ -343,7 +343,16 @@ function undo(){
   if(mode==='link')return;   // no undo in a match: the two boards must stay the same game
   // a stone still waiting to go down is the first thing undo takes back
   if(pick&&!over&&!busy){unpick();tipEl.textContent=TXT.tip;PAD.sfx('miss');draw();return;}
-  if(over||busy||hist.length<2)return;
+  // white is still thinking: undo takes back black's stone and white never moves (the button is never dead)
+  if(busy&&!over){
+    clearTimeout(aiT);busy=false;
+    var s=hist.pop();b[s[1]][s[0]]=0;
+    unpick();turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;
+    last=hist.length?hist[hist.length-1]:null;
+    PAD.sfx('miss');draw();return;
+  }
+  // nothing to take back, or the game is over: say so with the error sound rather than doing nothing
+  if(over||hist.length<2){PAD.sfx('err');return;}
   for(var k=0;k<2;k++){var m=hist.pop();b[m[1]][m[0]]=0;}
   unpick();tipEl.textContent=TXT.tip;
   last=hist.length?hist[hist.length-1]:null;
