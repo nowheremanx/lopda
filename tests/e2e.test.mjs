@@ -8495,6 +8495,44 @@ test("sensor: an app without the permission gets denied and no dialog", { skip, 
   assert.equal(await p.evaluate(() => window.__asked + window.__gum), 0);
 });
 
+test("sensor: after a relaunch, a start right after a tap in the app needs no bar; refused there, the bar comes", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await sensePage(t);
+  let f = await runSenseApp(p);
+  f.evaluate(() => { go("mic"); });
+  await p.waitForSelector("#file-ask .box"); await p.click("#file-ok");
+  await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on");
+  await until(p, () => p.evaluate(() => new Promise((res) => { const r = indexedDB.open("lopda"); r.onsuccess = () => { const g = r.result.transaction("docs").objectStore("docs").get("data/users/local/sensors"); g.onsuccess = () => { r.result.close(); res(!!(g.result && g.result.data.apps["sense-test"])); }; }; })), "the grant stored");
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.waitForTimeout(300);
+  f = await runSenseApp(p);
+  /* the app's own button was just tapped: the outer page has the activation */
+  await p.evaluate(() => Object.defineProperty(navigator, "userActivation", { value: { isActive: true }, configurable: true }));
+  f.evaluate(() => { go("mic"); });
+  await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on without the bar");
+  assert.equal(await p.locator("#sense-tap").count(), 0);
+  assert.equal(await p.evaluate(() => window.__gum), 1, "one system prompt, from the app's own tap");
+  /* a phone that refuses without its own gesture: the bar comes, and its tap turns the mic on */
+  f.evaluate(() => { PAD.mic.stop(); });
+  await p.reload({ waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.waitForTimeout(300);
+  f = await runSenseApp(p);
+  await p.evaluate(() => {
+    Object.defineProperty(navigator, "userActivation", { value: { isActive: true }, configurable: true });
+    const real = navigator.mediaDevices.getUserMedia;
+    navigator.mediaDevices.getUserMedia = (c) => { if (window.__refuseOnce) { window.__refuseOnce = false; window.__gum++; return Promise.reject(new DOMException("no gesture", "NotAllowedError")); } return real(c); };
+    window.__refuseOnce = true;
+  });
+  f.evaluate(() => { go("mic"); });
+  await p.waitForSelector("#sense-tap");
+  assert.equal(await p.textContent("#sense-tap"), "点一下开启麦克风");
+  await p.click("#sense-tap");
+  await until(p, async () => (await R(f)).results.includes("mic:on"), "mic on after the bar");
+  assert.equal((await R(f)).results.includes("mic:denied"), false, "the refused try never reached the app");
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
 test("sensor: after a relaunch an allowed app gets the tap bar; settings revoke brings the dialog back", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await sensePage(t);
   let f = await runSenseApp(p);
@@ -8507,6 +8545,8 @@ test("sensor: after a relaunch an allowed app gets the tap bar; settings revoke 
   await p.waitForFunction(() => window.LP && window.LP.S.db);
   await p.waitForTimeout(300);
   f = await runSenseApp(p);
+  /* no tap in the app just before (Playwright's evaluate counts as one in Chromium, so the page is told there was none) */
+  await p.evaluate(() => Object.defineProperty(navigator, "userActivation", { value: { isActive: false }, configurable: true }));
   f.evaluate(() => { go("motion"); });
   await p.waitForSelector("#sense-tap");
   assert.equal(await p.textContent("#sense-tap"), "点一下开启倾斜感应");

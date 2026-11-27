@@ -433,7 +433,8 @@ shows its own dialog over it (`「迷宫」要用倾斜感应。 允许 / 不允
 does nothing while it is on). A, or a tap on 允许, allows it and the phone's own prompt may follow; B or 不允许 resolves
 `"denied"`, and the next `start()` asks again. An allowed app is remembered (the player can revoke it in Settings). The phone may still ask again after the handheld is reopened: then a one-line bar
 (`点一下开启倾斜感应`) waits for the player's tap, because the phone takes the answer only from a tap on the handheld
-itself. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
+itself. From runtime 1.7.0, a `start()` called right after a tap inside the app tries that tap first, so an app that
+starts the sensor from its own button usually skips the bar; the bar still comes when the phone refuses it. `start()` resolves `"on"`, `"denied"` (the player or the phone said no, or the manifest lacks the permission)
 or `"none"` (no such sensor: a desktop, an old phone). Without the permission there is no dialog: `"denied"` at once,
 an error in the dev harness, and the checker fails the app.
 
