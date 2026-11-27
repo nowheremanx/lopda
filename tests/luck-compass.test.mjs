@@ -738,7 +738,7 @@ test("explanation data, gua results and details fit in both languages", async ()
     const changed = env.app.ctx.get("YI").changed(state.lines);
     if (changed) assert.ok(result.some((line) => line.includes("变卦") || line.includes("Changed:")));
     for (const line of result) assert.ok(g.measure(line) <= SCREEN_W, `${lang} result: ${line}`);
-    const expectedKey = lang === "zh" ? "START记事本 · SELECT详解" : "START notes · SELECT more";
+    const expectedKey = lang === "zh" ? "←→选择 · A确认 · SELECT详解" : "←→ pick · A ok · SELECT more";
     assert.ok(result.join(" ").includes(expectedKey));
     env.press("select");
     const details = drawnLines(env.app);
@@ -780,3 +780,32 @@ test("the coins on screen are the ones that made the line: backs 0-3 give 6, 7, 
     assert.equal(env.app.ctx.get("guaToss"), null);
   }
 });
+
+test("八卦 after a cast: Left/Right pick 写入记事本 or 不写, A presses it", async () => {
+  const done = [9, 7, 8, 6, 7, 8];
+  const skip = bootStored("zh", { v: 1, day: todayKeyForTest(), lines: done });
+  await settle();
+  skip.app.ctx.get("openSection")("hexagram");
+  skip.press("right");
+  assert.equal(skip.app.ctx.get("guaChoice"), 1);
+  skip.press("a");
+  await settle();
+  assert.equal(skip.appends.length, 0, "不写 writes nothing");
+  assert.equal(skip.app.ctx.get("guaButtonsShown")(), false);
+
+  const write = bootStored("zh", { v: 1, day: todayKeyForTest(), lines: done });
+  await settle();
+  write.app.ctx.get("openSection")("hexagram");
+  write.press("right");
+  write.press("left");
+  write.press("a");
+  await settle();
+  assert.equal(write.appends.length, 1);
+  assert.equal(write.appends[0].title, "八卦");
+  assert.equal(write.saves.get("gua").written, true);
+});
+
+function todayKeyForTest() {
+  const d = new Date(), p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}

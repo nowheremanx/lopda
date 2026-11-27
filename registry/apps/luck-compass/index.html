@@ -2367,12 +2367,20 @@ function syncSlipDate() {
 var guaState = { day: todayKey(), lines: [], loaded: false, failed: false, animating: false, written: false };
 var guaScroll = 0, guaExplain = false, guaExplainScroll = 0;
 var guaAppendBusy = false, guaAppendStatus = "";
+/* after a cast, like the slip: 写入记事本 / 不写, Left/Right and A; "skip" lasts for this visit only */
+var guaChoice = 0, guaSkipped = false;
+function guaButtonsShown() {
+  return guaState.lines.length === 6 && !guaState.animating && !guaState.written && !guaSkipped && !guaAppendBusy;
+}
+function guaArea() { return { x: 9, y: 22, w: 198, h: guaButtonsShown() ? 150 : 183 }; }
 function syncGuaDate() {
   var key = todayKey();
   if (key === guaState.day) return;
   guaState.day = key;
   guaState.lines = [];
   guaState.written = false;
+  guaSkipped = false;
+  guaChoice = 0;
   guaState.animating = false;
   guaAppendStatus = "";
   guaScroll = 0;
@@ -3291,6 +3299,11 @@ function drawTossCoins(g) {
   ];
   g.text(T(names[backs]), CX, TABLE_Y + COIN_R + 5, { align: "center", color: g.INK });
 }
+function pickGuaChoice() {
+  sfx("tap");
+  if (guaChoice === 0) appendGua();
+  else guaSkipped = true;
+}
 function updateHexagram(dt) {
   syncGuaDate();
   if (guaExplain) { updateGuaExplain(dt); return; }
@@ -3305,8 +3318,16 @@ function updateHexagram(dt) {
   if (guaState.lines.length === 6 && !guaState.animating) {
     var rows = guaResultRows(game.g), total = 0;
     for (var i = 0; i < rows.length; i++) total += rows[i].height;
-    guaScroll = scrollUpdate(guaScroller, { x: 9, y: 22, w: 198, h: 183 }, total, dt, game.g.lineHeight || 14);
+    guaScroll = scrollUpdate(guaScroller, guaArea(), total, dt, game.g.lineHeight || 14);
+    if (guaButtonsShown()) {
+      if (game.pressed("left")) { guaChoice = 0; sfx("move"); }
+      if (game.pressed("right")) { guaChoice = 1; sfx("move"); }
+      var tap = game.pointer;
+      if (tap.pressed && tap.y >= 176 && tap.y < 207) { guaChoice = tap.x < 108 ? 0 : 1; pickGuaChoice(); return; }
+      if (game.pressed("a")) { pickGuaChoice(); return; }
+    }
     if (game.pressed("start")) appendGua();
+    return;
   }
   var p = game.pointer;
   if (p.pressed && !guaState.animating && guaState.lines.length < 6 && p.y >= 40 && p.y <= 205) tossGuaLine();
@@ -3322,9 +3343,10 @@ function drawHexagram(g) {
   } else if (guaState.lines.length === 6) {
     var rows = guaResultRows(g), total = 0, y = 22 - guaScroller.offset;
     for (var i = 0; i < rows.length; i++) total += rows[i].height;
-    guaScroller.max = Math.max(0, total - 183);
+    var area = guaArea();
+    guaScroller.max = Math.max(0, total - area.h);
     guaScroll = guaScroller.offset;
-    g.clip(9, 22, 198, 183);
+    g.clip(area.x, area.y, area.w, area.h);
     for (i = 0; i < rows.length; i++) {
       var row = rows[i];
       if (row.type === "figure") {
@@ -3342,7 +3364,15 @@ function drawHexagram(g) {
       y += row.height;
     }
     g.clip();
-    drawScrollbar(g, guaScroller, { x: 9, y: 22, w: 198, h: 183 }, total);
+    drawScrollbar(g, guaScroller, area, total);
+    if (guaButtonsShown()) {
+      var labels = [T({ zh: "写入记事本", en: "To notes" }), T({ zh: "不写", en: "Skip" })], bx = [8, 110];
+      for (var bi = 0; bi < 2; bi++) {
+        g.rect(bx[bi], 176, 98, 31, bi === guaChoice ? g.INK : g.PAPER);
+        g.frame(bx[bi], 176, 98, 31, g.INK);
+        g.text(labels[bi], bx[bi] + 49, 185, { align: "center", color: bi === guaChoice ? g.PAPER : g.INK });
+      }
+    }
   } else {
     if (!guaState.lines.length) g.text(T({ zh: "心里想一个问题，再起卦", en: "Hold one question in mind, then cast" }), 6, 42,
       { align: "center", color: g.INK, width: 204 });   /* with a width, align centres inside it from x */
@@ -3353,9 +3383,12 @@ function drawHexagram(g) {
     if (guaState.failed && !guaState.animating) g.text(T({ zh: "存档读不出，今天不会保存",
       en: "Could not read the save; today won't be saved" }), CX, 190, { align: "center", color: g.DARK, width: 210 });
   }
-  var key = guaState.lines.length === 6 ?
-    T({ zh: "START记事本 · SELECT详解", en: "START notes · SELECT more" }) :
-    T({ zh: "A 起卦", en: "A cast" });
+  var key = guaState.lines.length !== 6 ? T({ zh: "A 起卦", en: "A cast" }) :
+    guaAppendBusy ? T({ zh: "正在写入…", en: "Saving…" }) :
+    guaButtonsShown() ? T({ zh: "←→选择 · A确认 · SELECT详解", en: "←→ pick · A ok · SELECT more" }) :
+    guaState.written ? T({ zh: "已写入 · SELECT详解", en: "Saved · SELECT more" }) :
+    guaAppendStatus === "denied" ? T({ zh: "没有写入 · SELECT详解", en: "Not saved · SELECT more" }) :
+    T({ zh: "START记事本 · SELECT详解", en: "START notes · SELECT more" });
   var keyLines = g.wrap(key, W);
   for (var ki = 0; ki < keyLines.length; ki++)
     g.text(keyLines[ki], CX, 211 + ki * (g.lineHeight || 14), { align: "center", color: g.INK });
@@ -3449,7 +3482,7 @@ game.scene("compass", {
   }
 });
 game.scene("hexagram", {
-  enter: function () { section = "hexagram"; guaScroll = 0; syncGuaDate(); syncMotion(); },
+  enter: function () { section = "hexagram"; guaScroll = 0; guaSkipped = false; guaChoice = 0; syncGuaDate(); syncMotion(); },
   update: updateHexagram,
   draw: function (g) { if (guaExplain) drawGuaExplain(g); else drawHexagram(g); }
 });
