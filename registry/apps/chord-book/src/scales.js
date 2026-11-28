@@ -35,7 +35,7 @@ var Scales = (function () {
     phrygian:   { zh: "Phrygian", en: "Phrygian", iv: [0, 1, 3, 5, 7, 8, 10], lab: ["R", "b9", "b3", "11", "5", "b13", "b7"],
       why: { zh: "b9 带一点西班牙味。", en: "The b9 gives it a Spanish colour." } },
     locrian:    { zh: "Locrian", en: "Locrian", iv: [0, 1, 3, 5, 6, 8, 10], lab: ["R", "b9", "b3", "11", "b5", "b13", "b7"],
-      why: { zh: "半减七和弦自己的音阶。", en: "The half-diminished chord's own scale." } },
+      why: { zh: "减三和弦的 Locrian（大调 vii°），半减七也用它。", en: "Locrian, the scale of the major key's vii°, also the half-diminished chord's." } },
     locrian2:   { zh: "Locrian #2", en: "Locrian #2", iv: [0, 2, 3, 5, 6, 8, 10], lab: ["R", "9", "b3", "11", "b5", "b13", "b7"],
       why: { zh: "Locrian 把 b9 换成 9，更顺耳。", en: "Locrian with 9 instead of b9: smoother." } },
     whdim:      { zh: "全半减音阶", en: "Whole-half diminished", iv: [0, 2, 3, 5, 6, 8, 9, 11], lab: ["R", "9", "b3", "11", "b5", "b13", "13", "7"],
@@ -47,7 +47,7 @@ var Scales = (function () {
     harmmin:    { zh: "和声小调", en: "Harmonic minor", iv: [0, 2, 3, 5, 7, 8, 11], lab: ["R", "9", "b3", "11", "5", "b13", "7"],
       why: { zh: "b13 到 7 隔了一个半全音，有中东味。", en: "The wide gap from b13 to 7 sounds Middle Eastern." } },
     majpent:    { zh: "大调五声", en: "Major pentatonic", iv: [0, 2, 4, 7, 9], lab: ["R", "9", "3", "5", "13"],
-      why: { zh: "大调去掉 4 和 7，五个音都不撞，最不容易弹错。", en: "Major without 4 and 7: nothing clashes, the hardest to get wrong." } },
+      why: { zh: "大调去掉 4 和 7，五个音都不撞，最不容易弹错；maj7 上再把 7 作为和弦音补回来。", en: "Major without 4 and 7: nothing clashes, the hardest to get wrong; on a maj7 the 7 comes back as a chord tone." } },
     minpent:    { zh: "小调五声", en: "Minor pentatonic", iv: [0, 3, 5, 7, 10], lab: ["R", "b3", "11", "5", "b7"],
       why: { zh: "五个音都不撞，摇滚和布鲁斯的即兴多从这里开始。", en: "Five notes, nothing clashes. Rock and blues solos start here." } },
     blues:      { zh: "布鲁斯音阶", en: "Blues scale", iv: [0, 3, 5, 6, 7, 10], lab: ["R", "b3", "11", "b5", "5", "b7"],
@@ -93,6 +93,8 @@ var Scales = (function () {
       n.pc = mod12(c.root + v);
       return n;
     });
+    /* the line reads left to right, and a 9 is an extension: it goes last, so the scale's own run stays in pitch order */
+    var line = notes.filter(function (n) { return n.lab !== "9"; }).concat(notes.filter(function (n) { return n.lab === "9"; }));
     /* the avoid notes said in words after the scale's own line: which chord tone each sits a half step over, or for a
        sus4 that the 3 would undo the suspension */
     var zh = [], en = [];
@@ -105,7 +107,7 @@ var Scales = (function () {
     });
     var why = { zh: sc.why.zh + (zh.length ? zh.join("，") + "，经过就好，别停在上面。" : ""),
       en: sc.why.en + (en.length ? " " + en.join(", ") + ": pass through, don't hold it." : "") };
-    return { id: pair[0], zh: sc.zh, en: sc.en, why: why, notes: notes };
+    return { id: pair[0], zh: sc.zh, en: sc.en, why: why, notes: notes, line: line };
   }
   /* a chord's scales {list, def, inKey}: def is the one to show first. With ctx {key: tonic pc, minor} it is the first
      seven-note scale whose notes all lie in the key's scale or the chord (inKey true); otherwise, or when none does, 0. */

@@ -7,25 +7,25 @@
   var T = EN ? {
     strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
-    search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
+    search: "C#m7b5, D/F#, Bbmaj7", unknown: "This book has 19 qualities ({q} is not one)", unknownEmpty: "Type a chord name", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
-    listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
+    listen: "Play", noChord: "Not one of this book's 19 qualities", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
-    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k}. "
+    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k} plus this chord's notes. "
   } : {
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
-    search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
+    search: "C#m7b5、D/F#、Bbmaj7", unknown: "这个版本只收 19 种和弦（认不出 {q}）", unknownEmpty: "先输入一个和弦名", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
-    listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
+    listen: "听", noChord: "不是这一版的 19 种和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
     role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
-    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}选的。"
+    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}和这个和弦的音选的。"
   };
-  function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
+  function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.split("{" + v + "}").join(vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
   function sfx(n) { try { PAD.sfx(n); } catch (e) {} }
@@ -45,7 +45,20 @@
     if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
-    if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
+    /* a save from before 1.4.2 may hold Ammaj7: show it as Am(maj7), once */
+    if (Array.isArray(s.recent)) {
+      var seen = {};
+      set.recent = [];
+      s.recent.forEach(function (n) {
+        var c = typeof n === "string" ? Chords.parse(n) : null;
+        if (!c) return;
+        var name = Chords.name(c);
+        if (seen[name]) return;
+        seen[name] = true;
+        set.recent.push(name);
+      });
+      set.recent = set.recent.slice(0, 8);
+    }
   }
   function chord() { return { root: set.cur.root, q: set.cur.q, bass: set.cur.bass }; }
   function list() {
@@ -125,7 +138,7 @@
     line.classList.remove("tight");
     line.classList.add("deg");
     line.innerHTML = "";
-    o.notes.forEach(function (n, i) {
+    o.line.forEach(function (n, i) {
       if (i) line.appendChild(document.createTextNode(" "));
       line.appendChild(el(n.kind === "a" ? "s" : n.kind === "t" ? "span" : "b", "", n.lab));
     });
@@ -286,7 +299,7 @@
       Chords.QUALS.forEach(function (Q) {
         if (Q.group !== gi) return;
         var b = choice("", pick.q === Q.id, function () { pick.q = Q.id; sfx("tick"); buildPicker(); }, "qual");
-        b.appendChild(el("b", "", Q.id || "maj"));
+        b.appendChild(el("b", "", Q.show || Q.id || "maj"));
         b.appendChild(el("span", "", EN ? Q.en : Q.zh));
         grid.appendChild(b);
       });
@@ -317,8 +330,8 @@
   }
   function applyPick() { sfx("ok"); go(pick, 0); closePicker(); }
   function search() {
-    var c = Chords.parse($("q").value);
-    if (!c) { $("msg").textContent = t("unknown"); sfx("err"); return; }
+    var q = $("q").value.trim(), c = Chords.parse(q);
+    if (!c) { $("msg").textContent = q ? t("unknown", { q: q }) : t("unknownEmpty"); sfx("err"); return; }
     $("q").blur();
     pick = c; applyPick();
   }
@@ -357,6 +370,8 @@
       head.appendChild(el("span", "", t(p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName })));
       card.appendChild(head);
       card.appendChild(el("div", "grn", p.rn.join(" - ")));
+      if (p.legend) card.appendChild(el("div", "grn", EN ? p.legend.en : p.legend.zh));
+      if (p.bars) card.appendChild(el("div", "grn", (EN ? "bars: " : "小节：") + p.bars.join(" ")));
       var chips = el("div", "chips grid4");
       r.chords.forEach(function (x, i) {
         var b = choice(r.names[i], seq.card === n && seq.i === i, function () { jumpTo(r, i); });
@@ -374,7 +389,8 @@
     });
   }
   function stopSeq() { clearTimeout(seq.timer); seq = { timer: 0, card: -1, i: -1 }; }
-  /* one strum per chord, a second apart; the chord sounding is filled. A second tap on Play stops it. */
+  /* one strum a bar, a second a bar; a chord holds for its p.bars[i] bars (the twelve-bar blues has four bars of I7),
+     the chord sounding is filled. A second tap on Play stops it. */
   function playProg(n) {
     var again = seq.card === n;
     stopSeq(); Guitar.stop();
@@ -382,16 +398,17 @@
     var r = gl[n];
     /* the switch at Off means silence, not an error (1.4.1) */
     if (!Guitar.level()) return;
-    function at(i) {
+    function at(i, bar) {
       if (!gl || document.hidden) { stopSeq(); return; }
       if (i >= r.chords.length) { stopSeq(); buildProgs(); return; }
       seq.card = n; seq.i = i;
       var v = voicingFor(r, i);
       if (v) Guitar.play(Chords.midiOf(v.frets), 0.012);
       buildProgs();
-      seq.timer = setTimeout(function () { at(i + 1); }, 1000);
+      var bars = (r.p.bars && r.p.bars[i]) || 1;
+      seq.timer = setTimeout(function () { if (bar + 1 < bars) at(i, bar + 1); else at(i + 1, 0); }, 1000);
     }
-    at(0);
+    at(0, 0);
   }
   /* a chord in a progression opens it on the main screen, on the voicing it was played with */
   function jumpTo(r, i) {

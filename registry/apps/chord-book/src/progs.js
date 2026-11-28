@@ -8,7 +8,9 @@ var Progs = (function () {
   function mod12(n) { return ((n % 12) + 12) % 12; }
 
   /* ch: [semitones from the key's tonic, quality id, bass in semitones from the tonic (slash chords only)];
-     rn: each chord's Roman numeral; key: "maj" or "min" (the tonic of a minor key is its i) */
+     rn: each chord's Roman numeral; bassStep: the 0-based key degree of a slash bass, so V6 is spelled from the numeral
+     itself; legend: a line under the numerals when it teaches their inversions; key: "maj" or "min" (the tonic of a
+     minor key is its i) */
   var LIST = [
     { id: "pop", key: "maj", zh: "流行四和弦", en: "Pop four",
       ch: [[0, ""], [7, ""], [9, "m"], [5, ""]], rn: ["I", "V", "vi", "IV"],
@@ -49,7 +51,8 @@ var Progs = (function () {
       } },
     { id: "canon", key: "maj", zh: "卡农进行", en: "Canon progression",
       ch: [[0, ""], [7, "", 11], [9, "m"], [4, "m", 7], [5, ""], [0, "", 4], [5, ""], [7, ""]],
-      rn: ["I", "V/7", "vi", "iii/5", "IV", "I/3", "IV", "V"],
+      rn: ["I", "V6", "vi", "iii6", "IV", "I6", "IV", "V"], bassStep: [null, 6, null, 4, null, 2, null, null],
+      legend: { zh: "6 = 第一转位（三音在低音），6/4 = 第二转位（五音在低音）", en: "6 = first inversion (third in the bass), 6/4 = second inversion (fifth in the bass)" },
       why: {
         zh: "低音从主音一级一级往下走（do、ti、la、sol、fa、mi），上面的和弦跟着换；斜线和弦就是为了把低音排成这一条线。这是帕赫贝尔《卡农》（17 世纪，公有领域）的骨架。",
         en: "The bass walks down the scale from the tonic (do, ti, la, sol, fa, mi) while the chords change above it; the slash chords are there to keep that line. It is the frame of Pachelbel's Canon (17th century, public domain)."
@@ -87,8 +90,8 @@ var Progs = (function () {
     { id: "sus", key: "maj", zh: "挂留与解决", en: "Suspensions resolving",
       ch: [[0, "sus2"], [0, "sus4"], [0, ""]], rn: ["Isus2", "Isus4", "I"],
       why: {
-        zh: "挂留和弦没有三音，听不出大小，像悬在半空。挂二的二音、挂四的四音最后都落到三音上，和弦才「落地」。",
-        en: "A sus chord has no 3rd, so it is neither major nor minor and seems to hang. The 2 and the 4 both settle onto the 3rd, and only then does the chord land."
+        zh: "挂留和弦没有三音，听不出大小，像悬在半空。挂二的二音往上、挂四的四音往下，最后都落到三音上，和弦才「落地」。",
+        en: "A sus chord has no 3rd, so it is neither major nor minor and seems to hang. The 2 rises and the 4 falls, both onto the 3rd, and only then does the chord land."
       } },
     { id: "dom-sus", key: "maj", zh: "属七挂四", en: "Dominant sus",
       ch: [[7, "7sus4"], [7, "7"], [0, ""]], rn: ["V7sus4", "V7", "I"],
@@ -97,16 +100,16 @@ var Progs = (function () {
         en: "V7sus4 swaps the leading tone for the tonic, holding the dominant's tension back; the 4 falls to the 3rd (the leading tone), the tension arrives, and then it resolves to I. Two resolutions in a row."
       } },
     { id: "cliche", key: "maj", zh: "半音线（大调）", en: "Line cliché (major)",
-      ch: [[0, ""], [0, "aug"], [0, "6"], [0, "7"], [5, ""]], rn: ["I", "I+", "I6", "I7", "IV"],
+      ch: [[0, ""], [0, "aug"], [0, "6"], [0, "7"], [5, ""]], rn: ["I", "I+", "I(add6)", "I7", "IV"],
       why: {
         zh: "根音不动，只有一个声部从五音半音往上爬（C 调里 G、G#、A、Bb），一条线把四个和弦串起来；最后 Bb 落到 IV 的三音 A。常用来做过门。",
         en: "The root stays while one voice climbs from the 5th in half steps (in C: G, G#, A, Bb), threading four chords on one line; the Bb then falls to the A of IV. A favourite way into a new section."
       } },
     { id: "minor-cliche", key: "min", zh: "半音线（小调）", en: "Line cliché (minor)",
-      ch: [[0, "m"], [0, "mmaj7"], [0, "m7"], [0, "m6"]], rn: ["i", "i(maj7)", "i7", "i6"],
+      ch: [[0, "m"], [0, "mmaj7"], [0, "m7"], [0, "m6"]], rn: ["i", "i(maj7)", "i7", "i(add6)"],
       why: {
-        zh: "根音上面的那个声部半音往下走（A 小调里 A、G#、G、F#），和弦名字变了四次，其实只有一个音在动。小大七那一下最紧张，很像电影里的悬疑配乐。",
-        en: "The voice above the root slides down in half steps (in A minor: A, G#, G, F#): four chord names, one moving note. The minor-major 7th is the tense one, the sound of a film's suspense scene."
+        zh: "根音不动，一个声部 G#→G→F# 半音下行（A 小调里）；四个和弦名字变了，其实只有一个音在动。小大七那一下最紧张，很像电影里的悬疑配乐。",
+        en: "The root stays while one voice falls G#-G-F# in half steps (in A minor): four chord names, one moving note. The minor-major 7th is the tense one, the sound of a film's suspense scene."
       } },
     { id: "dim-passing", key: "maj", zh: "减七经过", en: "Passing diminished",
       ch: [[0, ""], [1, "dim7"], [2, "m"], [7, ""]], rn: ["I", "#I°7", "ii", "V"],
@@ -116,9 +119,10 @@ var Progs = (function () {
       } },
     { id: "blues", key: "maj", zh: "十二小节布鲁斯", en: "Twelve-bar blues",
       ch: [[0, "7"], [5, "7"], [0, "7"], [7, "7"], [5, "7"], [0, "7"]], rn: ["I7", "IV7", "I7", "V7", "IV7", "I7"],
+      bars: [4, 2, 2, 1, 1, 2],
       why: {
-        zh: "四小节 I7、两小节 IV7、两小节 I7，然后 V7、IV7、I7 各一或两小节。三个都是属七和弦，按规矩都该解决，布鲁斯偏不解决，这股一直绷着的劲就是它的味道。",
-        en: "Four bars of I7, two of IV7, two of I7, then V7, IV7 and I7 to finish. All three are dominant 7ths that by the rules should resolve, and the blues never lets them: that unrelieved pull is its flavour."
+        zh: "四小节 I7、两小节 IV7、两小节 I7、一小节 V7、一小节 IV7、两小节 I7。三个都是属七和弦，按规矩都该解决，布鲁斯偏不解决，这股一直绷着的劲就是它的味道。",
+        en: "Four bars of I7, two of IV7, two of I7, one of V7, one of IV7 and two of I7. All three are dominant 7ths that by the rules should resolve, and the blues never lets them: that unrelieved pull is its flavour."
       } },
     { id: "power", key: "maj", zh: "强力和弦摇滚", en: "Power-chord rock",
       ch: [[0, "5"], [10, "5"], [5, "5"]], rn: ["I5", "bVII5", "IV5"],
@@ -194,8 +198,8 @@ var Progs = (function () {
     var root = letter(tonic, stepOf(rn), c.root) || Chords.NAMES[c.root];
     var out = root + Chords.name({ root: 0, q: c.q, bass: null }).slice(1);
     if (c.bass !== null) {
-      var m = /\/(\d)$/.exec(rn);
-      out += "/" + ((m && letter(tonic, +m[1] - 1, c.bass)) || Chords.NAMES[c.bass]);
+      var step = p.bassStep && p.bassStep[i] != null ? p.bassStep[i] : null;
+      out += "/" + ((step !== null && letter(tonic, step, c.bass)) || Chords.NAMES[c.bass]);
     }
     return out;
   }

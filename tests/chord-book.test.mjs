@@ -157,6 +157,8 @@ test("names: every chord's name reads back as the same chord; aliases and enharm
   same("C°7", "Cdim7"); same("Co", "Cdim"); same("C+", "Caug"); same("Csus", "Csus4"); same("Cadd2", "Cadd9");
   same("CmM7", "Cmmaj7"); same("Cm(maj7)", "Cmmaj7"); same("C#m7b5", "Dbm7b5"); same("E♭m", "Ebm"); same("D#", "Eb");
   same("CMAJ7", "Cmaj7"); same("c", "C"); same(" G / B ", "G/B"); same("Fb", "E"); same("B#", "C"); same("C/C", "C");
+  assert.equal(C.name({ root: 9, q: "mmaj7", bass: null }), "Am(maj7)", "the minor-major is written as players write it");
+  assert.deepEqual({ ...C.parse("Am(maj7)") }, { root: 9, q: "mmaj7", bass: null });
   assert.equal(C.parse("Cm").q, "m");
   assert.equal(C.parse("CM").q, "");
   assert.equal(C.parse("Bb").root, 10);
@@ -262,6 +264,10 @@ test("progressions: every entry is whole, in both languages, and every chord in 
     assert.ok(p.key === "maj" || p.key === "min", `${p.id} key`);
     assert.ok(p.zh && p.en && p.why.zh && p.why.en, `${p.id} has both languages`);
     assert.equal(p.rn.length, p.ch.length, `${p.id}: one numeral per chord`);
+    if (p.bassStep) assert.equal(p.bassStep.length, p.ch.length, `${p.id}: a bassStep per chord`);
+    p.ch.forEach((slot, i) => {
+      if (slot[2] !== undefined) assert.ok(p.bassStep && p.bassStep[i] != null, `${p.id}: the slash chord at ${i} has its bassStep`);
+    });
     for (const [deg, q] of p.ch) {
       assert.ok(deg >= 0 && deg < 12, `${p.id} degree`);
       assert.ok(C.qual(q), `${p.id}: ${q} is a quality`);
@@ -289,7 +295,7 @@ test("progressions: spelled by the key, the chord you came from where the key al
   assert.equal(first("Ebm", "andalusian").names.join(" "), "Ebm Db Cb Bb");
   /* the passing diminished chord between I and ii is a raised I, so it is G#dim7 in G, not Abdim7 */
   assert.equal(first("G", "dim-passing").names.join(" "), "G G#dim7 Am D");
-  /* a slash chord matches by its bass where a progression has one: C/E is the canon's I/3 */
+  /* a slash chord matches by its bass where a progression has one: C/E is the canon's I6 */
   const canon = first("C/E", "canon");
   assert.equal(canon.exact, true);
   assert.equal(canon.names[canon.at], "C/E");
@@ -301,6 +307,18 @@ test("progressions: spelled by the key, the chord you came from where the key al
   const c = P.forChord(C.parse("C"));
   assert.equal(c[0].at, 0);
   assert.equal(C.name(c[0].chords[c[0].at]), "C");
+});
+
+test("progressions: the numerals name the inversions, and the blues counts its bars", () => {
+  const byId = (id) => P.LIST.find((p) => p.id === id);
+  const canon = byId("canon");
+  assert.deepEqual([...canon.rn], ["I", "V6", "vi", "iii6", "IV", "I6", "IV", "V"]);
+  assert.deepEqual([...canon.bassStep], [null, 6, null, 4, null, 2, null, null], "B, G and E are the 7th, 5th and 3rd degrees");
+  assert.deepEqual([...byId("cliche").rn], ["I", "I+", "I(add6)", "I7", "IV"], "a sixth chord, not a first inversion");
+  assert.deepEqual([...byId("minor-cliche").rn], ["i", "i(maj7)", "i7", "i(add6)"]);
+  const blues = byId("blues").bars;
+  assert.equal(blues.reduce((a, b) => a + b, 0), 12, "twelve bars");
+  assert.ok(blues.every((b) => b >= 1 && b <= 4), `${blues} bars a chord`);
 });
 
 test("progressions: the other chords are played near the hand's fret, the commonest shape on a tie", () => {
@@ -355,6 +373,18 @@ test("the common defaults: maj7 Ionian with 11 to avoid, m7 Dorian, 7 Mixolydian
   assert.ok(first("maj7").list.find((o) => o.id === "majpent").notes.some((n) => n.lab === "7" && n.kind === "c"));
   /* E is the root of an E chord: the pcs follow the root */
   assert.equal(S.forChord({ root: 4, q: "m7", bass: null }, null).list[0].notes[0].pc, 4);
+});
+
+test("the degree line puts the 9 last; the notes themselves stay in pitch order for the picture", () => {
+  for (const q of ["9", "add9", "m9", "maj7"]) {
+    const o = S.forChord({ root: 0, q, bass: null }, null).list[0];
+    assert.equal(o.line[o.line.length - 1].lab, "9", `${q}: the 9 is read last`);
+    assert.deepEqual([...o.line.map((n) => n.iv)], [...o.notes.filter((n) => n.lab !== "9").map((n) => n.iv),
+      ...o.notes.filter((n) => n.lab === "9").map((n) => n.iv)], `${q}: everything else keeps its order`);
+  }
+  const c9 = S.forChord({ root: 0, q: "9", bass: null }, null).list[0];
+  assert.deepEqual([...c9.notes.map((n) => n.iv)], [0, 2, 4, 5, 7, 9, 10], "notes stay low to high");
+  assert.equal(c9.line[c9.line.length - 1].iv, 2);
 });
 
 test("from a progression the key picks the mode: ii Dorian, iii Phrygian, IV Lydian, V Mixolydian, minor V7 Phrygian dominant", () => {
