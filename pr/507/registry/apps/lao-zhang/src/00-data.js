@@ -37,7 +37,8 @@ GM.ENDLESS_GROW = 240;
    perfect player. Now it fails about one seed in seventy; level 10 stays the hardest step. */
 GM.TARGETS = [1200, 3600, 5850, 10200, 13750, 18300, 24300, 31200, 35000, 41000];
 
-/* value is the base price; bag uses min/max and a roll; rocks are worth triple with the book.
+/* value is the base price; bag uses min/max and a roll; rocks are worth ten times with the book
+   (triple never paid back its price: eight big rocks in sixty seconds; owner, 2026-11-28).
    A bag now rolls cash, dynamite or a burst of strength when it is hauled in. */
 GM.ITEMS = {
   goldS:   { kind: "gold",  value: 100, weight: 0.9,  r: 7,  sprite: "goldS",   pref: [40, 122] },
@@ -248,7 +249,7 @@ GM.TEXT = {
     owned: "{n}/{m}",
     footShop: "↑↓ 选　A 买　B 下一关",
     shopNames: ["炸药", "力量药水", "幸运草", "岩石图鉴"],
-    shopDescs: ["炸掉钩住的东西和周围，每店限购一个", "本关收绳更快，过关失效", "本关钱袋更鼓、多一颗钻石", "本关石头值三倍，过关失效"],
+    shopDescs: ["炸掉钩住的东西和周围，每店限购一个", "本关收绳更快，过关失效", "本关钱袋更鼓、多一颗钻石", "本关石头值十倍，大石头 $100"],
     over: "时间到",
     overShort: "差 ${d}",
     retry: "从第 1 关重来",
@@ -339,7 +340,7 @@ GM.TEXT = {
     owned: "{n}/{m}",
     footShop: "UP/DOWN PICK　A BUY　B NEXT",
     shopNames: ["DYNAMITE", "STRENGTH", "CLOVER", "ROCK BOOK"],
-    shopDescs: ["Blows up the hooked item and its neighbours; one per shop", "Faster reel, this level only", "Fatter bags, one extra diamond", "Rocks worth triple, this level only"],
+    shopDescs: ["Blows up the hooked item and its neighbours; one per shop", "Faster reel, this level only", "Fatter bags, one extra diamond", "Rocks worth ten times, $100 a big one, this level only"],
     over: "TIME UP",
     overShort: "${d} SHORT",
     retry: "RESTART AT LV 1",
