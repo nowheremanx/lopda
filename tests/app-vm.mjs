@@ -16,7 +16,7 @@ export function boot(file, opt = {}) {
   const raf = [], listeners = {}, hashes = [];
   const ctx2d = {
     createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
-    putImageData: (img) => { hashes.push(createHash("sha256").update(img.data).digest("hex").slice(0, 16)); if (opt.onPut) opt.onPut(img); },
+    putImageData: (img, x, y) => { hashes.push(createHash("sha256").update(img.data).digest("hex").slice(0, 16)); if (opt.onPut) opt.onPut(img, x, y); },
     getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
     measureText: () => ({ width: 12 }), fillText() {}, clearRect() {}
   };

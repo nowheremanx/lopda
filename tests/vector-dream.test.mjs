@@ -117,6 +117,27 @@ test("vector-dream: the numbers are hidden by default, START shows them with the
   assert.equal(s.legend, false);
 });
 
+test("vector-dream: A names the scene it switched to, and the card goes after 1.2 s", () => {
+  const v = launch();
+  v.run(3);
+  assert.equal(v.state().card, false);
+  v.press("a");
+  v.run(1);
+  let s = v.state();
+  assert.equal(s.scene, 1);
+  assert.equal(s.card, true);
+  assert.equal(s.cardText, "场景 2/3  飞越");
+  v.run(70);                                     /* 1.18 s: still up */
+  assert.equal(v.state().card, true);
+  v.run(2);                                      /* past 1.2 s */
+  assert.equal(v.state().card, false, "the card stays up too long");
+  v.press("a");                                  /* a second press names the next scene at once */
+  v.run(1);
+  s = v.state();
+  assert.equal(s.card, true);
+  assert.equal(s.cardText, "场景 3/3  晶体");
+});
+
 test("vector-dream: the flyover uses at least three tones, and the crystal's centre is not a blob of ink", () => {
   const v = launch();
   v.run(5);
