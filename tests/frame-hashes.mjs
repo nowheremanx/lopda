@@ -24,11 +24,12 @@ async function zhenyao(file, scenes) {
   return out;
 }
 
-/* VecDream reads PAD presses and PAD.isDown; frames are its own rAF loop */
-export function vecdream(file) {
+/* VecDream reads PAD presses and PAD.isDown; frames are its own rAF loop.
+   opt.stage ({w, h}) and opt.onPut are for the fill test: the same script on a phone-sized stage. */
+export function vecdream(file, opt = {}) {
   const handlers = [], down = new Set();
   const pad = { lang: "zh", on: (type, f) => { if (type === "press") handlers.push(f); }, isDown: (b) => down.has(b), sfx() {} };
-  const app = boot(file, { pad });
+  const app = boot(file, { pad, stage: opt.stage, onPut: opt.onPut });
   const press = (b) => handlers.forEach((f) => f(b));
   const run = (n) => { for (let i = 0; i < n; i++) app.frame(); };
   for (let s = 0; s < 3; s++) { run(20); press("b"); run(15); press("b"); press("a"); }
