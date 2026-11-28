@@ -75,6 +75,57 @@ test("golden list: the shape a guitarist expects comes first under Common", () =
   }
 });
 
+test("barres: a hand-written shape draws a barre only where its own fingers bar the strings", () => {
+  const shapes = C.shapes();
+  let barred = 0, checked = 0;
+  for (const key of Object.keys(shapes)) {
+    const [root, q, bass] = key.split(":");
+    const c = { root: +root, q, bass: bass === "" ? null : +bass };
+    const byFret = new Map(C.voicings(c).map((v) => [v.frets.join(","), v]));
+    for (const s of shapes[key]) {
+      const v = byFret.get(s.frets.join(","));
+      assert.ok(v, `${C.name(c)} ${C.fretText(s.frets)} is a voicing`);
+      checked++;
+      if (!v.barre) continue;
+      barred++;
+      for (let i = v.barre.from; i <= v.barre.to; i++) {
+        if (v.frets[i] === v.barre.fret) assert.equal(v.fingers[i], 1, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} under the barre is finger 1`);
+        else assert.ok(v.frets[i] > v.barre.fret, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} inside the barre`);
+      }
+    }
+  }
+  assert.ok(checked > 400 && barred > 150, `${checked} hand-written voicings, ${barred} with a barre`);
+});
+
+test("barres: shapes played with separate fingers draw none; the E shape still bars across all six strings", () => {
+  const first = (name) => C.voicings(C.parse(name))[0];
+  for (const name of ["D", "A", "Em", "Asus2", "Asus4", "Em7", "Emaj7", "Ammaj7", "E5", "A5", "Esus4", "D/A"])
+    assert.equal(first(name).barre, null, `${name} ${C.fretText(first(name).frets)}: no barre`);
+  const f = first("F");
+  assert.equal(C.fretText(f.frets), "133211");
+  assert.deepEqual({ ...f.barre }, { fret: 1, from: 0, to: 5 });
+});
+
+test("barres: the canonical shapes keep their real barre", () => {
+  const canon = {
+    F: ["133211", { fret: 1, from: 0, to: 5 }],
+    Bb: ["x13331", { fret: 1, from: 1, to: 5 }],
+    Bm: ["x24432", { fret: 2, from: 1, to: 5 }],
+    B: ["x24442", { fret: 2, from: 1, to: 5 }],
+    "F#m": ["244222", { fret: 2, from: 0, to: 5 }],
+    "C#m": ["x46654", { fret: 4, from: 1, to: 5 }],
+    Dmaj7: ["xx0222", { fret: 2, from: 3, to: 5 }],
+    A6: ["x02222", { fret: 2, from: 2, to: 5 }],
+    "F/C": ["x33211", { fret: 1, from: 4, to: 5 }],
+    Dm7: ["xx0211", { fret: 1, from: 4, to: 5 }]
+  };
+  for (const [name, [frets, want]] of Object.entries(canon)) {
+    const v = C.voicings(C.parse(name)).find((x) => C.fretText(x.frets) === frets);
+    assert.ok(v, `${name} ${frets} is a voicing`);
+    assert.deepEqual({ ...v.barre }, want, `${name} ${frets}`);
+  }
+});
+
 test("every one of the 12 x 19 chords has at least 3 voicings, and every voicing keeps the rules", () => {
   for (const c of every()) {
     const list = C.voicings(c);

@@ -216,7 +216,7 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
     await tap(p, "#tofind");
     assert.ok(await p.locator("#finder").evaluate((e) => e.classList.contains("open")));
     assert.equal(await text(p, "#fname"), "C");
-    assert.equal(await text(p, "#xo"), "x32o1o", "x for a muted string, o for an open one, the fret for a held one");
+    assert.equal(await text(p, "#xo"), "x··o·o", "x for a muted string, o for an open one, · for a fretted one");
     await fits(p, "#finder", size, "finder");
     for (const sel of ["#fname", "#fsee", "#xo"]) await inside(p, sel, size, "finder");
     /* the G string at fret 2: x32210 */
@@ -237,6 +237,113 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
     assert.equal(await text(p, "#cname"), "C6");
     assert.deepEqual(errors, []);
   }
+});
+
+test("chord-book 1.4.1: the finder's position moves the shape, and the x/o row names only x and o", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  /* F 133211: every string fretted, so the whole shape can move and stay a chord */
+  await tap(p, "#chord");
+  await p.locator("#q").fill("F");
+  await tap(p, "#qgo");
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  assert.equal(await text(p, "#fname"), "F");
+  assert.equal(await text(p, "#xo"), "······", "a fretted string is neither x nor o");
+  const held = () => p.evaluate(() => {
+    const out = {};
+    document.querySelectorAll("#frets button").forEach((b, i) => { if (b.classList.contains("sel")) out[i % 6] = b.textContent; });
+    return out;
+  });
+  assert.deepEqual(await held(), { 0: "1", 1: "3", 2: "3", 3: "2", 4: "1", 5: "1" });
+  /* + moves the shape up a fret, the five-fret grid with it: F becomes F# 244322, and Listen plays the shifted notes */
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push(notes.slice()); return play(notes, gap, ring); };
+  });
+  await tap(p, "#fup");
+  assert.equal(await text(p, "#fname"), "F#");
+  assert.equal(await text(p, "#fpos"), "2 品起");
+  assert.deepEqual(await held(), { 0: "2", 1: "4", 2: "4", 3: "3", 4: "2", 5: "2" });
+  await tap(p, "#fplay");
+  assert.deepEqual(await p.evaluate(() => window.__notes[0]), [42, 49, 54, 58, 61, 66]);
+  /* down goes back; down again from fret 1 is refused, because a fretted note would leave the neck */
+  await tap(p, "#fdown");
+  assert.equal(await text(p, "#fname"), "F");
+  await tap(p, "#fdown");
+  assert.equal(await text(p, "#fname"), "F", "still F: no note below fret 1");
+  assert.equal(await text(p, "#fpos"), "1 品起");
+  /* the x/o row: a fretted string mutes, a muted string opens, an open string mutes */
+  await tap(p, p.locator("#xo button").nth(0));
+  assert.equal(await text(p, "#xo"), "x·····");
+  await tap(p, p.locator("#xo button").nth(0));
+  assert.equal(await text(p, "#xo"), "o·····");
+  await tap(p, p.locator("#xo button").nth(0));
+  assert.equal(await text(p, "#xo"), "x·····");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.1: moving an open shape leaves its open and muted strings where they are", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  assert.equal(await text(p, "#xo"), "x··o·o");
+  /* C x32010 one fret up: the three fretted notes move, the muted low E and the two open strings do not */
+  await tap(p, "#fup");
+  assert.equal(await text(p, "#fpos"), "2 品起");
+  assert.equal(await text(p, "#fname"), "不是常见和弦");
+  assert.equal(await text(p, "#xo"), "x··o·o", "still two open strings and a muted one");
+  const held = await p.evaluate(() => {
+    const out = {};
+    document.querySelectorAll("#frets button").forEach((b, i) => { if (b.classList.contains("sel")) out[i % 6] = b.textContent; });
+    return out;
+  });
+  assert.deepEqual(held, { 1: "4", 2: "3", 4: "2" }, "x43020: only the fretted notes moved");
+  assert.ok(await p.locator("#fsee").isDisabled(), "an unknown chord cannot be shown");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.1: a found voicing outside the chord's list is shown first as a temporary one", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  /* C x32010 with the low E added at fret 5: 532010 is an Am7 the generator does not list */
+  await tap(p, p.locator("#frets button").nth(4 * 6 + 0));
+  assert.equal(await text(p, "#fname"), "Am7");
+  assert.ok(!(await p.locator("#fsee").isDisabled()));
+  const found = await p.evaluate(() => Chords.voicings(Chords.parse("Am7")).length);
+  await tap(p, "#fsee");
+  assert.equal(await text(p, "#cname"), "Am7");
+  assert.match(await text(p, "#line"), /^532010 · 1 \/ \d+ · /);
+  const n = Number((await text(p, "#line")).match(/ \/ (\d+)/)[1]);
+  assert.equal(n, found + 1, "the temporary voicing is added before the chord's own list");
+  assert.equal(await text(p, "#tones"), "ARCb3E5Gb7Cb3E5");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.1: with the sound off, a play is silent rather than an error", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, p.locator("#vol button").nth(0));
+  assert.equal(await p.evaluate(() => window.Guitar.level()), 0, "the switch is at Off");
+  await tap(p, "#pback");
+  await p.evaluate(() => { window.__log = []; });
+  await tap(p, "#strum");
+  await tap(p, p.locator("#tones button").first());
+  assert.deepEqual(await p.evaluate(() => window.__log), [], "no err, and nothing else either");
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  await p.evaluate(() => { window.__log = []; });
+  await tap(p, "#fplay");
+  assert.deepEqual(await p.evaluate(() => window.__log), [], "Listen is silent too");
+  /* the fourth play path: a progression's Play must return silently, not beep err (playProg) */
+  await tap(p, "#fback");
+  await tap(p, "#prog");
+  await p.evaluate(() => { window.__log = []; });
+  await tap(p, p.locator("#glist .card .gplay").first());
+  await p.waitForTimeout(1250);
+  assert.deepEqual(await p.evaluate(() => window.__log), [], "a progression with the switch off is silent too");
+  assert.deepEqual(errors, []);
 });
 
 test("chord-book: English words, the strum plays without an error, the degree map is named", { skip, timeout: 60000 }, async (t) => {
