@@ -130,17 +130,21 @@ test("crossing at 331x359: RANDOM opens after round 30, and before it the locked
   /* a player past 30: the RANDOM row is open and really starts a random round */
   let { p, errors, frame } = await open(t, { round: 31, cleared: 30, taught: true });
   const title = (f) => f.evaluate(() => {
-    const rows = [...document.querySelectorAll("#cover-list li")];
+    const menu = game.titleMenu;
     return {
-      rows: rows.map((li) => li.textContent),
-      locked: rows.map((li) => li.classList.contains("locked")),
+      rows: menu.items.map((item) => item.label),
+      statuses: menu.items.map((item) => item.status),
+      locked: menu.items.map((item) => item.locked),
+      reasons: menu.items.map((item) => item.reason),
+      canvas: [document.getElementById("title-cv").getBoundingClientRect().width, document.getElementById("title-cv").getBoundingClientRect().height],
       size: [document.documentElement.clientWidth, document.documentElement.clientHeight],
     };
   });
   let ts = await title(frame());
   assert.deepEqual(ts.size, [331, 359]);
-  assert.equal(ts.rows[0], "继续 · 第 31 关");
-  assert.equal(ts.rows[2], "随机关", "past round 30 RANDOM is open");
+  assert.deepEqual(ts.canvas, [331, 359], "the shared title canvas fills the screen in CSS pixels");
+  assert.deepEqual(ts.rows, ["继续", "选关", "随机关", "玩法"]);
+  assert.equal(ts.statuses[0], "第 31 关");
   assert.deepEqual(ts.locked, [false, false, false, false], "no row is locked at cleared 30");
   await press(p, "down");
   await press(p, "down");
@@ -151,8 +155,9 @@ test("crossing at 331x359: RANDOM opens after round 30, and before it the locked
   /* a save at round 12 is still before the unlock, and its row says which round opens it */
   ({ p, errors, frame } = await open(t, { round: 12, cleared: 11, taught: true }));
   ts = await title(frame());
-  assert.equal(ts.rows[0], "继续 · 第 12 关");
-  assert.equal(ts.rows[2], "随机关通关 30 关后开放", "the locked row names round 30");
+  assert.deepEqual(ts.rows, ["继续", "选关", "随机关", "玩法"]);
+  assert.equal(ts.statuses[0], "第 12 关");
+  assert.match(ts.reasons[2], /30/, "the locked row names round 30");
   assert.deepEqual(ts.locked, [false, false, true, false], "RANDOM is closed at round 12");
   await press(p, "down");
   await press(p, "down");
@@ -164,7 +169,9 @@ test("crossing at 331x359: RANDOM opens after round 30, and before it the locked
   /* the English row says the same number */
   ({ p, errors, frame } = await open(t, { round: 12, cleared: 11, taught: true }, "en"));
   ts = await title(frame());
-  assert.equal(ts.rows[2], "RANDOMOpens after round 30", "the English locked row names round 30");
+  assert.deepEqual(ts.rows, ["CONTINUE", "ROUNDS", "RANDOM", "HOW TO PLAY"]);
+  assert.equal(ts.statuses[0], "ROUND 12");
+  assert.match(ts.reasons[2], /30/, "the English locked row names round 30");
   assert.deepEqual(ts.locked, [false, false, true, false], "RANDOM is closed at round 12 in English too");
   assert.deepEqual(errors, [], "no page errors");
 });
