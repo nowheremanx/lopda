@@ -180,7 +180,7 @@
       </div>
     </section>
 
-    <!-- CONTROLLER (proof of concept): tap a key, then press what should be that key on a controller or a remote -->
+    <!-- CONTROLLER: tap a key, then press what should be that key on a controller, a remote or a keyboard (gamepad.js) -->
     <section class="view" id="v-set-pad" hidden>
       <div class="bar">
         <button class="btn ghost back" id="set-pad-back" type="button" aria-label="返回">◂</button>
@@ -188,10 +188,11 @@
       </div>
       <div class="settings set-pad-page">
         <p class="hint" id="set-pad-who"></p>
-        <p class="hint" data-i18n="pad.hint">点一个键，再按手柄或遥控器上你想用的那个键。</p>
-        <ul class="set-pad-list" id="set-pad-list"></ul>
+        <p class="hint" data-i18n="pad.hint">点一个键，再按手柄、遥控器或键盘上你想用的那个键。</p>
+        <div class="set-pad-list" id="set-pad-list"></div>
         <p class="hint" id="set-pad-live"></p>
         <p class="hint" id="set-pad-msg"></p>
+        <p class="hint" data-i18n="pad.keys">键盘上的方向键、X、Z、Enter、Shift 一直都能用。</p>
         <button class="btn ghost" id="set-pad-reset" type="button" data-i18n="pad.reset">恢复默认</button>
       </div>
     </section>
