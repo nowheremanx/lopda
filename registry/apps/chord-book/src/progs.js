@@ -1,6 +1,6 @@
 /* 和弦大全 / Chords: chord progressions (和弦连接). A hand-written table of common progressions, each in degrees of its key
    with a short note on why it works; forChord() finds the ones a chord belongs to and spells them in that chord's key.
-   Every one of the 28 qualities appears in at least one of the 28 progressions (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
+   Every one of the 32 qualities appears in at least one of the 32 progressions (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
    A progression is not anyone's property; the notes are our own words. Pachelbel's canon (1680s) is public domain.
    MIT License. Copyright (c) 2026 Haowei Wu. */
 var Progs = (function () {
@@ -183,6 +183,30 @@ var Progs = (function () {
       why: {
         zh: "降五和升五只是把五音换掉，三音和降七音不动，属七的骨架还在。五音降或升半音，和弦一会儿像减三和弦、一会儿像增三和弦，颜色变了，拉力没变。",
         en: "The flat and sharp 5 change only the fifth while the 3rd and flat 7th stay, so the dominant frame is intact. Lowered or raised by a half step, the fifth turns the chord diminished or augmented in colour; the pull stays."
+      } },
+    { id: "sharp11", key: "maj", zh: "升十一", en: "Sharp 11",
+      ch: [[0, "maj7#11"], [5, "maj7#11"]], rn: ["Imaj7#11", "IVmaj7#11"],
+      why: {
+        zh: "大七和弦把十一音升高半音：自然的十一音比三音高半音，听着挤，所以常被避开；升高以后离开三音，成了 Lydian 调式那块很亮的颜色（#11 在五音下方半音，五音通常放在它上面或省掉）。I 和 IV 两个和弦之间只换一两个音，亮色却一直留着，所以听着开阔，不急着落地。",
+        en: "Raising the 11th of a major 7th by a half step takes it off the major 3rd, where the natural 11 rubs, and turns it into the bright Lydian colour (the #11 sits a half step below the 5th, so the 5th is usually voiced above it or left out). Between I and IV only a note or two change, yet the brightness stays, so it sounds open and in no hurry to land."
+      } },
+    { id: "m13", key: "min", zh: "小十三", en: "Minor 13",
+      ch: [[0, "m13"], [5, "m13"]], rn: ["im13", "ivm13"],
+      why: {
+        zh: "十三音是根音上方的大六度，正好把忧伤的小三音托住，听着柔和不发闷。根音往上四度换到 iv，两个都是小和弦，没有属和弦那股要回家的劲，所以可以一圈一圈地转，停在哪儿都像还没说完。",
+        en: "The 13th is a major 6th above the root, and it lifts the sad minor 3rd instead of thickening it. Moving up a fourth to iv keeps both chords minor, with no dominant pull home, so the pair can circle for as long as you like and never feels finished."
+      } },
+    { id: "sus9", key: "maj", zh: "九挂四", en: "9sus4",
+      ch: [[0, "9sus4"], [5, "9sus4"]], rn: ["I9sus4", "IV9sus4"],
+      why: {
+        zh: "四音把三音挂起来，和弦因此既不大也不小；九音和降七音又给它加上属和弦的重量，所以它不是普通的挂留，而是一个能自己站住的颜色。I 和 IV 是同一个和弦性质往上移四度，指型不变，根音往上走四度；四音、降七音和九音把挂留的颜色留住。",
+        en: "The 4th suspends the 3rd, so the chord is neither major nor minor, while the 9th and flat 7th give it a dominant's weight: not a plain sus, but a colour that can stand on its own. I and IV are the same chord quality a fourth higher: the grip stays the same and the root moves up a fourth, while the 4th, flat 7th and 9th keep the suspended colour."
+      } },
+    { id: "minor-add9", key: "min", zh: "小加九", en: "Minor add9",
+      ch: [[0, "madd9"], [5, "madd9"]], rn: ["imadd9", "ivmadd9"],
+      why: {
+        zh: "九音只是加在小三和弦上面，没有七音，所以不带属和弦的拉力，也不像小九那样厚。它把小三和弦照亮一点，却还留着空处，两个和弦来回时听着轻，可以一直重复。",
+        en: "The 9th is added to the minor triad with no 7th, so there is no dominant pull and none of the thickness of a minor 9. It brightens the triad while leaving space around it, and the two chords pass back and forth lightly enough to repeat indefinitely."
       } }
   ];
 

@@ -14,7 +14,7 @@ var Chords = (function () {
   var PICK_NAMES = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
   var LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-  /* The 28 qualities, in the order the picker lists them (section 2.1). iv: semitones above the root; lab: how each
+  /* The 32 qualities, in the order the picker lists them (section 2.1). iv: semitones above the root; lab: how each
      interval is written; opt: intervals a voicing may leave out (the fifth). group: the picker's heading; common: how
      readily identify() picks it when two names fit the same notes. A 9, 11 or 13 is stored as its mod-12 interval
      (2, 5, 9); tones() stacks it an octave up. */
@@ -46,7 +46,12 @@ var Chords = (function () {
     { id: "add11", zh: "加十一", en: "add11",       iv: [0, 4, 5, 7],     lab: ["R", "3", "11", "5"],          opt: [7], group: 3, common: 0.3 },
     { id: "7b9",   zh: "属七降九", en: "7 flat 9",   iv: [0, 1, 4, 7, 10], lab: ["R", "b9", "3", "5", "b7"],    opt: [7], group: 5, common: 0.3 },
     { id: "7b5",   zh: "属七降五", en: "7 flat 5",   iv: [0, 4, 6, 10],    lab: ["R", "3", "b5", "b7"],         opt: [],  group: 5, common: 0.3 },
-    { id: "7#5",   zh: "属七升五", en: "7 sharp 5",  iv: [0, 4, 8, 10],    lab: ["R", "3", "#5", "b7"],         opt: [],  group: 5, common: 0.3 }
+    { id: "7#5",   zh: "属七升五", en: "7 sharp 5",  iv: [0, 4, 8, 10],    lab: ["R", "3", "#5", "b7"],         opt: [],  group: 5, common: 0.3 },
+    /* 1.4.9's four colours: a Lydian major 7, a minor 13, a suspended 9 and a minor add9 */
+    { id: "maj7#11", zh: "大七升十一", en: "major 7 sharp 11", iv: [0, 4, 6, 7, 11], lab: ["R", "3", "#11", "5", "7"], opt: [7], group: 4, common: 0.3 },
+    { id: "m13",     zh: "小十三",     en: "minor 13",        iv: [0, 2, 3, 7, 9, 10], lab: ["R", "9", "b3", "5", "13", "b7"], opt: [7, 2], group: 4, common: 0.3 },
+    { id: "9sus4",   zh: "属九挂四",   en: "9sus4",           iv: [0, 2, 5, 7, 10],   lab: ["R", "9", "4", "5", "b7"], opt: [7], group: 2, common: 0.35 },
+    { id: "madd9",   zh: "小加九",     en: "minor add9",      iv: [0, 2, 3, 7],       lab: ["R", "9", "b3", "5"],   opt: [7], group: 3, common: 0.35 }
   ];
   var GROUPS = [{ zh: "三和弦", en: "Triads" }, { zh: "七和弦", en: "Sevenths" }, { zh: "挂留", en: "Suspended" },
     { zh: "加音、六", en: "Added, sixths" }, { zh: "九、十一、十三", en: "Ninths, elevenths, thirteenths" },
@@ -82,13 +87,21 @@ var Chords = (function () {
     "7b5": "7b5", "7(b5)": "7b5", "7-5": "7b5",
     /* aug7 and 7#5 are the same chord (owner, 1.4.8): one quality, several names */
     "7#5": "7#5", "7(#5)": "7#5", "7+5": "7#5", "7+": "7#5", "aug7": "7#5", "+7": "7#5",
-    /* not qualities of this book: a major 11 and a minor 6/9 must not fall through the lowercase aliases to
-       m11 and 6/9 (M/m stay apart, as the comment above says) */
-    "M11": null, "m6/9": null
+    /* 1.4.9's four colours and the ways players write them */
+    "maj7#11": "maj7#11", "M7#11": "maj7#11", "Δ7#11": "maj7#11", "ma7#11": "maj7#11", "maj7(#11)": "maj7#11",
+    "m13": "m13", "min13": "m13", "-13": "m13",
+    "9sus4": "9sus4", "9sus": "9sus4",
+    "madd9": "madd9", "minadd9": "madd9", "-add9": "madd9", "m(add9)": "madd9",
+    /* not qualities of this book: a major 11, a minor 6/9, a major 13 / add9 and M7#11 must not fall through
+       the lowercase aliases to m11, 6/9, m13, madd9 or maj7#11 (M/m stay apart, as the comment above says) */
+    "M11": null, "m6/9": null, "m7#11": null, "M13": null, "Madd9": null, "M(add9)": null
   };
   var ALIAS_LOWER = {};
-  /* null entries are exact-only rejects (M11, m6/9): they must not shadow a valid lowercase alias */
-  Object.keys(ALIAS).forEach(function (k) { if (k.length >= 3 && ALIAS[k] !== null) ALIAS_LOWER[k.toLowerCase()] = ALIAS[k]; });
+  /* null entries are exact-only rejects. A valid mixed-case alias is not copied over a lowercase reject (M7#11 is
+     valid, m7#11 is not), while a valid lowercase alias such as madd9 still serves CmAdd9 / CmADD9. */
+  Object.keys(ALIAS).forEach(function (k) {
+    if (k.length >= 3 && ALIAS[k] !== null && ALIAS[k.toLowerCase()] !== null) ALIAS_LOWER[k.toLowerCase()] = ALIAS[k];
+  });
 
   function mod12(n) { return ((n % 12) + 12) % 12; }
   function pcOf(s) {
@@ -185,6 +198,9 @@ var Chords = (function () {
     ["C6/9", "x32233", "021134"], ["Cm11", "x31311", "021311"], ["Cadd11", "x32011", "032011"],
     /* 1.4.8's three altered dominants: E7b9 bars D-G-B at 6 with the ring finger on G 7; C7b5 sits at 3-4, C7#5 at 3-6 */
     ["E7b9", "07676x", "021310"], ["C7b5", "x34310", "024310"], ["C7#5", "x36350", "013120"],
+    /* 1.4.9's four colours: open Cmaj7 with F# on the D string, and the minor 13 / 9sus4 / minor add9 shapes */
+    ["Cmaj7#11", "x34000", "012000"], ["Cm13", "x30345", "010234"],
+    ["C9sus4", "x3333x", "011110"], ["Cmadd9", "x3103x", "021030"],
     /* slash chords */
     ["D/F#", "2x0232", "T00132"], ["G/B", "x20003", "010003"], ["C/G", "332010", "432010"], ["C/E", "032010", "032010"],
     ["Am/G", "3x2210", "402310"], ["F/C", "x33211", "034211"], ["D/A", "x00232", "000132"], ["Am/E", "002210", "002310"]
@@ -418,7 +434,7 @@ var Chords = (function () {
   }
 
   /* ---------------- naming a voicing (section 3.4) ---------------- */
-  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 28.
+  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 32.
      The notes' pitch classes must hold every required tone of the quality and nothing outside it but the bass. */
   function identify(frets) {
     var notes = midiOf(frets);
