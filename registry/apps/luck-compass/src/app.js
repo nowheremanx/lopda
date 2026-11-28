@@ -7,7 +7,6 @@ var game = LoGame.create({ width: 216, height: 240, lang: "zh", fill: true, band
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
-var W = game.width, CX = W / 2, CY = 106;      /* 216 x 240; the luopan sits on an 180 x 180 plate */
 var H = game.height;
 
 /* With fill on, the canvas grows around the 216 x 240 page (LO-GAME.md 2.1): the night sky is above it and
