@@ -199,7 +199,7 @@ test("chord-book: the picker chooses root, quality and bass in one visit; the ke
     await fits(p, "#picker", size, "picker");
     await tap(p, p.locator("#roots button", { hasText: /^D$/ }));
     await tap(p, p.locator("#quals button", { hasText: "maj7" }).first());
-    await tap(p, p.locator("#basses button", { hasText: /^F#$/ }));
+    await tap(p, p.locator("#basses button", { hasText: /^F#\/Gb$/ }));
     assert.equal(await text(p, "#ptitle"), "Dmaj7/F#");
     await tap(p, "#pok");
     assert.equal(await text(p, "#cname"), "Dmaj7/F#");
@@ -661,7 +661,7 @@ test("chord-book 1.4.3: the x above a muted string plays nothing, an o still pla
 test("chord-book 1.4.3: the finder starts from the picker's pending chord, and Back goes there again", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t);
   await tap(p, "#chord");
-  await tap(p, p.locator("#roots button", { hasText: /^C#$/ }).first());
+  await tap(p, p.locator("#roots button", { hasText: /^C#\/Db$/ }).first());
   await tap(p, p.locator("#quals button", { hasText: "m7b5" }).first());
   assert.equal(await text(p, "#ptitle"), "C#m7b5");
   await tap(p, "#tofind");
@@ -789,7 +789,7 @@ test("chord-book 1.4.3: the footer's mute button turns the guitar off and back t
 test("chord-book 1.4.4: a combination with no voicing is refused, and an old save that held one starts on C", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t);
   await tap(p, "#chord");
-  await tap(p, p.locator("#roots button", { hasText: /^Ab$/ }));
+  await tap(p, p.locator("#roots button", { hasText: /^Ab\/G#$/ }));
   await tap(p, p.locator("#quals button", { hasText: "属九" }));
   await tap(p, p.locator("#basses button", { hasText: /^B$/ }));
   assert.equal(await text(p, "#ptitle"), "Ab9/B", "the picker reads the combination");
@@ -844,7 +844,7 @@ test("chord-book 1.4.4: a recent chip with no voicing is refused, and ↑ down o
   /* the main screen's quality step: Eb9/G down is Ebm9/G, which has no voicing; the chord stays, only err sounds */
   const { p, errors } = await open(t);
   await tap(p, "#chord");
-  await tap(p, p.locator("#roots button", { hasText: /^Eb$/ }));
+  await tap(p, p.locator("#roots button", { hasText: /^Eb\/D#$/ }));
   await tap(p, p.locator("#quals button", { hasText: "属九" }));
   await tap(p, p.locator("#basses button", { hasText: /^G$/ }));
   assert.equal(await text(p, "#ptitle"), "Eb9/G");
@@ -875,6 +875,113 @@ test("chord-book 1.4.4: a guessed finder voicing draws no ring-finger barre", { 
   const px = await p.locator("#pic").evaluate((c) => Array.from(c.getContext("2d").getImageData(83, 41, 1, 1).data));
   assert.deepEqual(px, [163, 173, 126, 255], "paper, not ink: the guessed shape has no barre");
   assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.5: the picker writes the common enharmonic beside each root and bass; the name stays the book's", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await tap(p, "#chord");
+    const roots = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
+    assert.deepEqual(await p.locator("#roots button").allTextContents(), roots, "every root with its common enharmonic");
+    await fits(p, "#picker", size, "the picker with enharmonic labels");
+    const clipped = await p.evaluate(() => [...document.querySelectorAll("#roots button, #basses button")]
+      .filter((b) => b.scrollWidth > b.clientWidth + 1).map((b) => b.textContent));
+    assert.deepEqual(clipped, [], "no label is cut off in its cell");
+    /* a tap still selects the pitch class; the title and every name keep the fixed spelling */
+    await tap(p, p.locator("#roots button", { hasText: /^C#\/Db$/ }));
+    assert.ok(await p.locator("#roots button", { hasText: /^C#\/Db$/ }).evaluate((b) => b.classList.contains("sel")));
+    assert.equal(await text(p, "#ptitle"), "C#", "C# major, written the book's way");
+    const basses = ["无", "C", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
+    assert.deepEqual(await p.locator("#basses button").allTextContents(), basses, "the same labels, the root left out");
+    await tap(p, p.locator("#basses button", { hasText: /^F#\/Gb$/ }));
+    assert.equal(await text(p, "#ptitle"), "C#/F#");
+    await tap(p, "#pok");
+    assert.equal(await text(p, "#cname"), "C#/F#");
+    assert.equal(await text(p, "#qname"), "大三");
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("chord-book 1.4.5: 连接 can keep only the cards where the chord is the tonic; the keys walk that list", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await tap(p, "#prog");
+    await fits(p, "#progs", size, "the progressions with the filter row");
+    assert.equal(await p.locator("#glist .card").count(), 15, "C is in 15 progressions");
+    assert.equal(await text(p, "#gfilter"), "只看主和弦");
+    assert.ok(!(await p.locator("#gfilter").evaluate((b) => b.classList.contains("on"))));
+    assert.ok(await p.locator("#glist .card", { hasText: "小调终止" }).count() > 0, "the C-as-V card is there");
+    /* the list is scrolled, then the filter is turned on: 12 cards, top of the list, the action reads 全部 */
+    await p.evaluate(() => { document.getElementById("glist").scrollTop = 400; });
+    await tap(p, "#gfilter");
+    assert.equal(await p.locator("#glist .card").count(), 12, "12 of them make C the tonic");
+    assert.equal(await text(p, "#gfilter"), "全部");
+    assert.ok(await p.locator("#gfilter").evaluate((b) => b.classList.contains("on")));
+    assert.equal(await p.locator("#glist .card", { hasText: "小调终止" }).count(), 0, "the C-as-V card is gone");
+    assert.equal(await p.locator("#glist").evaluate((e) => e.scrollTop), 0, "the filtered list starts at the top");
+    await tap(p, "#gfilter");
+    assert.equal(await p.locator("#glist .card").count(), 15);
+    assert.equal(await text(p, "#gfilter"), "只看主和弦");
+    /* every visit starts with all cards, not the last filter */
+    await tap(p, "#gfilter");
+    await tap(p, "#gback");
+    await tap(p, "#prog");
+    assert.equal(await p.locator("#glist .card").count(), 15);
+    assert.equal(await text(p, "#gfilter"), "只看主和弦");
+    assert.ok(await p.locator("#gbar").isVisible(), "the row is back for a chord with a mix");
+    assert.equal(await p.locator("#gfilter").isDisabled(), false);
+    assert.deepEqual(errors, []);
+  }
+
+  /* the keyboard focuses and plays the filtered list: up from the first card wraps to the 12th tonic card, not the 15th */
+  const { p, errors } = await open(t);
+  await tap(p, "#prog");
+  await p.evaluate(() => { window.__press("up"); window.__press("up"); });
+  await p.waitForTimeout(80);
+  assert.equal(await p.locator("#glist .card.focus .ghead b").textContent(), "加了颜色的流行四和弦", "unfiltered, the 15th card has C on V");
+  await tap(p, "#gfilter");
+  assert.equal(await p.locator("#glist .card.focus").count(), 0, "a toggle clears the focus");
+  await p.evaluate(() => { window.__press("up"); window.__press("up"); });
+  await p.waitForTimeout(80);
+  assert.equal(await p.locator("#glist .card.focus .ghead b").textContent(), "减七经过", "the filtered 12th card, 减七经过");
+  await p.evaluate(() => window.__press("a"));
+  await p.waitForTimeout(100);
+  assert.equal(await p.locator("#glist .card.focus .gplay").textContent(), "停", "A plays the focused card of the filtered list");
+  /* a toggle while it plays stops the sequence and clears the focus */
+  await tap(p, "#gfilter");
+  assert.equal(await p.locator("#glist .gplay", { hasText: /^停$/ }).count(), 0);
+  assert.equal(await p.locator("#glist .card.focus").count(), 0);
+  assert.deepEqual(errors, []);
+
+  /* English words */
+  const en = await open(t, { lang: "en" });
+  await tap(en.p, "#prog");
+  assert.equal(await text(en.p, "#gfilter"), "Tonic only");
+  await tap(en.p, "#gfilter");
+  assert.equal(await text(en.p, "#gfilter"), "All");
+  assert.deepEqual(en.errors, []);
+
+  /* a chord with no tonic card hides the row, so the filter can never leave an empty screen */
+  const b = await open(t);
+  await tap(b.p, "#chord");
+  await b.p.locator("#q").fill("Bdim");
+  await tap(b.p, "#qgo");
+  await tap(b.p, "#prog");
+  assert.equal(await b.p.locator("#glist .card").count(), 1, "Bdim is vii° of the circle, its one progression");
+  assert.ok(!(await b.p.locator("#gbar").isVisible()), "no filter row");
+  assert.ok(await b.p.locator("#gfilter").isDisabled());
+  assert.deepEqual(b.errors, []);
+
+  /* every card already tonic (Cmaj7's 2 of 2) is nothing to filter: the row hides, like the zero-tonic case */
+  const m = await open(t);
+  await tap(m.p, "#chord");
+  await m.p.locator("#q").fill("Cmaj7");
+  await tap(m.p, "#qgo");
+  await tap(m.p, "#prog");
+  assert.equal(await m.p.locator("#glist .card").count(), 2, "Cmaj7's two progressions both make it the tonic");
+  assert.ok(!(await m.p.locator("#gbar").isVisible()), "no filter row when every card is tonic");
+  assert.ok(await m.p.locator("#gfilter").isDisabled());
+  assert.deepEqual(m.errors, []);
 });
 
 test("chord-book 1.4.4: a chord opened from a progression keeps the key's spelling, with the book's name beside it", { skip, timeout: 60000 }, async (t) => {

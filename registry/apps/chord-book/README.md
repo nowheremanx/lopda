@@ -54,6 +54,29 @@ A swipe slides the picture (`slide()` in app.js). The words and the hit tests ch
 The finder opened from the picker starts from the pending chord's first voicing, and its Back returns to the picker
 (`finderFromPicker` in app.js); 看这个和弦 always goes to the main screen.
 
+### The picker
+
+The root and bass grids write the common enharmonic beside the book's name (`C#/Db`, `Eb/D#`, `F#/Gb`, `Ab/G#`,
+`Bb/A#`), from the pure array `Chords.PICK_NAMES`. Only those labels change: a tap still selects the pitch class, the
+selected state is still the pitch class, the bass grid still leaves the root out, and the title and every chord name,
+tone name, search result and save keep `Chords.NAMES` (so tapping `C#/Db` gives C#). Five characters fit the four-column
+grid at 331, and the cells stay 44 px tall (1.4.5).
+
+### The progressions screen
+
+23 hand-written progressions (`src/progs.js`), each a card with its key, Roman numerals, a chip per chord (the one you
+came from underlined), a Play button and a note on why it works. The sequence strums one chord a bar, holds a chord for
+its `p.bars[i]` bars and fills the chip that is sounding; a second tap stops it. A chip opens that chord on the main
+screen on the voicing it was played with, and the key's spelling follows.
+
+`#gbar` above the scrolling list has one filter button. All cards show by default; `只看主和弦 / Tonic only` keeps only
+the cards where the chord is the tonic of its key (`r.p.ch[r.at][0] === 0`, 12 of C's 15), and the button then reads
+`全部 / All` in the on style. The filtered array is the list everywhere: the cards drawn, the `seq.card` index, the
+keyboard focus and what Play plays. Toggling stops a running sequence, clears the focus and scrolls to the top; every
+visit starts with all cards. The row appears only when there is a mix to choose between: a chord with no tonic card
+(Bdim is only vii° of the circle) or with every card already tonic (Cmaj7's two) hides it and disables the button, so the
+filter never leaves an empty screen or does nothing (1.4.5).
+
 ### Rules the screen depends on
 
 - **The picture's scale.** `Draw.paint` scales the canvas by a whole number to fit `#pwrap`, so every row around

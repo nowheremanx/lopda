@@ -186,6 +186,18 @@ test("names: every chord's name reads back as the same chord; aliases and enharm
   for (const bad of ["", "H", "Cxyz", "C/H", "C13", "Cmaj13#11", "12", null, 7]) assert.equal(C.parse(bad), null, String(bad));
 });
 
+test("the picker's labels: the fixed names with the common enharmonic beside them (1.4.5)", () => {
+  assert.deepEqual([...C.PICK_NAMES], ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"]);
+  C.PICK_NAMES.forEach((n, pc) => {
+    assert.ok(n.indexOf(C.NAMES[pc]) === 0, `${n} begins with the book's ${C.NAMES[pc]}`);
+    assert.ok(n.length <= 5, `${n} fits a 44 px cell`);
+    assert.deepEqual({ ...C.parse(n) }, { root: pc, q: "", bass: null }, `${n} reads back as pitch class ${pc}`);
+  });
+  /* every other name still uses the book's fixed set */
+  assert.equal(C.name({ root: 1, q: "m", bass: null }), "C#m");
+  assert.equal(C.name({ root: 3, q: "", bass: 1 }), "Eb/C#", "the fixed names, even for a bass written enharmonically");
+});
+
 test("identify: each hand-written shape is named as itself first (an equivalent spelling counts)", () => {
   const set = (c) => {
     const Q = C.qual(c.q);
@@ -361,6 +373,20 @@ test("progressions: the other chords are played near the hand's fret, the common
   assert.equal(P.nearVoicing(g, 0), g[0]);
   const near7 = P.nearVoicing(g, 7);
   assert.ok(Math.abs(near7.pos - 7) <= Math.abs(g[0].pos - 7));
+});
+
+test("the tonic filter's data: C has 15 cards and 12 with C as the tonic; Bdim has none (1.4.5)", () => {
+  const split = (n) => {
+    const r = P.forChord(C.parse(n));
+    return { all: r.length, tonic: r.filter((x) => x.p.ch[x.at][0] === 0).length };
+  };
+  assert.deepEqual(split("C"), { all: 15, tonic: 12 });
+  assert.deepEqual(split("Bdim"), { all: 1, tonic: 0 }, "vii° of the circle, never the tonic");
+  assert.deepEqual(split("G#dim7"), { all: 1, tonic: 0 }, "#I°7 of the passing diminished");
+  assert.deepEqual(split("Cmaj7"), { all: 2, tonic: 2 }, "every card makes Cmaj7 the tonic: nothing to filter");
+  assert.deepEqual(split("C6"), { all: 1, tonic: 1 });
+  const others = [...P.forChord(C.parse("C")).filter((x) => x.p.ch[x.at][0] !== 0).map((x) => x.p.id)];
+  assert.deepEqual(others, ["minor-cadence", "andalusian", "add9-pop"], "the three cards where C is not the tonic");
 });
 
 /* ---------------- the improv view's scales (1.4.0) ---------------- */
