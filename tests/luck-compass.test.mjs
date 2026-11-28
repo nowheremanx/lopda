@@ -156,6 +156,17 @@ test("sector: 22.5 degrees each way, and null for no compass", () => {
 /* ---- the running app: a fake PAD, a manual clock, and the strings it draws ---- */
 const APP = join(ROOT, "registry/apps/luck-compass/index.html");
 const SCREEN_W = 216;   /* the app's logical width; 331 px on the smallest phone scales it */
+const SCREEN_H = 240;
+/* the page is 216 x 240 and the app fills a phone's stage with bands around it (LO-GAME.md 2.1); give the
+   fake page a stage exactly the page's size, so a pointer argument is a page pixel as it always was */
+const STAGE = { w: SCREEN_W, h: SCREEN_H };
+/* app-vm's pointer() scales a point into its default 160 x 144 fake canvas; with the stage exactly the page
+   and k = 1, a page pixel is a CSS pixel of the stage, so give the tests the raw-position form. */
+function pagePointer(app) {
+  const raw = app.pointerRaw;
+  app.pointer = (type, x, y) => raw(type, x + 0.5, y + 0.5);
+  return app;
+}
 
 function bootApp(lang, withMotion) {
   const listeners = {};
@@ -167,7 +178,7 @@ function bootApp(lang, withMotion) {
     sfx() {}
   };
   if (withMotion) pad.motion = { start: () => Promise.resolve("on"), stop() {}, zero() {} };
-  const app = boot(APP, { pad, seed: 1 });
+  const app = pagePointer(boot(APP, { pad, seed: 1, stage: STAGE }));
   app.ctx.get("openSection")("compass");
   return { app, tilt(t) { (listeners.tilt || []).forEach((fn) => fn(t)); } };
 }
@@ -237,7 +248,7 @@ function bootStored(lang, loadValue, rejectLoad) {
     remove(key) { removeCalls.push(key); },
     notes: { append(title, text) { appends.push({ title, text }); return Promise.resolve("saved"); } }
   };
-  const app = boot(APP, { pad, seed: 1 });
+  const app = pagePointer(boot(APP, { pad, seed: 1, stage: STAGE }));
   function press(button) {
     (listeners.press || []).forEach((fn) => fn(button));
     app.frame();

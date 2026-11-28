@@ -920,9 +920,9 @@
         ".00000000000000.",
         "................"
       ],
-      "version": "2.0.2",
+      "version": "2.1.0",
       "released": "2026-10-24",
-      "updated": "2026-11-27",
+      "updated": "2026-11-28",
       "description": "老黄历、每日一签、罗盘、八卦，一间小小的旧历书铺。旧书上的说法，图个吉利。",
       "i18n": {
         "zh": {
@@ -941,8 +941,8 @@
         "notes"
       ],
       "path": "apps/luck-compass/index.html",
-      "sha256": "8a1e5790f33e516de8c9cb3bc2ed736e8e106bedf973e2ae1abb6b474e18134c",
-      "bytes": 384409
+      "sha256": "738367563b53ec0ac6352afb6a85da5f859ad4d99f89c15b4488a5bf9715c97a",
+      "bytes": 398995
     }
   ]
 }

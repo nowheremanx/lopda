@@ -3,9 +3,21 @@
    four-tone lo-game drawing, so the text stays upright while the dial positions turn.
    MIT License. Copyright (c) 2026 Haowei Wu. */
 
-var game = LoGame.create({ width: 216, height: 240, lang: "zh" });
+var game = LoGame.create({ width: 216, height: 240, lang: "zh", fill: true, bands: LUCK_BANDS.paint });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+var W = game.width, CX = W / 2, CY = 106;      /* 216 x 240; the luopan sits on an 180 x 180 plate */
+var H = game.height;
+
+/* With fill on, the canvas grows around the 216 x 240 page (LO-GAME.md 2.1): the night sky is above it and
+   the altar below. A press that starts there is the phone, not the page, so every direct read of the pointer
+   asks this first. game.ok(), the dialogue box and game.choose already ignore band presses; this is for the
+   app's own hit tests (the counter rows, the dial, the cup, the coins and the scrolling pages). */
+function pagePress() {
+  var p = game.pointer, s = game.stage;
+  return !!p.pressed && p.stageX >= s.x && p.stageX < s.x + W && p.stageY >= s.y && p.stageY < s.y + H;
+}
 
 var W = game.width, CX = W / 2, CY = 106;      /* 216 x 240; the luopan sits on an 180 x 180 plate */
 var PLATE = 180, PLATE_X = (W - PLATE) / 2, PLATE_Y = 16;
@@ -265,7 +277,7 @@ function update(dt) {
   }
 
   var p = game.pointer, acted = false;
-  if (p.pressed) {
+  if (pagePress()) {
     if (panel) closePanel();
     else if (inDial(p.x, p.y)) openPanel();
   }
@@ -576,7 +588,7 @@ function scrollUpdate(sc, area, total, dt, lineHeight) {
       if (sc.held >= sc.next) { sc.offset += dir * lineHeight; sc.next += 0.09; sfx("move"); }
     }
   } else { sc.direction = 0; sc.held = 0; }
-  if (p.pressed) {
+  if (pagePress()) {
     scrollGestureMoved = false;
     sc.down = p.y >= area.y && p.y <= area.y + area.h;
     sc.moved = false; sc.startY = p.y; sc.lastY = p.y; sc.velocity = 0;
@@ -592,7 +604,7 @@ function scrollUpdate(sc, area, total, dt, lineHeight) {
     sc.down = false;
     releasedNow = true;
   }
-  if (!sc.down && !p.pressed && !releasedNow && Math.abs(sc.velocity) > 8) {
+  if (!sc.down && !pagePress() && !releasedNow && Math.abs(sc.velocity) > 8) {
     sc.offset += sc.velocity * dt;
     sc.velocity *= Math.pow(0.001, dt / 0.4);
     if (sc.offset <= 0 || sc.offset >= max) sc.velocity = 0;
@@ -859,7 +871,7 @@ function updateCounter() {
   var p = game.pointer, i;
   if (game.pressed("up")) { counterCursor = (counterCursor + SECTIONS.length - 1) % SECTIONS.length; sfx("move"); }
   if (game.pressed("down")) { counterCursor = (counterCursor + 1) % SECTIONS.length; sfx("move"); }
-  if (p.pressed && p.y >= COUNTER_TOP) {
+  if (pagePress() && p.y >= COUNTER_TOP) {
     i = Math.floor((p.y - COUNTER_TOP) / COUNTER_ROW);
     if (i >= 0 && i < SECTIONS.length) { counterCursor = i; openSection(SECTIONS[i].id); sfx("tap"); return; }
   }
@@ -1220,7 +1232,7 @@ function updateFortune(dt) {
       rows.length * lineH, dt, lineH);
     /* writing to notes is the player's own choice: START, never a question (owner, 2026-11-27) */
     if (game.pressed("start")) { appendSlip(); return; }
-  } else if (game.pressed("a") || (game.pointer.pressed && game.pointer.y >= 45 && game.pointer.y <= 208)) {
+  } else if (game.pressed("a") || (pagePress() && game.pointer.y >= 45 && game.pointer.y <= 208)) {
     drawSlip();
   }
   if (!game.pointer.down) scrollGestureMoved = false;
@@ -1554,7 +1566,7 @@ function updateHexagram(dt) {
     return;
   }
   var p = game.pointer;
-  if (p.pressed && !guaState.animating && guaState.lines.length < 6 && p.y >= 40 && p.y <= 205) tossGuaLine();
+  if (pagePress() && !guaState.animating && guaState.lines.length < 6 && p.y >= 40 && p.y <= 205) tossGuaLine();
   if (game.pressed("a")) tossGuaLine();
 }
 function drawHexagram(g) {
