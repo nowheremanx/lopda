@@ -661,25 +661,25 @@
         "...1.1.1.1.1.1..",
         "................"
       ],
-      "version": "1.4.9",
+      "version": "1.4.10",
       "released": "2026-11-27",
       "updated": "2026-11-28",
-      "description": "吉他和弦字典：32 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。",
+      "description": "吉他和弦字典：32 种和弦性质、斜线和弦、标准调弦 EADGBE、capo 0-12，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。",
       "i18n": {
         "zh": {
           "name": "和弦大全",
-          "description": "吉他和弦字典：32 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。"
+          "description": "吉他和弦字典：32 种和弦性质、斜线和弦、标准调弦 EADGBE、capo 0-12，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。"
         },
         "en": {
           "name": "Chords",
-          "description": "EADGBE, no capo: 32 qualities, slash chords, shapes, scales, progressions."
+          "description": "EADGBE, capo 0-12: 32 qualities, slash chords, shapes, scales, progressions."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/chord-book/index.html",
-      "sha256": "0f14bf9f06119cf69ad85e2149ed0968a5cd8717539f7706261983b3e1761fed",
-      "bytes": 131469
+      "sha256": "cdd3059d18ca10cc53a6f74a5d2126305d294b7708d5a812a894ad0cdee7a56b",
+      "bytes": 136244
     },
     {
       "spec": "lopda/1",

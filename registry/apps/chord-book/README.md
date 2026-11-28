@@ -1,8 +1,8 @@
 # 和弦大全 / Chords: notes for maintainers
 
 A guitar chord dictionary for Lo-PDA. This version covers **32 chord qualities plus slash chords, in standard tuning
-(EADGBE) only, with no capo**; a capo is planned for v2 (section 11), while other tunings and a left-handed layout are
-not planned yet. It has 65 hand-written open and slash shapes, up to 24 voicings each, four pictures of a chord,
+(EADGBE) only, with a capo from 0 to 12**; other tunings and a left-handed layout are not planned yet. It has 65
+hand-written open and slash shapes, up to 24 voicings each, four pictures of a chord,
 32 common progressions with a note on why each works, a scale view for improvising, and a finder that names the chord
 your fingers make. Sound is a plucked string made in the app.
 
@@ -36,7 +36,9 @@ From top to bottom:
   a normal pick, search or recent chip clears the note (1.4.4).
 - **Picture:** one of four views.
 - **Quality line:** the chord quality, or in the improv view the scale's name.
-- **Info line:** the frets, the voicing's number and its position, or in the improv view the scale's degrees.
+- **Info line:** the frets, the voicing's number and its position, or in the improv view the scale's degrees. With a capo
+  on, the frets are followed by `变调夹 n · 实际 X` / `Capo n · sounds X`: the frets, the capo and the real chord are
+  never dropped when the line is long; the voicing's number goes first, then the position.
 - **Bottom row:** one 44 x 44 cell per string, or in the improv view the why and the legend. A tap on the why opens it
   in full on its own screen (`#whyfull`).
 - **Footer:** previous, strum, next, mute. In the improv view previous and next become Prev scale and Next scale, and
@@ -63,6 +65,22 @@ The root and bass grids write the common enharmonic beside the book's name (`C#/
 selected state is still the pitch class, the bass grid still leaves the root out, and the title and every chord name,
 tone name, search result and save keep `Chords.NAMES` (so tapping `C#/Db` gives C#). Five characters fit the four-column
 grid at 331, and the cells stay 44 px tall (1.4.5).
+
+The last row is the capo, 0-12 (`#capo`, a `grid4` with 13 cells). It takes effect at once, like the order and the
+sound: `set.capo`, then `store()` and a repaint of the main screen behind the picker. A new capo is a new real chord and
+a new real scale, so the key's spelling (`spelledName`) and the chosen scale (`md`) are cleared with it (1.4.10).
+
+### The capo: a shape and the chord it sounds
+
+The header, the picker, the voicings, the save and the finder's frets all hold the **shape**; everything played or worked
+out by key holds the **sounding** chord, `Chords.transpose(shape, capo)` (root and bass moved, quality unchanged). So C
+x32010 under capo 2 is written `C` in the header and `实际 D` in the info line, and its strings are D F# A D F# with the
+shape's degrees R 3 5 R 3.
+
+`Chords.midiOf(frets, capo)`, `strings(frets, c, capo)`, `identify(frets, capo)` and `Draw.scale(notes, capo)` take the
+capo as an optional last argument; 0 is a no-op. `strings` looks its degrees up with `OPEN + frets` (the shape) and adds
+the capo only to `midi` / `pc`. `Draw.box`, `map` and `neck` take no capo at all: they are pictures of the shape, so the
+four pictures are the same at every capo (an e2e test compares `#pic` pixel by pixel at 0, 2 and 12).
 
 ### The progressions screen
 
@@ -114,9 +132,10 @@ below a chord tone. The tests check that every avoid note is a half step over a 
 
 ## Saved state
 
-`PAD.save("set", {v: 1, cur: {root, q, bass, i}, sort, view, vol, lastVol, recent})`. `adopt()` in app.js reads older saves:
+`PAD.save("set", {v: 1, cur: {root, q, bass, i}, sort, view, vol, lastVol, capo, recent})`. `adopt()` in app.js reads older saves:
 
 - 1.2.0's `map: true` becomes `view: "map"`.
+- a save from before 1.4.10 has no `capo`: it opens at 0; only a whole number 0-12 is believed.
 - Anything it does not know is dropped.
 
 The scale chosen in the improv view is not saved: a new chord starts on its default.
