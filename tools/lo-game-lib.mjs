@@ -5,7 +5,8 @@
 //   <script data-lo-game="VERSION"> sdk/lo-game.js, verbatim </script>
 //   <script data-lo-title="VERSION"> sdk/lo-title.js, verbatim (the shared title screen) </script>
 //   <script data-lo-font="lopix12"> license notice + only the glyphs the app uses </script>
-//     after the lo-game block (LoGame.font), else after the lo-title block (LoTitle.font); with both, it feeds both
+//     after whichever of the lo-game and lo-title blocks comes later in the file (LoGame.font and/or LoTitle.font);
+//     with both, it feeds both
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -86,8 +87,9 @@ export function wantsBuild(html) {
   return new RegExp(SRC_BLOCK.source).test(html) || LIB3D_BLOCK.test(html) || LIB_BLOCK.test(html) || LIBT_BLOCK.test(html);
 }
 
-/* fill data-src blocks (needs dir), then the lo-3d block, then the lo-game block, and (re)build the font block
-   after the lo-game block. Returns null when the app asks for none of them; throws when a data-src rule fails. */
+/* fill data-src blocks (needs dir), then the lo-3d block, then the lo-game and lo-title blocks, and (re)build the
+   font block after whichever framework block comes later (it calls both font functions when an app has both).
+   Returns null when the app asks for none of them; throws when a data-src rule fails. */
 export function build(html, dir) {
   if (!wantsBuild(html)) return null;
   let out = html;
@@ -102,7 +104,10 @@ export function build(html, dir) {
     if (LIB_BLOCK.test(out)) out = out.replace(LIB_BLOCK, () => `<script data-lo-game="${LIB_VERSION}">\n${LIB}</script>`);
     if (LIBT_BLOCK.test(out)) out = out.replace(LIBT_BLOCK, () => `<script data-lo-title="${LIBT_VERSION}">\n${LIBT}</script>`);
     const font = fontBlock(out);
-    out = out.replace(LIB_BLOCK.test(out) ? LIB_BLOCK : LIBT_BLOCK, (m) => m + "\n" + font);
+    /* the font block names both LoGame.font and LoTitle.font, so it has to sit after the block that is later in
+       the file: with lo-title after lo-game the old "after lo-game" rule called LoTitle.font before LoTitle existed */
+    const afterTitle = LIBT_BLOCK.test(out) && (!LIB_BLOCK.test(out) || out.search(LIBT_BLOCK) > out.search(LIB_BLOCK));
+    out = out.replace(afterTitle ? LIBT_BLOCK : LIB_BLOCK, (m) => m + "\n" + font);
   }
   return out;
 }

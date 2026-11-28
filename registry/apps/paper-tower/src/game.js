@@ -11,7 +11,7 @@ var D = PT.DATA, R = PT.RULES, A = PT.ART, M = PT.MUSIC;
 var HUD = 30, TS = 16, VIEW_H = 144 - HUD, VIEW_W = 160, MAP_W = 11 * TS, MAP_H = 11 * TS;
 var DIRS = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
 var SLOT_KEYS = ["auto", "slot1", "slot2", "slot3"];
-var S = null, busy = false, musicId = null;
+var S = null, busy = false, fading = false, musicId = null;
 var canSave = true;   /* false once a save could not be read: then nothing is written over it (SPEC.md 8) */
 function unreadable() { canSave = false; return null; }
 var toastMsg = null, toastT = 0, banner = null, bannerT = 0;
@@ -54,13 +54,16 @@ function loadRun(key) { return game.load(key).then(function (v) { return v ? R.h
 /* ---------- title screen: the shared fog title (sdk/lo-title.js) ----------
    The cover is PT.titleCover; the menu, its bar and the fog are lo-title's. The 160 x 144 game canvas stays
    under the title's full-stage canvas. Save state is the same three documents as before. */
-var titleCanvas = null, titleMenu = null, titleActs = [], titleAuto = null, titleMeta = null;
+var titleCanvas = null, titleMenu = null, titleActs = [], titleAuto = null, titleMeta = null, titleMoved = false;
 
 /* the menu the save state asks for: continue only with a run, as the old dialog had it */
 function titleSpec() {
   var items = [], acts = [];
   if (titleAuto) {
-    items.push({ label: t("继续", "Continue"), status: t("第 {n} 页", "page {n}").replace("{n}", titleAuto.floor) });
+    var cont = { label: t("继续", "Continue") };
+    /* a broken save puts the warning on the bar instead of the page: saving is off for this visit */
+    if (canSave) cont.status = t("第 {n} 页", "page {n}").replace("{n}", titleAuto.floor);
+    items.push(cont);
     acts.push("continue");
   }
   items.push({ label: t("新的一页", "A new page") }); acts.push("new");
@@ -73,9 +76,13 @@ function titleSpec() {
 }
 function titleRefresh() {
   if (!titleMenu) return;
+  /* a late save inserts 继续 above the first item: keep the item the player had chosen, but a menu nobody has
+     touched yet starts on the new first item (继续 once the run is found) */
+  var at = titleMenu.index(), was = titleActs[at];
   var e = titleSpec();
+  var next = titleMoved ? e.acts.indexOf(was) : 0;
   titleActs = e.acts;
-  titleMenu.set({ items: e.items, note: e.note });
+  titleMenu.set({ items: e.items, note: e.note, index: next >= 0 ? next : Math.min(at, e.items.length - 1) });
 }
 /* a dialog is drawn on the game canvas, so the title canvas steps aside while one is open */
 function titleShow(on) {
@@ -84,6 +91,7 @@ function titleShow(on) {
   titleCanvas.style.pointerEvents = on ? "auto" : "none";
 }
 function titleUnmount() {
+  if (titleMenu && titleMenu.destroy) titleMenu.destroy();
   titleMenu = null; titleActs = [];
   if (titleCanvas && titleCanvas.parentNode) titleCanvas.parentNode.removeChild(titleCanvas);
   titleCanvas = null;
@@ -95,6 +103,7 @@ function titleMount() {
   document.body.appendChild(titleCanvas);
   var e = titleSpec(), art = PT.titleCover;
   titleActs = e.acts;
+  titleMoved = false;
   titleMenu = LoTitle.mount(titleCanvas, {
     art: { w: art.W, h: art.H, px: art.draw() },
     title: { text: t("纸 塔", "PAPER TOWER"), y: 4, w: 140 },
@@ -102,7 +111,7 @@ function titleMount() {
     index: e.index,
     note: e.note,
     hint: e.hint,
-    onMove: function () { sfx("move"); },
+    onMove: function () { sfx("move"); titleMoved = true; },
     onPick: function (i) { sfx("tap"); titlePick(i); }
   });
 }
@@ -149,7 +158,7 @@ game.scene("title", {
     titleMount();
     /* a run on card turns the first item into 继续 with its page on the bar; the note follows the record */
     loadRun("auto").then(function (v) { titleAuto = v; titleRefresh(); });
-    game.load("meta").then(function (v) { titleMeta = v; titleRefresh(); }, unreadable);
+    game.load("meta").then(function (v) { titleMeta = v; titleRefresh(); }, function () { unreadable(); titleRefresh(); });
   },
   update: function () {
     if (busy || !titleMenu) return;
@@ -166,7 +175,14 @@ game.scene("title", {
    carry the same wall (sdk/UI.md 13). While a menu, a dialogue, a battle, a fade or the title is up the bands
    go flat, so the words are read on a calm screen. */
 function bandsCalm() {
-  return !S || busy || game.top() !== playScene;
+  return !S || busy || fading || game.top() !== playScene;
+}
+/* lo-game's own fade busy is private: mark the app's fades so the bands stay flat until the screen settles */
+function goFade(name, args, o) {
+  fading = true;
+  o = o || {};
+  o.fade = true;
+  return game.go(name, args, o).then(function () { fading = false; });
 }
 function bandWall(s, x, y, w, h) {
   if (w <= 0 || h <= 0) return;
@@ -234,7 +250,7 @@ function worldTap() {
 function goPlay() {
   syncHeroBase();
   banner = null; bannerT = 0; toastT = 0;
-  game.go("play", null, { fade: true });
+  goFade("play");
 }
 
 /* ---------- the play scene ---------- */
@@ -458,7 +474,7 @@ function revealSecrets() {
 }
 function reachLamp() {
   if (!S.flags["boss:12"]) { sfx("denied"); toast(t("蠹王还坐在灯座上。", "The King still sits on the lamp stand.")); return; }
-  game.go("ending", null, { fade: true, to: game.INK });
+  goFade("ending", null, { to: game.INK });
 }
 
 /* ---------- touching the map ---------- */
@@ -696,7 +712,7 @@ async function openMenu() {
     else if (act === "help") await helpPages();
     else if (act === "title") {
       var c = await game.choose([t("存好并回去", "Save and go"), t("留在这里", "Stay")], { title: t("回标题？", "Back to the title?") });
-      if (c === 0) { saveAuto(); busy = false; music("title"); game.go("title", null, { fade: true }); return; }
+      if (c === 0) { saveAuto(); busy = false; music("title"); goFade("title"); return; }
     }
   }
   busy = false;
@@ -1160,7 +1176,7 @@ game.scene("ending", {
   update: function () {
     if (endingPhase === "done" && (game.pressed("a") || game.pressed("start") || worldTap())) {
       music("title"); game.ambience(null);
-      game.go("title", null, { fade: true });
+      goFade("title");
     }
   },
   draw: function (g) {

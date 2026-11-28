@@ -1,4 +1,4 @@
-// 纸塔 / Paper Tower on lo-game 1.5.0's fill layout and lo-title 0.1.0: the canvas covers the five phone
+// 纸塔 / Paper Tower on lo-game 1.5.0's fill layout and lo-title 0.1.1: the canvas covers the five phone
 // stages from sdk/UI.md 13 with the world whole and centred, a tap that starts in the bands is not a world
 // tap, and the fog title is the app's title screen with the save state's items.
 import { test } from "node:test";
@@ -82,7 +82,7 @@ test("paper-tower app: is on 2.1.0 and asks lo-game for a fill screen with bands
   const src = read("registry/apps/paper-tower/src/game.js");
   assert.match(src, /LoGame\.create\(\{[^}]*width: 160, height: 144[^}]*fill: true[^}]*bands: paintBands/);
   const html = read("registry/apps/paper-tower/index.html");
-  assert.match(html, /<script data-lo-title="0\.1\.0">/);
+  assert.match(html, /<script data-lo-title="0\.1\.1">/);
   assert.match(html, /<script data-lo-game="1\.5\.0">/);
 });
 
@@ -160,6 +160,65 @@ test("the title is the shared fog screen over a tower cover with a calm lower th
   for (let y = 110; y < 156; y++) for (let x = 0; x < 208; x++) {
     assert.equal(px[y * 208 + x], 2, `the calm lower third is not flat at ${x},${y}`);
   }
+});
+
+test("a meta save that cannot be read refreshes the title's bar instead of leaving it stale", async () => {
+  const store = { auto: { v: 3, floor: 2, flags: { intro: true } } };
+  const on = { press: [], release: [] };
+  let rejectMeta = null;
+  const p = {
+    lang: "zh", spec: "lopda/1",
+    on(type, f) { (on[type] = on[type] || []).push(f); },
+    off() {}, isDown() { return false; }, sfx() {}, exit() {},
+    load(k) {
+      if (k === "meta") return new Promise((res, rej) => { rejectMeta = rej; });
+      return Promise.resolve(store[k] != null ? JSON.parse(JSON.stringify(store[k])) : null);
+    },
+    save() {}, remove() {},
+    press(b) { (on.press || []).forEach((f) => f(b)); },
+    release(b) { (on.release || []).forEach((f) => f(b)); }
+  };
+  const app = boot(APP, { pad: p, seed: 3, stage: { w: 331, h: 359 } });
+  await settle();
+  const menu = app.ctx.get("titleMenu");
+  assert.ok(menu && rejectMeta, "the title is up and its meta read is pending");
+  const notes = [], set = menu.set;
+  menu.set = function (opts) { if (opts && opts.note) notes.push(opts.note); return set.call(menu, opts); };
+  rejectMeta(new Error("corrupt meta"));
+  await frames(app, 4);
+  assert.equal(app.ctx.get("canSave"), false);
+  assert.ok(notes.some((n) => /存档读不出/.test(n)), "the mounted menu took the warning note");
+  assert.equal(menu.index(), 0, "an untouched title starts on 继续");
+  assert.equal(app.ctx.get("titleSpec")().acts[menu.index()], "continue");
+  assert.equal(app.ctx.get("titleSpec")().items[0].status, undefined,
+    "no page status on 继续, so the warning is the bar's line");
+});
+
+test("a late save does not move a title the player has already rolled", async () => {
+  const on = { press: [], release: [] };
+  let resolveAuto = null;
+  const p = {
+    lang: "zh", spec: "lopda/1",
+    on(type, f) { (on[type] = on[type] || []).push(f); },
+    off() {}, isDown() { return false; }, sfx() {}, exit() {},
+    load(k) {
+      if (k === "auto") return new Promise((res) => { resolveAuto = res; });
+      return Promise.resolve(null);
+    },
+    save() {}, remove() {},
+    press(b) { (on.press || []).forEach((f) => f(b)); },
+    release(b) { (on.release || []).forEach((f) => f(b)); }
+  };
+  const app = boot(APP, { pad: p, seed: 3, stage: { w: 331, h: 359 } });
+  await settle(); await frames(app, 3);
+  const menu = app.ctx.get("titleMenu");
+  assert.ok(menu && resolveAuto, "the title is up and its auto read is pending");
+  assert.equal(menu.index(), 0);
+  await tap(app, p, "down");
+  assert.equal(menu.index(), 1, "the player rolled to 读取存档");
+  resolveAuto({ v: 3, floor: 2, flags: { intro: true } });
+  await frames(app, 4);
+  assert.equal(app.ctx.get("titleSpec")().acts[menu.index()], "load", "the chosen item stayed chosen");
 });
 
 test("the title menu lists the save state's items and A starts 新的一页", async () => {

@@ -3,7 +3,8 @@
 //   <script data-src="src/x.js"></script>   the app's own source files (src/ folder), verbatim
 //   <script data-lo-3d="1.0.0"></script>    sdk/lo-3d.js
 //   <script data-lo-game="1.2.0"></script>  sdk/lo-game.js, then a pixel-font block with only the glyphs used
-//   <script data-lo-title="0.1.0"></script> sdk/lo-title.js (the shared title screen; the font block follows it too)
+//   <script data-lo-title="0.1.1"></script> sdk/lo-title.js (the shared title screen; the font block follows the
+//                                           later of the lo-game and lo-title blocks)
 // Run it again whenever src/ or the app's text changes. Re-running is safe (filled blocks are replaced).
 // Usage: node tools/bundle-app.mjs registry/apps/<id> [more dirs...]
 //        node tools/bundle-app.mjs --hash     (print the version and hash of sdk/lo-3d.js and sdk/lo-game.js)
