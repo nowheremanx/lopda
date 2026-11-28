@@ -119,11 +119,11 @@ var LoGame = (function () {
     var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
     if (stageW > 0 && stageH > 0) {
       k = stageW / worldW;
-      ch = Math.ceil(stageH / k - 0.01);
+      ch = Math.ceil(stageH / k);
       if (ch < worldH) {
         /* a stage too short for the world's width: fit by height and grow wider at the sides */
         k = stageH / worldH;
-        cw = Math.max(worldW, Math.ceil(stageW / k - 0.01));
+        cw = Math.max(worldW, Math.ceil(stageW / k));
         ch = worldH;
         x = Math.floor((cw - worldW) / 2);
       } else {
@@ -378,8 +378,11 @@ var LoGame = (function () {
         if (!stageBuf || !stageImage) return 0;
         var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
         for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
           var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
-          var v2 = srcX2 < 0 || srcY2 < 0 || srcX2 >= sw || srcY2 >= sh ? PAPER : stageBuf[srcY2 * sw + srcX2];
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
           var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
           sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
         }

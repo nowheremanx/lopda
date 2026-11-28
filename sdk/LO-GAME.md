@@ -106,11 +106,16 @@ The canvas is laid out to cover the stage edge to edge from the stage's own
   grows **wider** than the world; the extra columns at the sides carry the scenery, never paper.
 - Canvas rows round up, CSS sizes are exact (never rounded), and the canvas is re-laid-out whenever the stage's
   size changes, checked every animation frame after it starts. The canvas is repainted immediately.
+- The canvas covers the stage edge to edge; a fractional CSS size may overshoot the bottom or sides by less than
+  one canvas pixel. If you pass your own `parent`, give that stage `overflow: hidden`, or the overshoot can show
+  as a scrollbar or a line at the edge.
 
 `bands(s, stage)` is called on every drawn frame, before the world is copied in:
 
 - `s` is a drawing surface with all of section 3's methods, in **stage pixels**: `(0, 0)` is the canvas's top
-  left and `s.width`/`s.height` are the canvas's size. It has its own origin and clip.
+  left and `s.width`/`s.height` are the canvas's size. It has its own origin and clip. The surface persists
+  between frames, so `bands` must clear it (or paint every pixel it owns) on every call, or what it drew last
+  frame remains as a ghost wherever this frame paints nothing.
 - `stage` is `{w, h, k, x, y, worldW, worldH}`: the canvas's size, CSS pixels a canvas pixel, where the world
   sits in the canvas, and the world's size. The object is reused between frames.
 - Anything the world draws covers what `bands` painted in the world's rect, so a HUD in `bands` goes in the

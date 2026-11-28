@@ -27,14 +27,16 @@
     var w = i.w, h = i.h, sky = i.y, ground = i.y + i.worldH, floor = h - ground, n, st, x, y;
     s.clear(0);
     if (sky > 0) {
-      for (n = 0; n < bandStars.length; n++) {
+      /* the pause map is a flat dark board: keep its sky quiet, not a busy star strip */
+      var stars = pauseOpen ? 18 : bandStars.length;
+      for (n = 0; n < stars; n++) {
         st = bandStars[n];
         x = Math.floor(st.u * w);
         y = Math.floor(st.v * sky);
-        if (x >= 0 && x < w) s.pixel(x, y, st.t);
+        if (x >= 0 && x < w) s.pixel(x, y, pauseOpen ? 1 : st.t);
       }
       /* the station's moon, only where the sky is tall enough for it */
-      if (sky >= 30) {
+      if (!pauseOpen && sky >= 30) {
         var mx = Math.floor(w * 0.78), my = Math.floor(sky * 0.5), mr = Math.min(10, Math.floor(sky / 5));
         s.circle(mx, my, mr, 2, true);
         s.pixel(mx - 3, my - 2, 0); s.pixel(mx + 2, my + 3, 0); s.pixel(mx + 4, my - 4, 0);
@@ -558,9 +560,10 @@
   }
 
   /* ---------------- pause and the map ---------------- */
-  var pauseSel = 0;
+  var pauseSel = 0, pauseOpen = false;
   game.scene("pause", {
-    enter: function () { pauseSel = 0; },
+    enter: function () { pauseSel = 0; pauseOpen = true; },
+    exit: function () { pauseOpen = false; },
     update: function () {
       var d = game.dir();
       if (d.y) { pauseSel = (pauseSel + d.y + 3) % 3; sfx("tick"); }
