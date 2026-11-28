@@ -180,6 +180,7 @@ GM.startRun = function (state, seed) {
 GM.startLevel = function (state, n) {
   state.level = n;
   state.target = GM.targetFor(n);
+  state.levelBank = state.bank;     /* the cash this level started with: the scoreboard's gauge and the carts count from it */
   state.time = GM.LEVEL_TIME;
   state.jingleId = (state.jingleId || 0) + 1;
   state.lastSec = GM.LEVEL_TIME;
