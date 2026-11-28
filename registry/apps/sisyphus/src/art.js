@@ -51,15 +51,27 @@ var ART = (function () {
     var wet = s.weather === "rain";
     return night ? 0.12 : 3.08 - 2.25 * day - (wet ? 0.28 : 0);
   }
-  function sky(g, s) {
+  /* the sky's two ends, shared by sky() and the bands around the world so they never drift apart */
+  function skyValues(s) {
     var night = s.mode === "descent";
     var day = night ? 1 : s.p;
     var wet = s.weather === "rain";
-    var topV = skyTop(s);
-    var horV = night ? 0.92 : 1.85 + 1.15 * Math.sin(day * Math.PI) - (wet ? 0.30 : 0);
-    var horizon = 116;
+    return {
+      night: night, day: day, wet: wet,
+      topV: skyTop(s),
+      horV: night ? 0.92 : 1.85 + 1.15 * Math.sin(day * Math.PI) - (wet ? 0.30 : 0)
+    };
+  }
+  /* the sky's tone at a row; above the world's top the same line is extrapolated, which
+     only makes the sky darker towards the zenith (or keeps it at paper at the foot) */
+  function skyAt(sv, y) {
+    return y < 116 ? sv.topV + (sv.horV - sv.topV) * (y / 116) : sv.horV;
+  }
+  function sky(g, s) {
+    var sv = skyValues(s);
+    var night = sv.night, day = sv.day, wet = sv.wet;
     for (var y = 0; y < H; y++) {
-      var v = y < horizon ? topV + (horV - topV) * (y / horizon) : horV;
+      var v = skyAt(sv, y);
       for (var x = 0; x < W; x++) px(g, x, y, v);
     }
 
@@ -155,6 +167,56 @@ var ART = (function () {
   }
 
   /* ---------------- the mountain and its ledge ---------------- */
+  /* The near cliff's tone at a world point below its ledge, and the far slope's beyond the
+     summit. terrain() and the bands around the world share them: the stage's rows below the
+     world and columns beside it are the same mountain, evaluated a little past the edge. */
+  function cliffTone(s, wx, wy) {
+    var night = s.mode === "descent";
+    var top = Math.max(WORLD.pathY(wx) - s.cam.y + 4, 0);
+    var d = (wy - top) / Math.max(1, H - top);
+    var v = night ? 0.72 - d * 0.68 : 1.38 - d * 1.30;
+    v += Math.sin(wx * 0.031 + wy * 0.14) * 0.055;
+    /* large diagonal facets, then the horizontal strata, then the deep cracks */
+    var facet = (wx * 0.55 + (wy - top) * 1.35) / 46;
+    v += ((Math.floor(facet) % 3) - 1) * 0.11;
+    if ((facet - Math.floor(facet)) * 46 < 1.4) v -= 0.30;
+    if ((wy + Math.floor(Math.sin(wx * 0.041) * 4)) % 22 === 0) v -= 0.42;
+    if (crack(wx, wy)) v = 0.02;
+    return v;
+  }
+  /* the other side: one narrow lit rim, then the far slope in the crest's shadow, then the
+     cloud sea lower down. The first pixels after the summit borrow the near cliff's value,
+     so the two faces meet on the ridge instead of at a vertical seam. */
+  function farTone(s, wx, wy) {
+    var night = s.mode === "descent";
+    var fy = WORLD.farPathY(wx) - s.cam.y;
+    var mix = Math.min(1, (wx - WORLD.SUMMIT_X) / 16);
+    var top0 = Math.max(fy + 4, 0);
+    var nearD = 1 / Math.max(1, H - top0);
+    var rim = Math.max(0, Math.min(H, fy + 2));
+    var foot = Math.max(0, Math.min(H, fy + 26));
+    var v;
+    if (wy < rim) {
+      /* the last light on the crest: at most three pixels */
+      v = wy < fy + 1 ? (night ? 2.0 : 2.9) : (night ? 1.3 : 1.9);
+    } else if (wy < foot) {
+      /* the far slope is in shadow, not a second lit wall */
+      var fd = (wy - rim) / Math.max(1, foot - rim);
+      v = night ? 0.92 - fd * 0.14 : 1.46 - fd * 0.10;
+    } else {
+      /* the cloud sea sits lower and stays close to mid */
+      var d3 = (wy - foot) / Math.max(1, H - foot);
+      v = night ? 0.82 - d3 * 0.22 : 2.02 - d3 * 0.34;
+      v += Math.sin(wx * 0.05 + wy * 0.19) * 0.14;
+    }
+    if (wy >= rim && mix < 1) {
+      var d0 = Math.max(0, wy - top0) * nearD;
+      var near = night ? 0.72 - d0 * 0.68 : 1.38 - d0 * 1.30;
+      v = near + (v - near) * mix;
+    }
+    if (wy >= rim && (wy + Math.floor(Math.sin(wx * 0.05) * 3)) % 9 === 0) v -= 0.28;
+    return v;
+  }
   function terrain(g, s) {
     var cam = s.cam;
     var night = s.mode === "descent";
@@ -173,53 +235,9 @@ var ART = (function () {
         px(g, x, py + 3, 0.15);
 
         /* cliff below the ledge */
-        var top = Math.max(py + 4, 0);
-        for (var y = top; y < H; y++) {
-          var d = (y - top) / Math.max(1, H - top);
-          var v = night ? 0.72 - d * 0.68 : 1.38 - d * 1.30;
-          v += Math.sin(wx * 0.031 + y * 0.14) * 0.055;
-          /* large diagonal facets, then the horizontal strata, then the deep cracks */
-          var facet = (wx * 0.55 + (y - top) * 1.35) / 46;
-          v += ((Math.floor(facet) % 3) - 1) * 0.11;
-          if ((facet - Math.floor(facet)) * 46 < 1.4) v -= 0.30;
-          if ((y + Math.floor(Math.sin(wx * 0.041) * 4)) % 22 === 0) v -= 0.42;
-          if (crack(wx, y)) v = 0.02;
-          px(g, x, y, v);
-        }
+        for (var y = Math.max(py + 4, 0); y < H; y++) px(g, x, y, cliffTone(s, wx, y));
       } else {
-        /* the other side: one narrow lit rim, then the far slope in the crest's
-           shadow, then the cloud sea lower down. The first pixels after the
-           summit borrow the near cliff's value, so the two faces meet on the
-           ridge instead of at a vertical seam. */
-        var fy = WORLD.farPathY(wx) - cam.y;
-        var mix = Math.min(1, (wx - WORLD.SUMMIT_X) / 16);
-        var top0 = Math.max(fy + 4, 0);
-        var nearD = 1 / Math.max(1, H - top0);
-        var rim = Math.max(0, Math.min(H, fy + 2));
-        var foot = Math.max(0, Math.min(H, fy + 26));
-        for (var y2 = Math.max(0, fy - 1); y2 < H; y2++) {
-          var v2;
-          if (y2 < rim) {
-            /* the last light on the crest: at most three pixels */
-            v2 = y2 < fy + 1 ? (night ? 2.0 : 2.9) : (night ? 1.3 : 1.9);
-          } else if (y2 < foot) {
-            /* the far slope is in shadow, not a second lit wall */
-            var fd = (y2 - rim) / Math.max(1, foot - rim);
-            v2 = night ? 0.92 - fd * 0.14 : 1.46 - fd * 0.10;
-          } else {
-            /* the cloud sea sits lower and stays close to mid */
-            var d3 = (y2 - foot) / Math.max(1, H - foot);
-            v2 = night ? 0.82 - d3 * 0.22 : 2.02 - d3 * 0.34;
-            v2 += Math.sin(wx * 0.05 + y2 * 0.19) * 0.14;
-          }
-          if (y2 >= rim && mix < 1) {
-            var d0 = Math.max(0, y2 - top0) * nearD;
-            var near = night ? 0.72 - d0 * 0.68 : 1.38 - d0 * 1.30;
-            v2 = near + (v2 - near) * mix;
-          }
-          if (y2 >= rim && (y2 + Math.floor(Math.sin(wx * 0.05) * 3)) % 9 === 0) v2 -= 0.28;
-          px(g, x, y2, v2);
-        }
+        for (var y2 = Math.max(0, WORLD.farPathY(wx) - cam.y - 1); y2 < H; y2++) px(g, x, y2, farTone(s, wx, y2));
       }
     }
 
@@ -488,6 +506,153 @@ var ART = (function () {
     }
   }
 
+  /* ---------------- the stage around the world ----------------
+     sdk/UI.md 13 and LO-GAME.md 2.1: the world keeps its 160 x 178 and the canvas grows around it.
+     The rows above the world are more sky, the rows below the cliff's foot, and on a stage too
+     short for the world's width the columns beside it are the same mountain, seen edge on.
+     Every band point is evaluated at the world-screen point just past the world's edge, with
+     the world's own dither, so the sky, the ridges, the ledge and the rock run on without a
+     seam and no paper is left anywhere. calm (pause, the handbook, a quote, loading) keeps the
+     stars from twinkling and the high cloud still. */
+  var bandStars = [];
+  (function () {
+    var seed = 0x73697379;   /* "sisy" */
+    function next() {
+      seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+      return seed / 4294967296;
+    }
+    /* in world coordinates, spread over the sky the bands can show, so a star sits in the same
+       place at every phone size; the ones over the world itself are covered by it */
+    for (var i = 0; i < 420; i++) {
+      bandStars.push({ x: Math.round(next() * 330 - 85), y: Math.round(next() * 300 - 105) });
+    }
+  })();
+
+  function paintBands(s, st, sg, calm) {
+    var sv = skyValues(sg), night = sv.night, day = sv.day;
+    var cam = sg.cam;
+    var x0 = -st.x, x1 = x0 + st.w;                 /* the stage in world-screen columns */
+    var y0 = -st.y, y1 = y0 + st.h;                 /* and in world rows */
+    var sy0 = Math.max(0, y0), sy1 = Math.min(H, y1);
+    var x, y, i, c, v;
+
+    function put(x, y, v) { s.pixel(st.x + x, st.y + y, tone(v, x, y)); }
+
+    /* 1. the sky: over the world's top, and on a short stage beside it */
+    for (y = y0; y < 0; y++) {
+      v = skyAt(sv, y);
+      for (x = x0; x < x1; x++) put(x, y, v);
+    }
+    for (x = x0; x < 0; x++) for (y = sy0; y < sy1; y++) put(x, y, skyAt(sv, y));
+    for (x = W; x < x1; x++) for (y = sy0; y < sy1; y++) put(x, y, skyAt(sv, y));
+
+    /* 2. stars, as the world draws them, and the same rule for when the sky is dark enough;
+       a calm screen holds the twinkle at a fixed phase instead of stopping on a random one */
+    if (night || day > 0.9) {
+      for (i = 0; i < bandStars.length; i++) {
+        if (Math.sin((calm ? 0 : sg.time) * 1.7 + i * 2.3) <= -0.72) continue;
+        put(bandStars[i].x, bandStars[i].y, i % 5 === 0 ? 3 : 2.4);
+      }
+    }
+
+    /* 3. high cloud drifting across the band over the world, at the weather's pace: a lit top,
+       a body, a shadowed underside, so it reads as cloud rather than a scanline */
+    var bandH = -y0;
+    if (bandH >= 8) {
+      var wind = sg.weather === "wind" ? 2.2 : 1;
+      var rows = bandH >= 44 ? [0.14, 0.38, 0.62, 0.86] : (bandH >= 24 ? [0.20, 0.50, 0.80] : [0.45]);
+      for (c = 0; c < rows.length; c++) {
+        var cy = y0 + Math.round(bandH * rows[c]);
+        var off = ((calm ? 0 : sg.time) * (3 + c) * wind + c * 57) % 240;
+        var cloudV = night ? 0.55 : 2.45;
+        for (x = x0; x < x1; x++) {
+          var u = (x + off) / 240;
+          var puff = Math.sin(u * 6.283 * 2 + c) * 0.5 + 0.5;
+          if (puff <= 0.70) continue;
+          put(x, cy, cloudV);
+          put(x, cy + 1, cloudV - 0.6);
+          if (puff > 0.80) put(x, cy - 1, cloudV + 0.3);
+          if (puff > 0.88) put(x, cy + 2, cloudV - 1.1);
+        }
+      }
+    }
+
+    /* 4. the world's three low cloud bands, continued into the columns beside it */
+    if (sy1 > 0) {
+      var wind2 = sg.weather === "wind" ? 2.2 : 1;
+      for (c = 0; c < 3; c++) {
+        var lcy = 58 + c * 15;
+        var loff = (sg.time * (4 + c) * wind2 + c * 57) % 240 - 40;
+        for (x = x0; x < x1; x++) {
+          if (x >= 0 && x < W) continue;
+          var lu = (x + loff) / 240;
+          if (Math.sin(lu * 6.283 * 2 + c) * 0.5 + 0.5 > 0.72) {
+            var lv = night ? 0.55 : 2.45;
+            put(x, lcy + Math.sin(x * 0.05 + c) * 1.2, lv);
+            put(x, lcy + 1 + Math.sin(x * 0.05 + c) * 1.2, lv - 0.5);
+          }
+        }
+      }
+    }
+
+    /* 5. the distant ridges under everything, the world's own two layers */
+    function ridges(x, ya, yb) {
+      for (var layer = 0; layer < 2; layer++) {
+        var base = 92 + layer * 16 - (cam.y - 180) * 0.035;
+        var wxs = x + cam.x * (0.10 + layer * 0.07);
+        var yy = base + Math.sin(wxs * 0.026 + layer * 2.1) * (5 + layer * 2)
+          + Math.sin(wxs * 0.071 + layer) * (2.5 + layer);
+        var top = Math.round(yy);
+        var rv = night ? (layer ? 0.18 : 0.42) : (layer ? 0.95 : 1.65);
+        for (var ry = Math.max(ya, top); ry < yb; ry++) put(x, ry, rv - (ry - top) * 0.002);
+      }
+    }
+
+    /* 6. the mountain itself: the near cliff's ledge and rock, or the far slope and its cloud sea */
+    function rock(x, ya, yb) {
+      var wx = cam.x + x;
+      if (wx <= WORLD.SUMMIT_X) {
+        var py = WORLD.pathY(wx) - cam.y;
+        /* the ledge's five pixels, the same the world draws: a pale top, a dark underside */
+        var ledge = [night ? 2.0 : 3.0, 2.0, 2.0, 1.1, 0.15];
+        for (var l = 0; l < ledge.length; l++) {
+          if (py - 1 + l >= ya && py - 1 + l < yb) put(x, py - 1 + l, ledge[l]);
+        }
+        for (y = Math.max(ya, py + 4, 0); y < yb; y++) put(x, y, cliffTone(sg, wx, y));
+      } else {
+        var fy = WORLD.farPathY(wx) - cam.y;
+        for (y = Math.max(ya, fy - 1, 0); y < yb; y++) put(x, y, farTone(sg, wx, y));
+      }
+    }
+
+    /* 7. the columns beside the world: ridges, then the rock the world would draw there */
+    if (sy1 > sy0) {
+      for (x = x0; x < 0; x++) ridges(x, sy0, sy1);
+      for (x = W; x < x1; x++) ridges(x, sy0, sy1);
+      /* 8. the cloud sea at the foot, under the ridges and over the cliff's foot */
+      for (i = 0; i < 4; i++) {
+        var scx = (i * 59 + sg.time * 2.5) % 210 - 30;
+        var scy = 124 + (i * 7) % 11;
+        var ww = 26 + (i % 2) * 12;
+        for (x = -ww; x <= ww; x++) {
+          var sx2 = scx + x;
+          if (sx2 < x0 || sx2 >= x1) continue;
+          if (sx2 >= 0 && sx2 < W) continue;   /* the world draws its own */
+          var edgeW = Math.sin((x / ww) * 1.5708);
+          var hh = Math.max(1, Math.round(edgeW * 3));
+          for (y = -hh; y <= 1; y++) put(sx2, scy + y, night ? 0.75 : 2.35);
+        }
+      }
+      for (x = x0; x < 0; x++) rock(x, sy0, sy1);
+      for (x = W; x < x1; x++) rock(x, sy0, sy1);
+    }
+    /* 9. the rows under the world: the ridges and then the mountain running on down */
+    if (y1 > H) {
+      for (x = x0; x < x1; x++) ridges(x, Math.max(H, y0), y1);
+      for (x = x0; x < x1; x++) rock(x, Math.max(H, y0), y1);
+    }
+  }
+
   function drawWorld(g, s) {
     sky(g, s);
     ridges(g, s);
@@ -508,6 +673,7 @@ var ART = (function () {
   return {
     W: W, H: H, tone: tone, px: px, disc: disc, line2: line2,
     sky: sky, skyTop: skyTop, ridges: ridges, cloudSea: cloudSea, terrain: terrain,
+    cliffTone: cliffTone, farTone: farTone, paintBands: paintBands,
     boulder: boulder, sisyphus: sisyphus, spawnDust: spawnDust, updateDust: updateDust, drawDust: drawDust,
     reveal: reveal, card: card, wipe: wipe, drawWorld: drawWorld
   };

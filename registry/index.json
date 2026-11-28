@@ -295,9 +295,9 @@
         "................",
         "................"
       ],
-      "version": "0.2.2",
+      "version": "0.3.0",
       "released": "2026-10-27",
-      "updated": "2026-11-27",
+      "updated": "2026-11-28",
       "description": "推石上山。它滚下去。再推。加缪的十六句话在山顶等你。",
       "i18n": {
         "en": {
@@ -311,8 +311,8 @@
         "notes"
       ],
       "path": "apps/sisyphus/index.html",
-      "sha256": "2c5c3d82bdb44c9e3558161127309caedae2dd9ff3a7fa939e132ab46975fa0b",
-      "bytes": 104066
+      "sha256": "5a8f5b773c37a48204f8f2fb04bb231d00561e4413c4d5c8de085291ade368a6",
+      "bytes": 119097
     },
     {
       "spec": "lopda/1",
