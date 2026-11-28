@@ -1,6 +1,6 @@
 /* 和弦大全 / Chords: chord progressions (和弦连接). A hand-written table of common progressions, each in degrees of its key
    with a short note on why it works; forChord() finds the ones a chord belongs to and spells them in that chord's key.
-   Every one of the 19 qualities appears in at least one progression (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
+   Every one of the 25 qualities appears in at least one of the 26 progressions (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
    A progression is not anyone's property; the notes are our own words. Pachelbel's canon (1680s) is public domain.
    MIT License. Copyright (c) 2026 Haowei Wu. */
 var Progs = (function () {
@@ -153,6 +153,24 @@ var Progs = (function () {
       why: {
         zh: "九音给小和弦加了一点亮色，听着柔。根音往上四度是最常见的进行之一，但两个都是小和弦，没有 V 到 I 那种结束感，适合一直反复，neo-soul 常用。",
         en: "The 9th brightens a minor chord and softens it. Up a fourth is one of the commonest root moves, but with two minor chords there is no V-to-I sense of ending, so it can repeat for ever, as neo-soul does."
+      } },
+    { id: "colours", key: "maj", zh: "九与十三", en: "Ninths and thirteenths",
+      ch: [[0, "maj9"], [9, "m11"], [5, "6/9"], [7, "13"]], rn: ["Imaj9", "vim11", "IV6/9", "V13"],
+      why: {
+        zh: "四个和弦都带着九音或十三音：maj9 的九音、m11 的九音和十一音、6/9 的六音和九音、13 的十三音。它们共用的音很多：m11 把 maj9 的五个音全包了进去，6/9 和 m11 共用四个音，13 的三音又正是 maj9 的七音。换和弦时只动一两个音，颜色像在慢慢移动。V13 的十三音正好是 I 的三音，回到 I 时那个音不用挪，一直亮着。",
+        en: "Every chord here carries a 9th or a 13th: the 9 of maj9, the 9 and 11 of m11, the 6 and 9 of 6/9, the 13 of 13. They share plenty: m11 contains all five notes of maj9, 6/9 and m11 share four, and the 3rd of 13 is the 7th of maj9. A change moves only a note or two, so the colour seems to glide rather than switch. The 13th of V13 is the 3rd of I, so it stays put when the progression comes home, still ringing."
+      } },
+    { id: "add11", key: "maj", zh: "加十一", en: "Add 11",
+      ch: [[0, "add11"], [5, "add11"]], rn: ["Iadd11", "IVadd11"],
+      why: {
+        zh: "加十一和弦把四音放在大三音上面，两个音只隔半音，像挂留一样磨着，却从不落到三音上解决。它没有七音的重量，也没有属和弦的拉力，所以更像一种颜色，而不是一个句号。",
+        en: "An add11 puts the 4th on top of the major 3rd. The two are a half step apart and rub like a suspension, but the 4 never falls to the 3rd and settles. With no 7th and no dominant pull it is a colour rather than a full stop."
+      } },
+    { id: "altered9", key: "maj", zh: "变化属七（升九）", en: "Altered dominant (sharp 9)",
+      ch: [[0, "7#9"], [5, "7#9"]], rn: ["I7#9", "IV7#9"],
+      why: {
+        zh: "升九音其实就是小三音，和大三音一起响：同一个和弦里同时有大三度和小三度，磨得很厉害。它仍然是个属七和弦，解决到主和弦时那股拉力还在；停在 I 或 IV 上不解决，就成了一大块悬着的颜色。",
+        en: "The sharp 9 is really a minor 3rd sounding at the same time as the major 3rd: one chord holding both, a hard rub. It is still a dominant 7th, so the pull is there when it resolves; left unresolved on I or IV it becomes a large suspended colour."
       } }
   ];
 
