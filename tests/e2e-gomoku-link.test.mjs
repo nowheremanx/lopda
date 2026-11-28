@@ -65,8 +65,15 @@ async function waitState(frame, fn, arg, timeout = 15000) {
 async function place(t, frame, x, y) {
   const s = await state(frame);
   const box = await frame.locator("#c").boundingBox();
-  const k = box.width / s.size;
-  await t.p.mouse.click(box.x + (s.pad + x * s.cell) * k, box.y + (s.pad + y * s.cell) * k);
+  await t.p.mouse.click(box.x + (s.bx + s.pad + x * s.cell) * box.width / s.W,
+    box.y + (s.by + s.pad + y * s.cell) * box.height / s.H);
+}
+/* the bottom bar's buttons are painted into the canvas: a tap is a mouse click on their rect */
+async function tapButton(t, frame, id) {
+  const s = await state(frame), b = s.buttons[id];
+  assert.ok(b, `the ${id} button is painted in the bar`);
+  const box = await frame.locator("#c").boundingBox();
+  await t.p.mouse.click(box.x + (b.x + b.w / 2) * box.width / s.W, box.y + (b.y + b.h / 2) * box.height / s.H);
 }
 const waitMoves = (frame, n) => waitState(frame, (want) => window.__gomoku().moves === want, n);
 
@@ -137,8 +144,8 @@ test("gomoku link: pair, five moves each, duplicate ignored, missed move resynce
   assert.equal((await state(white.frame)).moves, 11, "the board stays after a close");
 
   // reconnect on both sides: each says "n,<count>", white has fewer and asks for the whole game
-  await black.frame.click("#rc");
-  await white.frame.click("#rc");
+  await tapButton(black, black.frame, "rc");
+  await tapButton(white, white.frame, "rc");
   await waitState(black.frame, () => window.__gomoku().open);
   await waitState(white.frame, () => window.__gomoku().open);
   await waitMoves(white.frame, 12);
@@ -157,7 +164,7 @@ test("gomoku link: pair, five moves each, duplicate ignored, missed move resynce
   assert.deepEqual(wGap.board, bGap.board, "the board is unchanged by the reply");
 
   // Leave during a match asks nothing and goes back to the start menu, closing the link
-  await black.frame.dispatchEvent("#ln", "pointerdown");
+  await tapButton(black, black.frame, "ln");
   await waitState(black.frame, () => window.__gomoku().mode === "solo");
   await black.frame.waitForFunction(() => window.PAD.link.state === "closed", null, { timeout: 5000 });
   await waitState(white.frame, () => !window.__gomoku().open);
