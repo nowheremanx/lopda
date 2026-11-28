@@ -392,3 +392,90 @@ PT.ART = (function () {
   });
   return A;
 })();
+
+/* The title cover for sdk/lo-title.js: 208 x 156 tone indices (0 paper, 1 mid, 2 dark, 3 ink), row by row.
+   The dark page sky holds a paper moon and a few blown sheets; the seven-strip tower stands under its lamp
+   on a ledge, and everything from the ledge down is flat dark ground, the calm lower third the fog and the
+   menu stand on (LO-TITLE.md). Drawn once, no clock: the shared title screen animates the fog and the menu. */
+PT.titleCover = (function () {
+  "use strict";
+  var W = 208, H = 156, GROUND = 92;
+  function put(px, x, y, t) {
+    x = Math.round(x); y = Math.round(y);
+    if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = t;
+  }
+  function rect(px, x, y, w, h, t) {
+    x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+    for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) put(px, x + i, y + j, t);
+  }
+  function disc(px, cx, cy, r, t) {
+    for (var y = -r; y <= r; y++) for (var x = -r; x <= r; x++)
+      if (x * x + y * y <= r * r) put(px, cx + x, cy + y, t);
+  }
+  function line(px, x0, y0, x1, y1, t) {
+    var n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)), i;
+    for (i = 0; i <= n; i++) put(px, x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, t);
+  }
+
+  function draw() {
+    var px = new Uint8Array(W * H), seed = 0x70617065, i, x, y;
+    px.fill(3);   /* ink: the page's night */
+    /* stars, fixed so every start and every screenshot is the same */
+    for (i = 0; i < 44; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      x = seed % W;
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      y = 3 + (seed >> 5) % 86;
+      put(px, x, y, i % 9 === 0 ? 0 : i % 4 === 0 ? 1 : 2);
+    }
+    /* the moon, low on the right: a paper disc with darker seas */
+    disc(px, 166, 48, 13, 1);
+    disc(px, 166, 48, 11, 0);
+    disc(px, 162, 45, 2, 1);
+    disc(px, 170, 53, 3, 1);
+    put(px, 171, 52, 0);
+    put(px, 161, 44, 0);
+    /* blown sheets: five little pages tumbling in the draught */
+    var sheets = [[22, 66], [48, 37], [140, 84], [178, 70], [34, 88]];
+    for (i = 0; i < sheets.length; i++) {
+      x = sheets[i][0]; y = sheets[i][1];
+      rect(px, x, y, 7, 5, 0);
+      rect(px, x, y + 4, 7, 1, 1);
+      line(px, x + 1, y + 3, x + 5, y + 1, 2);
+    }
+    /* the lamp on the tower's top: an ink frame around a paper pane and a small flame */
+    rect(px, 99, 30, 10, 11, 3);
+    rect(px, 100, 31, 8, 8, 0);
+    rect(px, 101, 33, 6, 4, 1);
+    rect(px, 102, 32, 4, 2, 0);
+    rect(px, 103, 36, 2, 2, 0);
+    rect(px, 102, 41, 4, 2, 2);
+    rect(px, 103, 43, 2, 3, 2);   /* the stem onto the tower's top strip */
+    put(px, 104, 27, 0); put(px, 103, 28, 1); put(px, 105, 28, 1);
+    /* seven folded strips, widest at the foot, each with its paper edge, ink seams and windows */
+    var widths = [22, 28, 34, 40, 46, 52, 58];
+    y = 46;
+    for (i = 0; i < widths.length; i++) {
+      var w = widths[i], sx = Math.round(104 - w / 2), fill = i % 2 ? 1 : 0, k, n, step;
+      rect(px, sx, y, w, 6, fill);
+      rect(px, sx, y, w, 1, 0);
+      rect(px, sx, y + 5, w, 1, 3);
+      rect(px, sx, y, 1, 6, 3);
+      rect(px, sx + w - 1, y, 1, 6, 3);
+      n = w >= 40 ? 3 : 2; step = Math.floor(w / (n + 1));
+      for (k = 1; k <= n; k++) rect(px, sx + step * k - 1, y + 2, 2, 2, 3);
+      y += 6;
+    }
+    /* the ledge, its two folded supports, and the calm floor */
+    rect(px, 70, 88, 68, 2, 0);
+    rect(px, 70, 90, 68, 1, 2);
+    rect(px, 70, 91, 68, 1, 3);
+    line(px, 73, 92, 66, 99, 1);
+    line(px, 135, 92, 142, 99, 1);
+    rect(px, 0, GROUND, W, 1, 0);
+    rect(px, 0, GROUND + 1, W, 1, 2);
+    rect(px, 0, GROUND + 2, W, H - GROUND - 2, 2);
+    return px;
+  }
+  return { W: W, H: H, draw: draw };
+})();

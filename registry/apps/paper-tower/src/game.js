@@ -1,7 +1,9 @@
 /* Paper Tower: the game. A twelve-page tower-climbing RPG in the classic key-and-door tradition:
    walk, open doors, take stones, fight with arithmetic, buy from four shops, find the folds.
    Everything visible is drawn on lo-game's 160x144 four-tone screen. MIT License. */
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+/* the 160 x 144 page is the whole game; on a phone lo-game's fill canvas grows around it (sdk/UI.md 13)
+   and paintBands fills the extra stage with the tower's page walls and floor, never paper */
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
@@ -49,112 +51,185 @@ function pack() { var o = R.clone(S); o.savedAt = Date.now(); return o; }
 function saveAuto() { if (S && canSave) game.save("auto", pack()); }
 function loadRun(key) { return game.load(key).then(function (v) { return v ? R.hydrate(v) : null; }, unreadable); }
 
-/* ---------- title screen ---------- */
-var FIVE = {
-  " ": ["00000", "00000", "00000", "00000", "00000", "00000", "00000"],
-  P: ["11110", "10001", "10001", "11110", "10000", "10000", "10000"],
-  A: ["01110", "10001", "10001", "11111", "10001", "10001", "10001"],
-  E: ["11111", "10000", "10000", "11110", "10000", "10000", "11111"],
-  R: ["11110", "10001", "10001", "11110", "10100", "10010", "10001"],
-  T: ["11111", "00100", "00100", "00100", "00100", "00100", "00100"],
-  O: ["01110", "10001", "10001", "10001", "10001", "10001", "01110"],
-  W: ["10001", "10001", "10001", "10101", "10101", "10101", "01010"]
-};
-function bigText(g, str, x, y, k, tone) {
-  var w = 0, i;
-  for (i = 0; i < str.length; i++) w += 6 * k;
-  var left = Math.round(x - w / 2);
-  for (i = 0; i < str.length; i++) {
-    var gl = FIVE[str.charAt(i)];
-    if (gl) for (var j = 0; j < 7; j++) for (var q = 0; q < 5; q++) if (gl[j].charAt(q) === "1") g.rect(left + i * 6 * k + q * k, y + j * k, k, k, tone);
-  }
-}
-function titleTower(g, time) {
-  var cx = 80, base = 80;
-  g.dither(0, 0, 160, 144, 3, 1);
-  for (var i = 0; i < 18; i++) {
-    var sx = (i * 43 + 11) % 150 + 5, sy = (i * 29 + Math.floor(time * 6)) % 120;
-    g.pixel(sx, sy, i % 3 ? 2 : 3);
-  }
-  for (i = 0; i < 14; i++) {
-    var rx = (i * 37 + Math.floor(time * 24)) % 170 - 5, ry = (i * 23 + Math.floor(time * 15)) % 150;
-    g.line(rx, ry, rx + 2, ry + 5, 2);
-  }
-  /* a lamp and its tower, folded from seven strips of paper */
-  g.rect(cx - 6, 22, 12, 9, 3);
-  g.rect(cx - 4, 17, 8, 6, 3);
-  g.rect(cx - 2, 14, 4, 4, 2);
-  if (Math.floor(time * 5) % 2 === 0) g.rect(cx - 1, 11, 2, 4, 0);
-  for (i = 0; i < 7; i++) {
-    var w = 52 - i * 6, y = 31 + i * 7;
-    g.rect(cx - w / 2, y, w, 7, i % 2 ? 2 : 1);
-    g.frame(cx - w / 2, y, w, 7, 0);
-    if (i % 2 === 0) {
-      g.rect(cx - 2, y + 2, 4, 4, 3);
-      g.rect(cx - 8, y + 2, 4, 4, 3);
-      g.rect(cx + 4, y + 2, 4, 4, 3);
-    }
-  }
-  g.rect(cx - 34, base, 68, 4, 0);
-  g.line(cx - 34, base, cx - 42, base + 8, 0);
-  g.line(cx + 34, base, cx + 42, base + 8, 0);
-  for (i = 0; i < 3; i++) {
-    var px = 20 + i * 52 + Math.floor(time * 6 + i * 17) % 10, py = 46 + i * 20 + Math.floor(time * 4 + i * 9) % 7;
-    g.rect(px, py, 10, 7, 3); g.frame(px, py, 10, 7, 0); g.line(px, py + 7, px + 10, py, 2);
-  }
-}
-var titleAuto = null, titleMeta = null;
-game.scene("title", {
-  enter: function () {
-    S = null; busy = false; titleAuto = null; titleMeta = null;
-    music("title"); game.ambience(null);
-    loadRun("auto").then(function (v) { titleAuto = v; });
-    game.load("meta").then(function (v) { titleMeta = v; }, unreadable);
-  },
-  update: function (dt) {
-    if (busy) return;
-    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) titleMenu();
-  },
-  draw: function (g) {
-    g.clear(g.INK);
-    titleTower(g, game.time);
-    g.dither(0, 82, 160, 62, 0, 3);
-    bigText(g, "PAPER TOWER", 80, 88, 2, g.PAPER);
-    if (!canSave) g.text(t("存档读不出，这次不存", "Save unreadable: no saving"), 80, 108, { align: "center", color: g.PAPER });
-    else g.text(titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit") : t("纸 塔", "a twelve-page climb"), 80, 108, { align: "center", color: g.PAPER });
-    if (Math.floor(game.time * 2) % 2 === 0) g.text(t("按 A 开始", "PRESS A"), 80, 130, { align: "center", color: g.PAPER });
-  }
-});
-async function titleMenu() {
-  busy = true;
+/* ---------- title screen: the shared fog title (sdk/lo-title.js) ----------
+   The cover is PT.titleCover; the menu, its bar and the fog are lo-title's. The 160 x 144 game canvas stays
+   under the title's full-stage canvas. Save state is the same three documents as before. */
+var titleCanvas = null, titleMenu = null, titleActs = [], titleAuto = null, titleMeta = null;
+
+/* the menu the save state asks for: continue only with a run, as the old dialog had it */
+function titleSpec() {
   var items = [], acts = [];
-  if (titleAuto) { items.push(t("继续　第 {n} 页", "Continue　page {n}").replace("{n}", titleAuto.floor)); acts.push("continue"); }
-  items.push(t("新的一页", "A new page")); acts.push("new");
-  items.push(t("读取存档", "Load a save")); acts.push("load");
-  items.push(t("怎么玩", "How to play")); acts.push("help");
-  var i = await game.choose(items, { title: t("纸塔", "Paper Tower") });
-  if (i < 0) { busy = false; return; }
-  var act = acts[i];
-  if (act === "continue") { S = titleAuto; busy = false; goPlay(); return; }
+  if (titleAuto) {
+    items.push({ label: t("继续", "Continue"), status: t("第 {n} 页", "page {n}").replace("{n}", titleAuto.floor) });
+    acts.push("continue");
+  }
+  items.push({ label: t("新的一页", "A new page") }); acts.push("new");
+  items.push({ label: t("读取存档", "Load a save") }); acts.push("load");
+  items.push({ label: t("怎么玩", "How to play") }); acts.push("help");
+  var note = !canSave ? t("存档读不出，这次不存", "Save unreadable: no saving")
+    : titleMeta && titleMeta.cleared ? t("灯已点亮", "the lamp is lit")
+    : t("十二页纸塔", "a twelve-page climb");
+  return { items: items, acts: acts, index: 0, note: note, hint: t("选 · A 确定", "A picks") };
+}
+function titleRefresh() {
+  if (!titleMenu) return;
+  var e = titleSpec();
+  titleActs = e.acts;
+  titleMenu.set({ items: e.items, note: e.note });
+}
+/* a dialog is drawn on the game canvas, so the title canvas steps aside while one is open */
+function titleShow(on) {
+  if (!titleCanvas) return;
+  titleCanvas.style.display = on ? "block" : "none";
+  titleCanvas.style.pointerEvents = on ? "auto" : "none";
+}
+function titleUnmount() {
+  titleMenu = null; titleActs = [];
+  if (titleCanvas && titleCanvas.parentNode) titleCanvas.parentNode.removeChild(titleCanvas);
+  titleCanvas = null;
+}
+function titleMount() {
+  if (titleMenu || typeof LoTitle === "undefined") return;
+  titleCanvas = document.createElement("canvas");
+  titleCanvas.className = "lotitle";
+  document.body.appendChild(titleCanvas);
+  var e = titleSpec(), art = PT.titleCover;
+  titleActs = e.acts;
+  titleMenu = LoTitle.mount(titleCanvas, {
+    art: { w: art.W, h: art.H, px: art.draw() },
+    title: { text: t("纸 塔", "PAPER TOWER"), y: 4, w: 140 },
+    items: e.items,
+    index: e.index,
+    note: e.note,
+    hint: e.hint,
+    onMove: function () { sfx("move"); },
+    onPick: function (i) { sfx("tap"); titlePick(i); }
+  });
+}
+async function titlePick(i) {
+  if (busy) return;
+  var act = titleActs[i];
+  if (!act) return;
+  busy = true;
+  if (act === "continue") {
+    if (!titleAuto) { busy = false; return; }
+    S = titleAuto; busy = false; goPlay(); return;
+  }
   if (act === "new") {
     if (titleAuto) {
+      titleShow(false);
       var c = await game.choose([t("从头开始", "Start over"), t("再想想", "Not yet")], { title: t("盖过自动存档？", "Replace the auto save?") });
-      if (c !== 0) { busy = false; return; }
+      if (c !== 0) { busy = false; titleShow(true); if (titleMenu) titleMenu.redraw(); return; }
     }
     S = R.newGame(); saveAuto(); busy = false; goPlay(); return;
   }
   if (act === "load") {
+    titleShow(false);
     var pick = await game.push(slotsScene("load"));
-    if (!pick) { busy = false; return; }
+    if (!pick) { busy = false; titleShow(true); if (titleMenu) titleMenu.redraw(); return; }
     /* loading a slot writes it over the auto save, which is the run in progress: ask first, as 新的一页 does (#363) */
     if (titleAuto && pick.key !== "auto") {
       var ok = await game.choose([t("读这个存档", "Load it"), t("再想想", "Not yet")], { title: t("当前进度会被替换", "This replaces your run") });
-      if (ok !== 0) { busy = false; return; }
+      if (ok !== 0) { busy = false; titleShow(true); if (titleMenu) titleMenu.redraw(); return; }
     }
     S = pick.v; saveAuto(); busy = false; goPlay(); return;
   }
-  await helpPages();
+  if (act === "help") {
+    titleShow(false);
+    await helpPages();
+    busy = false; titleShow(true); if (titleMenu) titleMenu.redraw(); return;
+  }
   busy = false;
+}
+game.scene("title", {
+  enter: function () {
+    S = null; busy = false; titleAuto = null; titleMeta = null;
+    music("title"); game.ambience(null);
+    titleUnmount();
+    titleMount();
+    /* a run on card turns the first item into 继续 with its page on the bar; the note follows the record */
+    loadRun("auto").then(function (v) { titleAuto = v; titleRefresh(); });
+    game.load("meta").then(function (v) { titleMeta = v; titleRefresh(); }, unreadable);
+  },
+  update: function () {
+    if (busy || !titleMenu) return;
+    var keys = ["up", "down", "a", "start"];
+    for (var i = 0; i < keys.length; i++) if (game.pressed(keys[i])) { titleMenu.press(keys[i]); return; }
+  },
+  /* only seen under a dialog or a fade, while the title canvas steps aside */
+  draw: function (g) { g.clear(g.PAPER); },
+  exit: function () { titleUnmount(); }
+});
+/* ---------- the bands around the world ----------
+   The page, its hit tests and its HUD keep the 160 x 144 screen. The rows above it are the tower's paper wall,
+   the rows below are its ledge and floor; a very short stage makes the canvas wider instead, and those columns
+   carry the same wall (sdk/UI.md 13). While a menu, a dialogue, a battle, a fade or the title is up the bands
+   go flat, so the words are read on a calm screen. */
+function bandsCalm() {
+  return !S || busy || game.top() !== playScene;
+}
+function bandWall(s, x, y, w, h) {
+  if (w <= 0 || h <= 0) return;
+  s.rect(x, y, w, h, s.DARK);
+  for (var c = 0, row = y + h - 7; row > y - 7; row -= 7, c++) {
+    var top = Math.max(y, row), bot = Math.min(y + h, row + 7), off = (c & 1) ? 0 : 8;
+    if (bot <= top) continue;
+    /* one brick in five is a lighter sheet, so the wall reads as folded paper, not a flat strip */
+    for (var bx = x - off; bx < x + w; bx += 16) {
+      var x0 = Math.max(x, bx), x1 = Math.min(x + w, bx + 16);
+      if (x1 <= x0) continue;
+      if ((c * 3 + Math.floor(bx / 16)) % 5 === 0) s.rect(x0, top, x1 - x0, bot - top, s.MID);
+      if (bx >= x) s.rect(bx, top, 1, bot - top, s.INK);
+    }
+    if (row >= y) s.rect(x, row, w, 1, s.INK);
+  }
+  s.rect(x, y + h - 1, w, 1, s.INK);
+  s.rect(x, y, w, 1, s.MID);
+}
+function bandFloor(s, x, y, w, h) {
+  if (w <= 0 || h <= 0) return;
+  s.rect(x, y, w, h, s.INK);
+  s.rect(x, y, w, 1, s.PAPER);
+  if (h > 1) s.rect(x, y + 1, w, 1, s.MID);
+  for (var row = y + 10; row < y + h; row += 10) s.rect(x, row, w, 1, s.DARK);
+  for (var gx = x + 9; gx < x + w; gx += 31) s.pixel(gx, y + 5 + (Math.floor(gx / 31) % 4) * 9, s.DARK);
+  /* the climb so far: the twelve pages as tabs, the page you stand on lit. The HUD never shows this. */
+  if (h >= 26 && S) {
+    var n = D.FLOORS.length, tw = 4, gap = 2, total = n * tw + (n - 1) * gap;
+    var tx = Math.round(x + (w - total) / 2), ty = y + h - 9;
+    for (var i = 0; i < n; i++) {
+      var tone = i < S.floor - 1 ? s.MID : i === S.floor - 1 ? s.PAPER : s.DARK;
+      s.rect(tx + i * (tw + gap), ty, tw, 6, tone);
+    }
+    s.rect(tx + (S.floor - 1) * (tw + gap), ty - 1, tw, 1, s.PAPER);
+  }
+}
+function paintBands(s, i) {
+  var calm = bandsCalm(), h = i.h;
+  s.clear(s.PAPER);
+  if (i.y > 0) {
+    if (calm) { s.rect(0, 0, i.w, i.y, s.DARK); s.rect(0, i.y - 1, i.w, 1, s.INK); }
+    else bandWall(s, 0, 0, i.w, i.y);
+  }
+  if (i.y + i.worldH < h) {
+    var fy = i.y + i.worldH, fh = h - fy;
+    if (calm) { s.rect(0, fy, i.w, fh, s.INK); s.rect(0, fy, i.w, 1, s.DARK); }
+    else bandFloor(s, 0, fy, i.w, fh);
+  }
+  /* a stage too short for the world's width: the extra columns are the page's cut edge, never paper */
+  if (i.x > 0) { if (calm) { s.rect(0, 0, i.x, h, s.DARK); s.rect(i.x - 1, 0, 1, h, s.INK); } else bandWall(s, 0, 0, i.x, h); }
+  if (i.x + i.worldW < i.w) {
+    var rx = i.x + i.worldW, rw = i.w - rx;
+    if (calm) { s.rect(rx, 0, rw, h, s.DARK); s.rect(rx, 0, 1, h, s.INK); } else bandWall(s, rx, 0, rw, h);
+  }
+}
+/* with fill on, a press that starts in the bands around the world is not a world tap (LO-GAME.md 2.1):
+   the clamped pointer would otherwise walk, open a door or choose a menu row from the scenery */
+function worldTap() {
+  var p = game.pointer, st = game.stage;
+  if (!p.pressed) return false;
+  return p.stageX >= st.x && p.stageX < st.x + game.width &&
+         p.stageY >= st.y && p.stageY < st.y + game.height;
 }
 function goPlay() {
   syncHeroBase();
@@ -194,7 +269,7 @@ function heldDir() {
   for (var i = 0; i < dirs.length; i++) if (game.btn(dirs[i])) return dirs[i];
   return null;
 }
-game.scene("play", {
+var playScene = game.scene("play", {
   enter: function () {
     busy = false; syncHeroBase();
     toastT = 0; toastMsg = null;
@@ -233,14 +308,14 @@ game.scene("play", {
       return;
     }
     if (p.autoPath) {
-      if (game.pressed("start") || game.pressed("b") || game.pressed("a") || game.pressed("select") || game.pointer.pressed) {
+      if (game.pressed("start") || game.pressed("b") || game.pressed("a") || game.pressed("select") || worldTap()) {
         p.autoPath = null; p.autoAct = null;
       } else { autoWalk(dt); return; }
     }
     if (game.pressed("start") || game.pressed("b")) { openMenu(); return; }
     if (game.pressed("select")) { revealSecrets(); return; }
     if (game.pressed("a")) { actFacing(); return; }
-    if (game.pointer.pressed) tapMap(game.pointer.x, game.pointer.y);
+    if (worldTap()) tapMap(game.pointer.x, game.pointer.y);
   },
   draw: drawPlay
 });
@@ -657,7 +732,7 @@ function helpScene(tips) {
   return {
     update: function () {
       if (game.pressed("start") || game.pressed("b")) { sfx("miss"); game.pop(true); return; }
-      if (game.pressed("a") || game.pointer.pressed) {
+      if (game.pressed("a") || worldTap()) {
         if (page < pages.length - 1) { page++; sfx("move"); }
         else { sfx("move"); game.pop(true); }
       }
@@ -677,7 +752,7 @@ function helpScene(tips) {
 
 function statusScene() {
   return {
-    update: function () { if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pointer.pressed) game.pop(); },
+    update: function () { if (game.pressed("a") || game.pressed("b") || game.pressed("start") || worldTap()) game.pop(); },
     draw: function (g) {
       g.clear(g.PAPER); g.window(6, 6, 148, 132);
       g.text(t("状 态　{name}", "STATUS　{name}").replace("{name}", tname(D.ZONES[D.zoneOf(S.floor)].name)), 80, 10, { align: "center" });
@@ -711,7 +786,7 @@ function itemScene() {
       var d = game.dir(0.25, 0.1);
       if (d.y) { sel = (sel + d.y + rows.length) % rows.length; sfx("move"); }
       if (game.pressed("b") || game.pressed("start")) { game.pop(); return; }
-      var tapped = game.pointer.pressed;
+      var tapped = worldTap();
       if (tapped) {
         var row = Math.floor((game.pointer.y - 30) / 22);
         if (row >= 0 && row < rows.length) sel = row;
@@ -768,7 +843,7 @@ function bestiaryScene() {
       if (d.y) { sel = LoGame.clamp(sel + d.y, 0, rows.length - 1); sfx("move"); }
       if (sel < top) top = sel;
       if (sel >= top + per) top = sel - per + 1;
-      if (game.pointer.pressed) {
+      if (worldTap()) {
         var row = Math.floor((game.pointer.y - 29) / 14);
         var at = top + row;
         if (row >= 0 && row < per && at >= 0 && at < rows.length) { sel = at; sfx("move"); return; }
@@ -809,7 +884,7 @@ function bestiaryScene() {
 
 function mapScene() {
   return {
-    update: function () { if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pointer.pressed) game.pop(); },
+    update: function () { if (game.pressed("a") || game.pressed("b") || game.pressed("start") || worldTap()) game.pop(); },
     draw: function (g) {
       g.clear(g.PAPER); g.window(2, 2, 156, 140, { thin: true });
       g.text(t("第 {n} 页　{name}", "Page {n}　{name}").replace("{n}", S.floor).replace("{name}", tname(D.FLOOR_NAMES[S.floor - 1])), 80, 3, { align: "center" });
@@ -850,7 +925,7 @@ function shopScene() {
       var d = game.dir(0.25, 0.1);
       if (d.y) { sel = (sel + d.y + sh.stock.length) % sh.stock.length; sfx("move"); }
       if (game.pressed("b") || game.pressed("start")) { game.pop(); return; }
-      var tapped = game.pointer.pressed;
+      var tapped = worldTap();
       if (tapped) {
         var row = Math.floor((game.pointer.y - 30) / 16);
         if (row < 0 || row >= sh.stock.length) { game.pop(); return; }
@@ -905,7 +980,7 @@ function slotsScene(mode) {
       if (!ready) return;
       var d = game.dir(0.25, 0.1);
       if (d.y) { sel = (sel + d.y + 4) % 4; sfx("move"); }
-      var tapped = game.pointer.pressed;
+      var tapped = worldTap();
       if (tapped) {
         var row = Math.floor((game.pointer.y - 22) / 25);
         if (row < 0 || row > 3) { game.pop(); return; }
@@ -1083,7 +1158,7 @@ game.scene("ending", {
     endingPhase = "done";
   },
   update: function () {
-    if (endingPhase === "done" && (game.pressed("a") || game.pressed("start") || game.pointer.pressed)) {
+    if (endingPhase === "done" && (game.pressed("a") || game.pressed("start") || worldTap())) {
       music("title"); game.ambience(null);
       game.go("title", null, { fade: true });
     }
