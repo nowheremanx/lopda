@@ -9,15 +9,16 @@ import { join } from "node:path";
 import { ROOT, readJSON, runScript } from "./helpers.mjs";
 
 const Layout = runScript("registry/apps/kana-cards/src/layout.js").KanaLayout;
-const SIZES = [[331, 359], [346, 518], [386, 606], [386, 738]];
+const SIZES = [[331, 359], [346, 518], [386, 606], [386, 650], [386, 738], [348, 323]];
 const ART = Layout.ART;
 
-/* header, main padding, the guide row, the rows with their gaps, the streak, the gaps, and the
-   cover: beside the rows on a short screen (the 459 px breakpoint), above them on a tall one */
+/* header, main padding, the guide row, the status line under the home, the rows with the two gaps
+   between them, the streak and the other gaps, then the cover: beside the rows on a short screen
+   (the 459 px breakpoint), above them on a tall one */
 function homeStack(m) {
   const chrome = 56 + 12 + 18 + 18;
-  if (m.h <= 459) return chrome + m.gap + Math.max(m.cover, m.row * 3 + m.gap * 2) + m.gap;
-  return chrome + m.gap * 4 + m.row * 3 + m.cover;
+  if (m.h <= 459) return chrome + m.gap * 3 + Math.max(m.cover, m.row * 3 + m.gap * 2);
+  return chrome + m.gap * 6 + m.row * 3 + m.cover;
 }
 
 test("layout: the smallest screen keeps the 160 cover, the four-tone art at 1x, and fits", () => {
@@ -53,8 +54,10 @@ test("layout: the largest screen gives the art 2x and the table the width", () =
 
 test("layout: a stage between the two phones still fits its own rows", () => {
   assert.equal(Layout.metrics(346, 518).cover, 160, "518 px cannot hold 160 px of rows under a 2x cover");
-  /* 606 px is the largest stage with the pad: a 2x cover would need 608 px, so it keeps 1x */
-  assert.equal(Layout.metrics(386, 606).cover, 160, "606 px is 2 px short of a 2x cover");
+  /* 606 px is the largest stage with the pad: a 2x cover needs 634 px, so this one keeps 1x
+     (the home is 474 px of 606, 132 px spare; 606 is 28 px below where 2x fits) */
+  assert.equal(Layout.metrics(386, 606).cover, 160, "606 px stays 1x, 28 px short of a 2x cover");
+  assert.equal(Layout.metrics(386, 642).cover, 320, "642 px is where 2x fits with the 8 px spare");
   assert.equal(Layout.metrics(386, 650).cover, 320, "650 px has the room");
   for (const [w, h] of SIZES) {
     const m = Layout.metrics(w, h);
@@ -68,8 +71,18 @@ test("layout: a stage between the two phones still fits its own rows", () => {
   }
 });
 
-test("layout: junk sizes fall back to the smallest phone instead of throwing", () => {
-  for (const v of [null, undefined, 0, -10, NaN, "331"]) {
+test("layout: no stage height between the phone sizes lets the home outgrow the screen", () => {
+  /* the bug this holds: a 2x cover chosen without counting #status and the gaps inside #rows
+     (603-641 px clipped the guide row before the stack was counted in full) */
+  for (const w of [331, 346, 386, 430]) {
+    for (let h = 323; h <= 760; h++) {
+      const m = Layout.metrics(w, h);
+      assert.ok(homeStack(m) <= h, `${w}x${h}: the home needs ${homeStack(m)} px`);
+    }
+  }
+});
+
+test("layout: junk sizes fall back to the smallest phone instead of throwing", () => {  for (const v of [null, undefined, 0, -10, NaN, "331"]) {
     const m = Layout.metrics(v, v);
     assert.equal(m.w, 331);
     assert.equal(m.h, 359);
@@ -97,7 +110,8 @@ test("layout: the app ships 1.7.0 and its bundled page carries this same file", 
   const html = readFileSync(join(ROOT, "registry/apps/kana-cards/index.html"), "utf8");
   const src = readFileSync(join(ROOT, "registry/apps/kana-cards/src/layout.js"), "utf8");
   assert.ok(html.includes(src.trim()), "the src block is filled into index.html");
-  /* the 331 x 359 sizes are the stylesheet's defaults, for the first frame before fitLayout runs */
-  assert.match(html, /:root \{ --content: 300px; --cardw: 300px; --gap: 6px; --row: 44px; --cover: 160px;/);
+  /* the 331 x 359 sizes are the stylesheet's defaults, for the first frame before fitLayout runs;
+     307 is the width that stage really gets, so the first frame is already right */
+  assert.match(html, /:root \{ --content: 307px; --cardw: 307px; --gap: 6px; --row: 44px; --cover: 160px;/);
   assert.match(html, /#reference \{ grid-template-rows: repeat\(16, var\(--cell\)\); \}/);
 });

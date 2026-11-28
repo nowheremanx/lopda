@@ -763,8 +763,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/kana-cards/index.html",
-      "sha256": "498f735741b62fa58e77e8f148041bf7de48678c1d72c8c8f009c9de873e4e2b",
-      "bytes": 63859
+      "sha256": "ccd8d5e22d8aef224b8349e70618d6fb4481b9473c3315ff5c05cb690954c6ef",
+      "bytes": 64115
     },
     {
       "spec": "lopda/1",

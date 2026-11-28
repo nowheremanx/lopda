@@ -25,10 +25,11 @@ var KanaLayout = (function () {
     var roma = cell >= 66 ? 14 : 12;
     var card = short ? 124 : roomy ? clamp(Math.round(h * 0.26), 146, 240) : 146;
     var kanaCard = short ? 66 : roomy ? clamp(Math.round(card / 2), 76, 112) : 76;
-    /* the cover grows by whole picture pixels only, and only if the rows under it still fit:
-       the header, main's padding, the guide row, four gaps (main, cover to rows, rows to streak,
-       inside the rows), three rows and the streak, and 8 px spare */
-    var others = 56 + 12 + 18 + gap * 4 + row * 3 + 18;
+    /* the cover grows by whole picture pixels only, and only if the rest of the home still fits:
+       the header, main's padding, the guide row, the status line under the home, three rows, the
+       streak, and six gaps (meta to home, home to status, cover to rows, rows to streak, and the two
+       between the three rows), plus 8 px spare */
+    var others = 56 + 12 + 18 + gap * 6 + row * 3 + 18 + 18;
     var scale = clamp(Math.min(Math.floor(content / ART), Math.floor((h - others - 8) / ART)), 1, 3);
     return {
       w: w, h: h, roomy: roomy, tall: tall,
