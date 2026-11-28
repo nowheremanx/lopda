@@ -39,7 +39,7 @@ before(async () => {
 after(async () => { await browser?.close(); server?.close(); });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const MESSAGES = { zh: { noredo: "没有可以重做的了。" }, en: { noredo: "Nothing to redo." } };
+const MESSAGES = { zh: { noundo: "没有可以撤销的了。", noredo: "没有可以重做的了。" }, en: { noundo: "Nothing to undo.", noredo: "Nothing to redo." } };
 const INK = [31, 42, 20], PAPER = [163, 173, 126];
 
 /* the dev harness (as tests/e2e-gomoku-link.test.mjs uses it), the app pinned to UI.md's smallest screen */
@@ -122,6 +122,14 @@ for (const locale of ["zh-CN", "en-US"]) {
     assert.equal(layout.canvas.w, layout.canvas.h, "the canvas is square");
     assert.ok(/pixelated|crisp-edges/.test(layout.rendering), `the canvas stays crisp (${layout.rendering})`);
 
+    /* a press on the 3 px ink frame is not on a dot: no mark, no undo step, no save */
+    const cbox = await frame.locator("#cv").boundingBox();
+    await p.mouse.click(cbox.x + 1, cbox.y + cbox.height / 2);
+    await p.waitForTimeout(50);
+    await app.locator("#undo").click();
+    assert.equal((await app.locator("#msg").textContent()).trim(), MESSAGES[lang].noundo, "a frame press leaves no undo step");
+    assert.deepEqual(await readPixel(frame, 0, 48), PAPER, "and paints nothing");
+
     /* (c) draw, Undo, Redo: the same pixel comes back */
     await dot(p, frame, 10, 10);
     assert.deepEqual(await readPixel(frame, 10, 10), INK, "the stroke is ink");
@@ -169,10 +177,14 @@ test("paint at 386x738: three CSS px a dot and the six-sheet strip", { skip, tim
   assert.equal(layout.hidden, false, "a tall stage shows the six-sheet strip");
   assert.equal(layout.tabs.length, 6);
   layout.tabs.forEach((b, i) => {
-    assert.ok(b.w >= 44 && b.h >= 44, `tab ${i + 1} is a thumb target (${b.w}x${b.h})`);
+    assert.equal(b.w, 52, `tab ${i + 1} takes a tall screen's larger tab (${b.w})`);
+    assert.ok(b.h >= 44, `tab ${i + 1} is still a thumb target (${b.h})`);
     assert.equal(b.label, `第 ${i + 1} 张`);
     assert.equal(b.current, i === 0 ? "true" : "false");
   });
+  assert.equal(layout.canvas.x, layout.sheets.x, "the strip starts on the board's left edge");
+  const preview = await frame.evaluate(() => document.querySelector("#sheets .tab canvas").width);
+  assert.equal(preview, 48, "the preview is 48 px, exactly half the 96-dot sheet");
   assert.ok(layout.sheets.y >= layout.canvas.y + layout.canvas.h, "the strip is below the board");
   assert.ok(Math.abs(layout.canvas.x + layout.canvas.w / 2 - 193) <= 3, `the board is centred (x=${layout.canvas.x})`);
 

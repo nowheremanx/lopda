@@ -1,7 +1,7 @@
 // The paint board's geometry (registry/apps/paint/index.html, <script id="fit">), with no browser:
 // a dot is always a whole number of CSS pixels, so no pixel block is 2 px wide and its neighbour 3;
-// the board and the six-sheet strip are placed on whole pixels and centred; and the strip only appears
-// where the board at that whole scale still leaves room for it.
+// the board is centred on whole pixels; and the six-sheet strip appears only where it fits, starting
+// on the board's left edge, with the larger tabs a tall screen can take.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -14,7 +14,8 @@ const PaintFit = new Function(src + "\nreturn PaintFit;")();
 
 /* The stage the app leaves at each size of sdk/UI.md section 1: the app's width less 8 px padding each side,
    and its height less 149 px (8 of padding, 16 of gaps, an 18 px title line, a 15 px message line, the two
-   44 px tool rows and the 4 px above the second). These are measured in tests/e2e-paint.test.mjs too. */
+   44 px tool rows and the 4 px above the second). The 331x359 and 386x738 stages are also measured in
+   tests/e2e-paint.test.mjs; the others keep the layout honest on the phones in between. */
 const SIZES = [
   [315, 210, "331x359, the smallest"],
   [330, 369, "346x518 with the chin pad"],
@@ -49,7 +50,7 @@ for (const [w, h, where] of SIZES) {
     assert.equal(L.sheet % 96, 0);
     assert.ok(Number.isInteger(L.left) && Number.isInteger(L.top), "the board starts on a whole pixel");
     assert.ok(L.left >= 0 && L.left + L.box + 4 <= w, `the board and its shadow fit across (${L.left}+${L.box})`);
-    const block = L.box + 4 + (L.strip ? 8 + 44 : 0);
+    const block = L.box + 4 + (L.strip ? 8 + L.tab : 0);
     assert.ok(L.top >= 0 && L.top + block <= h, `the block fits down (${L.top}+${block} of ${h})`);
     /* centred: the paper each side of the shadowed board is at most a pixel apart */
     assert.ok(Math.abs((w - (L.box + 4)) / 2 - L.left) <= 1, "the board is centred across");
@@ -57,19 +58,31 @@ for (const [w, h, where] of SIZES) {
 }
 
 test("paint: the six-sheet strip appears only where it fits under the whole-scale board", () => {
-  assert.equal(PaintFit.plan(315, 210).strip, false, "331x359 keeps the board alone, as before");
-  assert.equal(PaintFit.plan(315, 324).strip, false, "331x473 still has no room for the strip");
-  assert.equal(PaintFit.plan(370, 589).strip, true, "386x738 shows all six sheets");
-  assert.equal(PaintFit.plan(370, 457).strip, true, "386x606 too");
-  /* six 44 px tabs and five 8 px gaps need 304 px: a narrower stage leaves the strip out, not the drawing */
+  assert.equal(!!PaintFit.plan(315, 210).strip, false, "331x359 keeps the board alone, as before");
+  assert.equal(!!PaintFit.plan(315, 324).strip, false, "331x473 still has no room for the strip");
+  assert.equal(!!PaintFit.plan(370, 589).strip, true, "386x738 shows all six sheets");
+  assert.equal(!!PaintFit.plan(370, 457).strip, true, "386x606 too");
+  /* 6 x 52 + 5 x 4 = 332 px plus the board's 36 px left edge still fits 370: the big tabs */
+  const big = PaintFit.plan(370, 589);
+  assert.equal(big.tab, 52);
+  assert.equal(big.preview, 48, "exactly half of 96");
+  assert.equal(big.gap, 4);
+  assert.equal(big.stripWidth, 332);
+  assert.equal(big.stripLeft, big.left, "the strip starts on the board's left edge");
+  assert.ok(big.stripLeft + big.stripWidth <= 370, "and ends inside the stage");
+  /* 6 x 44 + 5 x 8 = 304 px is the fallback where 332 does not fit beside the board */
+  const mid = PaintFit.plan(330, 369);
+  assert.equal(mid.tab, 44);
+  assert.equal(mid.preview, 40);
+  assert.equal(mid.stripWidth, 304);
+  assert.equal(mid.stripLeft, mid.left);
+  assert.ok(mid.stripLeft + mid.stripWidth <= 330);
+  /* 304 px still needs a stage that is wide enough: 300 leaves the strip out, not the drawing */
   const narrow = PaintFit.plan(300, 900);
   assert.equal(narrow.scale, 3, "the board still gets its 3 px dots");
-  assert.equal(narrow.strip, false, "but no strip across 300 px");
+  assert.equal(narrow.strip, null, "but no strip across 300 px");
   assert.ok(narrow.left + narrow.box + 4 <= 300);
-  /* the strip sits under the board on the same whole-pixel grid, never across it */
-  const big = PaintFit.plan(370, 589);
-  assert.ok(big.stripLeft >= 0 && big.stripLeft + 304 <= 370);
-  assert.ok(Math.abs((370 - 304) / 2 - big.stripLeft) <= 1, "the strip is centred too");
+  assert.equal(narrow.tab, 0);
 });
 
 test("paint: a stage too small for 2 px dots still gets a 1 px board, on the screen", () => {
@@ -78,5 +91,5 @@ test("paint: a stage too small for 2 px dots still gets a 1 px board, on the scr
   assert.equal(L.sheet, 96);
   assert.equal(L.left, 22);
   assert.equal(L.top, 22);
-  assert.equal(L.strip, false);
+  assert.equal(L.strip, null);
 });

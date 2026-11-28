@@ -807,8 +807,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "ea3080f94cd605306e53eec93ac723f298c8e75995656b9094c6ab8acbd1c07d",
-      "bytes": 24666
+      "sha256": "2bea0fc43693851fa29d871fcd4652ce69c0434c2393699c9ecc32a658e25171",
+      "bytes": 26469
     },
     {
       "spec": "lopda/1",

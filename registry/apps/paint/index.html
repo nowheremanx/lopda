@@ -93,21 +93,33 @@ button.sw[aria-checked="true"]{outline:3px solid #1f2a14;outline-offset:2px}
 var PaintFit=(function(){
   var W=96;                    /* dots across the sheet */
   var FRAME=3, SHADOW=4;       /* the ink frame and the shadow behind the board, CSS px */
-  var GAP=8, TAB=44, TABS=6;   /* the six-sheet strip under the board */
-  var STRIP=TABS*TAB+(TABS-1)*GAP;
+  var GAP=8, TABS=6;           /* between the board and the strip, and the tabs in it */
+  /* tab, preview (the tab less its 2 px border each side), gap. The 52 px tab spends a tall screen's
+     paper; the 44 px one is for the smaller stages. 48 is exactly half of 96, so a preview dot covers
+     a whole 2 by 2 of the sheet's. */
+  var SIZES=[[52,48,4],[44,40,8]];
   /* plan(stage width, stage height) -> the largest whole number of CSS pixels a dot may be, and where
      the board and the strip sit. The strip is only shown when the board at that scale still has room for it,
-     so a short screen keeps the board as large as before and simply leaves the strip out. */
+     so a short screen keeps the board as large as before and simply leaves the strip out. It starts on the
+     board's left edge; a tab size is only taken when the strip still ends inside the stage there. */
   function plan(w,h){
     var scale=Math.max(1,Math.floor((Math.min(w,h)-(FRAME*2+SHADOW))/W));
     var box=scale*W+FRAME*2;                 /* the canvas's border box */
-    var strip=STRIP<=w && box+SHADOW+GAP+TAB<=h;
-    var total=box+SHADOW+(strip?GAP+TAB:0);
+    var left=Math.max(0,Math.floor((w-box-SHADOW)/2));
+    var strip=null;
+    for(var i=0;i<SIZES.length;i++){
+      var tab=SIZES[i][0], preview=SIZES[i][1], gap=SIZES[i][2];
+      var width=TABS*tab+(TABS-1)*gap;
+      if(width<=w && left+width<=w && box+SHADOW+GAP+tab<=h){
+        strip={tab:tab, preview:preview, gap:gap, width:width};
+        break;
+      }
+    }
+    var total=box+SHADOW+(strip?GAP+strip.tab:0);
     return {
-      scale:scale, sheet:scale*W, box:box, strip:strip,
-      left:Math.max(0,Math.floor((w-box-SHADOW)/2)),
-      top:Math.max(0,Math.floor((h-total)/2)),
-      stripLeft:Math.max(0,Math.floor((w-STRIP)/2))
+      scale:scale, sheet:scale*W, box:box, strip:strip, stripWidth:strip?strip.width:0,
+      left:left, top:Math.max(0,Math.floor((h-total)/2)), stripLeft:left,
+      tab:strip?strip.tab:0, preview:strip?strip.preview:0, gap:strip?strip.gap:0
     };
   }
   return {plan:plan};
@@ -146,7 +158,8 @@ var undo=[], redo=[], drawing=false, last=null, start=null, base=null, saveTimer
    that simply had not arrived yet. */
 var sheet=1, ready=false, loadSeq=0;
 var cv=$("cv"), ctx=cv.getContext("2d"), img=ctx.createImageData(W,W);
-/* the six-sheet strip: each tab is the sheet's picture at 40 by 40, so a tall screen shows all six at once */
+/* the six-sheet strip: each tab is the sheet's picture (48 px, or 40 on a smaller stage), so a tall
+   screen shows all six at once */
 var tabs=[], sheetPix={}, tabLive={};
 /* dotCSS: CSS pixels a dot is drawn at, set by fit(); the pointer is read against it and the 3 px frame */
 var dotCSS=1;
@@ -178,6 +191,7 @@ function say(t){ $("msg").textContent=t; clearTimeout(msgTimer); msgTimer=setTim
 /* whole-pixel dot blocks: the largest whole scale the stage allows, so no dot is 2 px wide and its neighbour
    3. On a tall screen the six-sheet strip fits under the board; on a short one it stays hidden, and the board
    is centred exactly as before. */
+var tabShape="";
 function fit(){
   var s=$("stage"), L=PaintFit.plan(s.clientWidth,s.clientHeight);
   dotCSS=L.scale;
@@ -185,20 +199,42 @@ function fit(){
   $("wrap").style.marginLeft=L.left+"px"; $("wrap").style.marginTop=L.top+"px";
   $("guide").style.left=(3+L.sheet/2)+"px";
   $("sheets").classList.toggle("hide",!L.strip);
-  if(L.strip) $("sheets").style.marginLeft=L.stripLeft+"px";
+  if(!L.strip) return;
+  /* the strip starts on the board's left edge, and its tabs grow with the stage */
+  $("sheets").style.marginLeft=L.stripLeft+"px"; $("sheets").style.gap=L.gap+"px";
+  if(!tabs[1]) return;
+  for(var n=1;n<=SHEETS;n++){
+    var c=tabs[n], b=c.parentNode;
+    c.style.width=c.style.height=L.preview+"px";
+    b.style.width=b.style.height=L.tab+"px";
+  }
+  var shape=L.preview+"/"+L.tab;
+  if(shape===tabShape) return;
+  tabShape=shape;
+  for(var m=1;m<=SHEETS;m++){
+    if(tabs[m].width!==L.preview){ tabs[m].width=tabs[m].height=L.preview; }
+    drawTab(m);
+  }
 }
 window.addEventListener("resize",fit); fit();
 
-/* a sheet's picture at 40 by 40 for the strip: each tab pixel is the nearest of the sheet's 96 dots.
-   The open sheet is read from px; the others from what was loaded when the app started. */
+/* a sheet's picture for the strip: each tab dot takes the darkest of the sheet's dots under it, so a
+   1-dot line stays visible even when the preview is smaller than 2:1. The open sheet is read from px;
+   the others from what was loaded when the app started. */
 function drawTab(n){
-  var c=tabs[n], d=c.getContext("2d").createImageData(40,40), out=d.data;
+  var c=tabs[n], size=c.width, g=c.getContext("2d"), d=g.createImageData(size,size), out=d.data;
   var src=n===sheet?px:sheetPix[n];
-  for(var y=0;y<40;y++) for(var x=0;x<40;x++){
-    var t=TONES[src?src[Math.floor(y*W/40)*W+Math.floor(x*W/40)]:3], o=(y*40+x)*4;
-    out[o]=t[0]; out[o+1]=t[1]; out[o+2]=t[2]; out[o+3]=255;
+  for(var y=0;y<size;y++) for(var xx=0;xx<size;xx++){
+    var t=3;
+    if(src){
+      var x0=Math.floor(xx*W/size), x1=Math.max(x0+1,Math.floor((xx+1)*W/size));
+      var y0=Math.floor(y*W/size), y1=Math.max(y0+1,Math.floor((y+1)*W/size));
+      for(var yy=y0;yy<y1;yy++) for(var xi=x0;xi<x1;xi++){ var v=src[yy*W+xi]; if(v<t) t=v; }
+    }
+    var rgb=TONES[t], o=(y*size+xx)*4;
+    out[o]=rgb[0]; out[o+1]=rgb[1]; out[o+2]=rgb[2]; out[o+3]=255;
   }
-  c.getContext("2d").putImageData(d,0,0);
+  g.putImageData(d,0,0);
   for(var i=1;i<=SHEETS;i++) $("sheets").children[i-1].setAttribute("aria-current",i===sheet?"true":"false");
 }
 /* six tabs, in order, built once before any sheet is read */
@@ -209,6 +245,7 @@ function drawTab(n){
     c.width=c.height=40; b.appendChild(c); $("sheets").appendChild(b); tabs[n]=c;
     (function(n){ b.onclick=function(){ goSheet(n); }; })(n);
   }
+  fit();
 })();
 
 function render(){
@@ -272,7 +309,9 @@ cv.addEventListener("pointerdown",function(ev){
   ev.preventDefault();
   if(!ready || drawing) return;
   try{ cv.setPointerCapture(ev.pointerId); }catch(e){}
+  /* a press on the ink frame is not on a dot: it must not make an undo step, clear the redo side or save */
   var p=pos(ev);
+  if(p[0]<0||p[1]<0||p[0]>=W||p[1]>=W) return;
   if(tool==="fill"){
     /* a tap on the tone already in hand changes nothing, so it costs no undo step */
     var k=p[1]*W+p[0], m=p[1]*W+(W-1-p[0]);
