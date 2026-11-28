@@ -61,6 +61,11 @@ export function bootDom(file, opt = {}) {
     clearTimeout: (id) => { const t = timers.find((x) => x.id === id); if (t) t.f = null; },
     setInterval: () => 0, clearInterval() {},
     addEventListener: (type, f) => { (winListeners[type] = winListeners[type] || []).push(f); },
+    removeEventListener: (type, f) => {
+      const list = winListeners[type] || [];
+      const i = list.indexOf(f);
+      if (i >= 0) list.splice(i, 1);
+    },
     Date: { now: () => now },
     Math: Object.create(Math, { random: { value: mulberry32(opt.seed || 1) } })
   };
