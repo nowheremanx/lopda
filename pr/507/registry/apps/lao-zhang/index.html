@@ -4679,9 +4679,11 @@ GM.ui = (function () {
 
   /* the canvas fills the stage: 320 columns across the width, as many rows as the height allows; the mine keeps
      its 320 x 288 and the rows left over become sky and bedrock (GM.frameLayout) */
+  var fitW = 0, fitH = 0, stageEl = null;
   function fit() {
     if (!cv) return;
-    var stage = $("stage"), w = stage.clientWidth, h = stage.clientHeight;
+    var stage = stageEl || (stageEl = $("stage")), w = stage.clientWidth, h = stage.clientHeight;
+    fitW = w; fitH = h;
     if (w < 40 || h < 40) return;
     var L = GM.frameLayout(w, h);
     if (cv.width !== GM.BW) cv.width = GM.BW;
@@ -4695,6 +4697,10 @@ GM.ui = (function () {
   function loop(now) {
     var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
     last = now;
+    /* the handheld can size this page after it starts (on an iPhone the chin pad and the safe areas settle late)
+       and a resize event does not always follow; a stage that changed size is fitted again here, or the mine
+       stays as small as the first, unsettled size and leaves paper at both sides */
+    if (stageEl && (stageEl.clientWidth !== fitW || stageEl.clientHeight !== fitH)) fit();
     if (state.screen === "play" || state.screen === "intro") {
       GM.update(state, dt);
       pump();
