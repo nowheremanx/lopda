@@ -175,11 +175,11 @@ test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch,
   await tap(p, "#chord");
   await p.locator("#q").fill("Cxyz");
   await tap(p, "#qgo");
-  assert.equal(await text(p, "#msg"), "这个版本只收 19 种和弦（认不出 Cxyz）");
+  assert.equal(await text(p, "#msg"), "这个版本只收 25 种和弦（认不出 Cxyz）");
   assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
   await p.locator("#q").fill("C$&");
   await tap(p, "#qgo");
-  assert.equal(await text(p, "#msg"), "这个版本只收 19 种和弦（认不出 C$&）", "a query is text, not a replacement pattern");
+  assert.equal(await text(p, "#msg"), "这个版本只收 25 种和弦（认不出 C$&）", "a query is text, not a replacement pattern");
   await tap(p, "#pback");
   assert.deepEqual(errors, []);
 
@@ -214,6 +214,41 @@ test("chord-book: the picker chooses root, quality and bass in one visit; the ke
   }
 });
 
+test("chord-book 1.4.7: the picker's six groups list the new qualities, and Cmaj9 opens on its own shape", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  assert.deepEqual(await p.locator("#quals h3").allTextContents(),
+    ["三和弦", "七和弦", "挂留", "加音、六", "九、十一、十三", "变化属七"]);
+  await tap(p, p.locator("#quals button", { hasText: "maj9" }).first());
+  assert.equal(await text(p, "#ptitle"), "Cmaj9");
+  await tap(p, "#pok");
+  assert.equal(await text(p, "#cname"), "Cmaj9");
+  assert.equal(await text(p, "#qname"), "大九");
+  assert.match(await text(p, "#line"), /^x3243x · 1 \/ /);
+  assert.equal(await text(p, "#tones"), "xCRE3B7D9x", "the G is left out: the 9, 7 and 3 are what make the colour");
+  /* the improv view knows it: Ionian first, and the 9 still reads last */
+  await tap(p, "#view"); await tap(p, "#view"); await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "即兴");
+  assert.match(await text(p, "#qname"), /^C Ionian（大调） · 1 \/ 3$/);
+  assert.equal(await text(p, "#line"), "R 3 11 5 13 7 9");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.7: the finder names a six-nine and an add11 too", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await p.locator("#q").fill("C6/9");
+  await tap(p, "#qgo");
+  assert.equal(await text(p, "#cname"), "C6/9");
+  assert.match(await text(p, "#line"), /^x32233 · /);
+  await tap(p, "#chord");
+  await p.locator("#q").fill("Cadd11");
+  await tap(p, "#qgo");
+  assert.equal(await text(p, "#cname"), "Cadd11");
+  assert.match(await text(p, "#line"), /^x32011 · /);
+  assert.deepEqual(errors, []);
+});
+
 test("chord-book: the finder names the frets, starts from the picked chord and shows the chord it found", { skip, timeout: 60000 }, async (t) => {
   for (const size of [SMALL, LARGE]) {
     const { p, errors } = await open(t, { size });
@@ -231,12 +266,14 @@ test("chord-book: the finder names the frets, starts from the picked chord and s
     await tap(p, "#fsee");
     assert.equal(await text(p, "#cname"), "C6");
     assert.match(await text(p, "#line"), /^x32210 · /);
-    /* a cluster is no chord, and Show is off */
+    /* a cluster is no chord, and Show is off; 1.4.7's 13 is named before the third note spoils it */
     await tap(p, "#chord");
     await tap(p, "#tofind");
     await tap(p, p.locator("#frets button").nth(0));
     await tap(p, p.locator("#frets button").nth(1));
-    assert.equal(await text(p, "#fname"), "不是这一版的 19 种和弦");
+    assert.equal(await text(p, "#fname"), "C13/F", "the new thirteenth is named");
+    await tap(p, p.locator("#frets button").nth(3));
+    assert.equal(await text(p, "#fname"), "不是这一版的 25 种和弦");
     assert.ok(await p.locator("#fsee").isDisabled());
     await tap(p, "#fback");
     assert.equal(await text(p, "#cname"), "C6");
@@ -296,7 +333,7 @@ test("chord-book 1.4.1: moving an open shape leaves its open and muted strings w
   /* C x32010 one fret up: the three fretted notes move, the muted low E and the two open strings do not */
   await tap(p, "#fup");
   assert.equal(await text(p, "#fpos"), "2 品起");
-  assert.equal(await text(p, "#fname"), "不是这一版的 19 种和弦");
+  assert.equal(await text(p, "#fname"), "不是这一版的 25 种和弦");
   assert.equal(await text(p, "#xo"), "x··o·o", "still two open strings and a muted one");
   const held = await p.evaluate(() => {
     const out = {};
