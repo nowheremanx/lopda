@@ -10,20 +10,26 @@
      PAD.save. Chin buttons, touch, PAD.sfx and a short PAD.music jingle. MIT License. -->
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
-  body { display: flex; flex-direction: column; }
-  header { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 10px; border-bottom: 2px solid #1f2a14; font-size: 15px; }
-  header b { font-size: 17px; letter-spacing: 2px; }
+  /* the stage is the whole screen (sdk/UI.md 13): one canvas paints the page, the photo and the bands, and the text
+     sits on that page. No boxed frame and no HTML bar takes height from the play area. */
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #a3ad7e; }
+  #cv { display: block; position: absolute; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
+  #ui { position: absolute; inset: 0; display: flex; flex-direction: column; pointer-events: none; }
+  #hdr { flex: none; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 10px 2px; font-size: 15px; }
+  #hdr b { font-size: 17px; letter-spacing: 2px; }
   #info { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  main { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 10px; box-sizing: border-box; }
-  #stage { flex: 1; min-height: 88px; width: 100%; display: flex; align-items: center; justify-content: center; }
-  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; border: 3px solid #1f2a14; touch-action: none; }
-  #msg { flex: none; margin: 0; font-size: 15px; line-height: 1.4; text-align: center; min-height: 1.4em; overflow-wrap: anywhere; }
+  /* the one scrolling area: the message and the menu sit on a sheet pinned to the bottom of the stage */
+  #main { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; justify-content: flex-end; }
+  #panel { flex: none; padding: 4px 10px 0; box-sizing: border-box; }
+  body.has-menu #main { pointer-events: auto; }
+  body.has-menu #panel { background: #a3ad7e; border-top: 2px solid #1f2a14; padding-top: 8px; }
+  #msg { margin: 0; font-size: 15px; line-height: 1.35; text-align: center; min-height: 1.35em; overflow-wrap: anywhere; }
   #msg.note { background: #1f2a14; color: #a3ad7e; padding: 2px 8px; }
-  #menu { flex: none; width: 100%; max-width: 360px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #menu { width: 100%; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 8px; }
   #menu.three { grid-template-columns: repeat(3, 1fr); }
   #menu:empty { display: none; }
   #menu button:only-child { grid-column: 1 / -1; }
-  #menu button { font: inherit; font-size: 16px; font-weight: bold; min-height: 44px; width: 100%; padding: 0 4px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; }
+  #menu button { font: inherit; font-size: 16px; font-weight: bold; min-height: 44px; width: 100%; padding: 0 4px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; pointer-events: auto; }
   #menu button.on { background: #1f2a14; color: #a3ad7e; }
   #menu button.off { color: #4a5a32; border-style: dashed; }
   /* the mode entry is a switch: both states stay visible, the one in force is filled; the whole button is the target */
@@ -34,7 +40,23 @@
   #menu button.sw .swo .o.on { background: #1f2a14; color: #a3ad7e; }
   #menu button.on .swo .o { color: #a3ad7e; }
   #menu button.on .swo .o.on { background: #a3ad7e; color: #1f2a14; }
-  footer { flex: none; padding: 4px 10px 6px; border-top: 2px solid #1f2a14; font-size: 13px; color: #4a5a32; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #ft { flex: none; padding: 3px 10px 5px; font-size: 13px; color: #4a5a32; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  body.game #ttl { display: none; }
+  body.game #hdr { justify-content: center; }   /* the status sits centred over the photo */
+  /* Safari's bars can leave 348 x 323: the bands go a size down so the photo keeps two whole pixels a side */
+  @media (max-height: 345px) {
+    #hdr { font-size: 14px; padding: 2px 8px 1px; }
+    #hdr b { font-size: 16px; }
+    #panel { padding: 2px 8px 0; }
+    #msg { font-size: 13px; line-height: 1.3; }
+    #ft { font-size: 12px; padding: 2px 8px 2px; }
+  }
+  /* English lessons wrap to more lines than the Chinese; on the small stages the game screens take the caption a
+     size down (13 px is sdk/UI.md's secondary size) so a long caption never costs the photo a whole scale. The menu
+     sheets keep 15 px: their layout does not depend on the caption's height. */
+  @media (max-height: 380px) {
+    body.game #msg { font-size: 13px; line-height: 1.3; }
+  }
   #fuse { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
   #fuse.on { display: block; }
   #fuse i { position: absolute; display: block; background-repeat: repeat; }
@@ -49,15 +71,77 @@
 </style>
 </head>
 <body>
-<header><b id="ttl">拍照拼图</b><span id="info"></span></header>
-<main>
-  <div id="stage"><canvas id="cv" width="128" height="112"></canvas></div>
-  <p id="msg"></p>
-  <div id="menu"></div>
-</main>
-<footer id="ft"></footer>
+<div id="stage">
+  <canvas id="cv" width="128" height="112"></canvas>
+  <div id="ui">
+    <header id="hdr"><b id="ttl">拍照拼图</b><span id="info"></span></header>
+    <main id="main"><div id="panel"><p id="msg"></p><div id="menu"></div></div></main>
+    <footer id="ft"></footer>
+  </div>
+</div>
 <div id="fuse"><i class="t"></i><i class="r"></i><i class="b"></i><i class="l"></i></div>
 
+<script data-src="src/layout.js">
+/* 拍照拼图: the play screen fills the stage (sdk/UI.md 13). The puzzle stays 128 x 112 art pixels and the canvas is
+   the whole screen, drawn at an integer number of CSS pixels an art pixel -- so every art pixel stays a square of
+   k x k CSS pixels (and k * dpr device pixels) and the picture is never resampled. Rows are rounded up and the CSS
+   size is never rounded down: a stage measured with a fraction must not leave a line of paper at its edge.
+
+   Two arrangements share the fit:
+   - play: the status band, the photo and the caption band are one card, centred on the page; the page's margins
+     above and below are painted scenery.
+   - a menu: the header and the footer stay at the page's top and bottom, the photo is centred between them, and the
+     menu sheet sits over the photo's foot -- the menu covers the whole stage.
+   Pure functions; tests/photo-puzzle-layout.test.mjs checks the five screen sizes. */
+var PZ = (function () {
+  "use strict";
+  var PIC_W = 128, PIC_H = 112, GAP = 4;   /* GAP: CSS pixels between the photo and the text above and below it */
+
+  /* fit(w, h, top, bottom, overlay) -> {k, W, H, cssW, cssH, x0, y0, padTop, padBottom, topRows, botRows, ...}
+     w and h are the stage's CSS size (fractional, from getBoundingClientRect); top and bottom are the CSS heights of
+     the text above and below the photo. k is the largest whole number of CSS pixels an art pixel that still fits.
+     W and H are the canvas in art pixels: W * k >= w and H * k >= h, so no paper shows at an edge.
+     overlay false: padTop / padBottom centre the card; overlay true: the page's own header and footer keep the edges. */
+  function fit(w, h, top, bottom, overlay) {
+    w = +w || 0; h = +h || 0; top = Math.max(0, +top || 0); bottom = Math.max(0, +bottom || 0);
+    var k = 1;
+    if (w > 0 && h > 0) {
+      var byW = Math.floor(w / PIC_W + 1e-9);
+      var byH = Math.floor((h - top - bottom - 2 * GAP) / PIC_H + 1e-9);
+      k = Math.max(1, Math.min(byW, byH >= 1 ? byH : 1));
+    }
+    var W = Math.max(PIC_W, Math.ceil(w / k - 1e-9));
+    var padTop = 0, padBottom = 0, photoTop, topRows;
+    if (overlay) {
+      var H0 = Math.max(PIC_H, Math.ceil(h / k - 1e-9));
+      var tRows = Math.ceil(top / k - 1e-9), bRows = Math.ceil(bottom / k - 1e-9);
+      var extra = Math.max(0, H0 - tRows - bRows - PIC_H);
+      topRows = tRows + Math.floor(extra * 0.5);
+      photoTop = topRows * k;
+    } else {
+      /* the card: the status band, GAP, the photo, GAP, the caption band; centred on the page */
+      var cardH = top + bottom + PIC_H * k + 2 * GAP;
+      padTop = Math.max(0, Math.floor((h - cardH) / 2));
+      padBottom = Math.max(0, h - cardH - padTop);
+      photoTop = padTop + top + GAP;
+      topRows = Math.ceil(photoTop / k - 1e-9);
+    }
+    var H = Math.max(PIC_H, Math.ceil(h / k - 1e-9), topRows + PIC_H);
+    var botRows = Math.max(0, Math.ceil((h - (photoTop + PIC_H * k)) / k - 1e-9));
+    /* Whole art columns only. On a 386 px stage at k = 3 the 384 px photo leaves 2 px, which is less than one
+       3 px column: it cannot be split 1/1, so the photo sits flush at the canvas's left edge (2 px of paper on the
+       right). Shifting it by a fraction of a pixel would undo the whole-pixel promise, and moving it one column
+       would cut a column off the picture. */
+    var x0 = Math.floor((W - PIC_W) / 2);
+    return { w: w, h: h, top: top, bottom: bottom, k: k, W: W, H: H, cssW: W * k, cssH: H * k,
+      x0: x0, y0: topRows, topRows: topRows, botRows: botRows,
+      padTop: padTop, padBottom: padBottom, photoTop: photoTop, photoBottom: photoTop + PIC_H * k,
+      picW: PIC_W, picH: PIC_H };
+  }
+
+  return { fit: fit, PIC_W: PIC_W, PIC_H: PIC_H, GAP: GAP };
+})();
+</script>
 <script data-src="src/solver.js">
 /* The solver behind 看它解 / SELECT / the tutorial: rows first, then columns, then the last 2×2 -- the way a person
    solves it, not the shortest way. Every stage is a small breadth-first search over the cells that still matter:
@@ -222,7 +306,7 @@ var Solver = (function () {
       kPlay: "D-pad slide  A peek  START menu  SELECT hint", kMenu: "Arrows pick  A ok  B back",
       kLesson: "D-pad slide  SELECT hint  START leave", kLessonDone: "A next  START leave", kSolved: "A continue", kWon: "Arrows pick  A ok  B main menu", kLost: "Arrows pick  A ok  B main menu", kDemo: "START leave",
       lessonDone: "Done!", lessonN: "Lesson {n}",
-      lesson1: "The arrows push the piece next to the gap into it. The arrow marks the first move: push tile 5 up, then tile 8 left. Press SELECT to see it again.",
+      lesson1: "The arrows push the piece beside the gap into it. Push 5 up, then 8 left; SELECT shows the arrow.",
       lesson2: "Bring tile 1 to the top-left corner. Each number sits in its tile's top-left corner; SELECT shows the arrow again.",
       lesson3: "The last two in a row: put tile 3 under tile 2, then turn them in together.",
       lesson4: "Once a row is done, leave it alone. The last two rows go column by column. Just watch.",
@@ -786,7 +870,11 @@ var Solver = (function () {
   /* ---------- drawing: the picture, cut into cells, written with putImageData ----------
      A piece is a raised plastic tile: 1 px of paper on its top and left, 1 px of ink on its bottom and right (the old
      cut line, now the shadow side). The empty slot is a hole: ink floor, lit paper lip. Shape, not colour. */
-  var cv = document.getElementById("cv"), ctx = cv.getContext("2d"), img = ctx.createImageData(W, H);
+  var cv = document.getElementById("cv"), ctx = cv.getContext("2d");
+  var uiEl = document.getElementById("ui"), stageEl = document.getElementById("stage"), hdrEl = document.getElementById("hdr"),
+    panelEl = document.getElementById("panel"), ftEl = document.getElementById("ft");
+  var RGB32 = TONES.map(function (c) { return (0xff000000 | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0; });
+  var L = PZ.fit(1, 1, 0, 0), img = null, u32 = null, base = null;
   function edges(n, size) { var e = []; for (var i = 0; i <= n; i++) e.push(Math.round(i * size / n)); return e; }
   var RECTS = {};
   function rects(n) {
@@ -1024,17 +1112,71 @@ var Solver = (function () {
     }
     return pic.px;
   }
+  /* ---------- the screen: one canvas, the page, the photo and the bands (sdk/UI.md 13) ----------
+     The canvas is the stage in art pixels: the puzzle at (x0, y0), a print's mid edge and soft shadow around it,
+     and paper everywhere else -- the status band above and the caption band below are the page's margins, with the
+     HTML text on them. k is whole, so every art pixel is k x k CSS pixels; the CSS size is W * k, never rounded
+     down, and the stage clips the last row. */
+  function makeBase(lay) {
+    var cw = lay.W, ch = lay.H, b = new Uint8Array(cw * ch), i, x, y;
+    for (i = 0; i < b.length; i++) b[i] = 3;
+    var x0 = lay.x0, y0 = lay.y0, x1 = x0 + W, y1 = y0 + H;
+    function dot(px, py) { if (px >= 0 && px < cw && py >= 0 && py < ch) b[py * cw + px] = 2; }
+    for (x = x0 - 1; x <= x1; x++) { dot(x, y0 - 1); dot(x, y1); dot(x, y1 + 1); }
+    for (y = y0 - 1; y <= y1; y++) { dot(x0 - 1, y); dot(x1, y); dot(x1 + 1, y); }
+    return b;
+  }
+  function bands() {
+    var top = hdrEl.getBoundingClientRect().height;
+    var bottom = ftEl.getBoundingClientRect().height;
+    /* a menu is a sheet over the board: the photo stays whole behind it; on the play screen the message is a band
+       of its own, and the photo ends above it */
+    if (!S.items.length) bottom += panelEl.getBoundingClientRect().height;
+    return { top: top, bottom: bottom };
+  }
+  function fit(force) {
+    var r = stageEl.getBoundingClientRect();
+    if (!(r.width > 0 && r.height > 0)) return false;
+    var b = bands(), next = PZ.fit(r.width, r.height, b.top, b.bottom, !!S.items.length);
+    var same = L && L.k === next.k && L.W === next.W && L.H === next.H && L.x0 === next.x0 && L.y0 === next.y0;
+    var resized = !L || L.W !== next.W || L.H !== next.H;
+    L = next;
+    /* the card is centred on the page: the status band, the photo, the caption band, one object */
+    uiEl.style.paddingTop = L.padTop + "px";
+    uiEl.style.paddingBottom = L.padBottom + "px";
+    cv.style.width = L.cssW + "px"; cv.style.height = L.cssH + "px";
+    if (resized) {
+      cv.width = L.W; cv.height = L.H;   /* setting a canvas size clears it: paint straight after a fit */
+      img = ctx.createImageData(L.W, L.H);
+      u32 = new Uint32Array(img.data.buffer);
+    }
+    if (resized || !same || force) base = makeBase(L);
+    return !same;
+  }
   function paint() {
-    var px = frame(), d = img.data;
-    for (var i = 0; i < px.length; i++) { var c = TONES[px[i]]; d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255; }
+    if (!img) return;
+    var px = frame(), i, x, y, o, row, oy, cw = L.W, ch = L.H;
+    for (i = 0; i < base.length; i++) u32[i] = RGB32[base[i]];
+    for (y = 0; y < H; y++) {
+      oy = L.y0 + y;
+      if (oy < 0 || oy >= ch) continue;
+      o = oy * cw + L.x0; row = y * W;
+      for (x = 0; x < W; x++) u32[o + x] = RGB32[px[row + x]];
+    }
     ctx.putImageData(img, 0, 0);
   }
-  function layout() {
-    var st = document.getElementById("stage"), w = st.clientWidth - 6, h = st.clientHeight - 6;
-    var k = Math.max(1, Math.min(w / W, h / H));
-    cv.style.width = Math.floor(W * k) + "px"; cv.style.height = Math.floor(H * k) + "px";
+  /* the iPhone can size the page after the app starts with no resize event (UI.md 13.4): compare the stage's exact
+     box every frame and fit again when it changes */
+  var lastW = -1, lastH = -1;
+  function watchSize() {
+    requestAnimationFrame(watchSize);
+    var r = stageEl.getBoundingClientRect();
+    if (r.width === lastW && r.height === lastH) return;
+    lastW = r.width; lastH = r.height;
+    if (fit(false)) paint();
+    updateFuse();
   }
-  window.addEventListener("resize", function () { layout(); updateFuse(); });
+  window.addEventListener("resize", function () { if (fit(true)) paint(); updateFuse(); });
 
   /* ---------- the main menu's attract mode: the built-in pictures solve themselves, then rest a moment ---------- */
   var attractRaf = 0;
@@ -1316,7 +1458,12 @@ var Solver = (function () {
       if (it[3] === "switch") modeSwitch(b); else b.textContent = it[1];
       box.appendChild(b);
     });
-    paint(); layout(); updateFuse();
+    /* the sheet is a menu (paper and a rule); on the play screen there is no sheet, only the message band */
+    document.body.className = (sc === "play" || sc === "lesson" || sc === "cut" || sc === "solved" ? "game " : "")
+      + (S.items.length ? "has-menu" : "");
+    fit(true);
+    paint();
+    updateFuse();
   }
   function continueGame() { if (!S.hasSave) { go("main"); return; } S.arcade = S.gameArcade; S.nextN = S.n; S.note = ""; go("play"); }
   function browse(d) { S.galleryIndex = (S.galleryIndex + d + BUILTINS.length) % BUILTINS.length; S.attractIndex = S.galleryIndex; S.sel = 1; sfx("tick"); savePuzzle(); draw(); }
@@ -1432,9 +1579,11 @@ var Solver = (function () {
     PAD.on("release", function (b) { if (b === "a" && S.peek) { S.peek = false; paint(); } });
   }
 
-  /* touch: tap a piece next to the gap, or swipe it towards the gap; the cut and the solved animation skip on a tap */
+  /* touch: tap a piece next to the gap, or swipe it towards the gap; the cut and the solved animation skip on a tap.
+     A tap outside the photo (in a band or the page's margin) is not a tile and never slides one. */
   function cellAt(e) {
-    var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    var r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / L.k - L.x0, y = (e.clientY - r.top) / L.k - L.y0;
+    if (x < 0 || x >= W || y < 0 || y >= H) return -1;
     var xs = edges(S.n, W), ys = edges(S.n, H), c = 0, row = 0;
     while (c < S.n - 1 && x >= xs[c + 1]) c++;
     while (row < S.n - 1 && y >= ys[row + 1]) row++;
@@ -1447,7 +1596,9 @@ var Solver = (function () {
     if (S.demo) { stopDemo(); return; }
     if (S.screen !== "play" && S.screen !== "lesson") return;
     if (S.screen === "lesson" && S.lessonDone) return;
-    touch = { id: e.pointerId, x: e.clientX, y: e.clientY, cell: cellAt(e) };
+    var cell = cellAt(e);
+    if (cell < 0) return;
+    touch = { id: e.pointerId, x: e.clientX, y: e.clientY, cell: cell };
     try { cv.setPointerCapture(e.pointerId); } catch (err) {}
   });
   cv.addEventListener("pointercancel", function () { touch = null; });
@@ -1488,10 +1639,12 @@ var Solver = (function () {
       gallery: S.galleryIndex, pictures: BUILTINS.map(picName), fuse: document.getElementById("fuse").className,
       msg: document.getElementById("msg").textContent, ft: document.getElementById("ft").textContent,
       intro: S.intro ? { phase: S.intro.ms < 300 ? "cut" : S.intro.ms < 600 ? "drop" : "mix", ms: S.intro.ms, gap: S.gap, total: S.intro.total } : null,
-      attract: S.attract ? { index: S.attract.index, n: S.attract.n, phase: S.attract.phase, moves: S.attract.i, plan: S.attract.plan.length, moving: !!S.attract.anim } : null };
+      attract: S.attract ? { index: S.attract.index, n: S.attract.n, phase: S.attract.phase, moves: S.attract.i, plan: S.attract.plan.length, moving: !!S.attract.anim } : null,
+      view: { k: L.k, W: L.W, H: L.H, x0: L.x0, y0: L.y0, cssW: L.cssW, cssH: L.cssH } };
   } };
 
   if (!HAS_PAD) go("main"); else draw();
+  requestAnimationFrame(watchSize);
 })();
 
 </script>

@@ -8976,19 +8976,32 @@ const ppStartBuiltin = async (p, f) => {
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "play", "a game");
 };
-const ppShot = (f) => f.evaluate(() => document.getElementById("cv").toDataURL());
+/* the photo's own 128 x 112 pixels, wherever the stage-wide canvas places the card: comparing the whole canvas
+   would also catch the status band and the page margins, which move when the message or the menu changes */
+const ppShot = (f) => f.evaluate(() => {
+  const s = window.PUZZLE.state(), v = s.view, c = document.getElementById("cv"), x = c.getContext("2d");
+  const out = document.createElement("canvas"); out.width = 128; out.height = 112;
+  out.getContext("2d").putImageData(x.getImageData(v.x0, v.y0, 128, 112), 0, 0);
+  return out.toDataURL();
+});
 /* the hole is ink except its last row/column (the lit lip); sample 2 px in from the top-left so the hint arrow
-   in the middle of the hole does not colour this pixel */
+   in the middle of the hole does not colour this pixel. The canvas is the whole screen now, so the photo's own
+   offset (view.x0 / view.y0, in art pixels) comes off first. */
 const ppGapPixel = (f) => f.evaluate(() => {
   const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
   const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
-  return Array.from(x.getImageData(Math.floor(col * 128 / s.n) + 2, Math.floor(row * 112 / s.n) + 2, 1, 1).data);
+  return Array.from(x.getImageData(s.view.x0 + Math.floor(col * 128 / s.n) + 2, s.view.y0 + Math.floor(row * 112 / s.n) + 2, 1, 1).data);
 });
 /* the middle of the hole: ink, or paper when the hint arrow is drawn into it */
 const ppGapCenter = (f) => f.evaluate(() => {
   const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
   const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
-  return Array.from(x.getImageData(Math.floor((col + 0.5) * 128 / s.n), Math.floor((row + 0.5) * 112 / s.n), 1, 1).data);
+  return Array.from(x.getImageData(s.view.x0 + Math.floor((col + 0.5) * 128 / s.n), s.view.y0 + Math.floor((row + 0.5) * 112 / s.n), 1, 1).data);
+});
+/* a cell's centre in the app frame, on the photo (sdk/UI.md 13: the photo is an inset of the stage-wide canvas) */
+const ppCellXY = (v, cell) => ({
+  x: v.x0 * v.k + ((cell % 3) + 0.5) * 128 * v.k / 3,
+  y: v.y0 * v.k + (Math.floor(cell / 3) + 0.5) * 112 * v.k / 3
 });
 /* the shortest way home for a 3x3, breadth first over the gap's moves; returns the keys to press */
 function solve3(tiles) {
@@ -9122,13 +9135,15 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   await until(p, async () => (await ppShot(f)) !== pieces, "the peek");
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", false));
   await until(p, async () => (await ppShot(f)) === pieces, "the pieces again");
-  /* a tap on the piece next to the gap slides it, and a tap back puts it where it was */
-  const g = s.gap, q = g % 3 < 2 ? g + 1 : g - 1, box = await f.locator("#cv").boundingBox();
-  const tap = (cell) => f.locator("#cv").click({ position: { x: ((cell % 3) + 0.5) * box.width / 3, y: (Math.floor(cell / 3) + 0.5) * box.height / 3 } });
+  /* a tap on the piece next to the gap slides it, and a tap back puts it where it was (the photo is inset in the
+     stage-wide canvas, so the cell centres come from the view) */
+  const g = s.gap, q = g % 3 < 2 ? g + 1 : g - 1;
+  const tap = (cell) => { const pt = ppCellXY(s.view, cell); return f.locator("#cv").click({ position: pt }); };
   await tap(q); await until(p, async () => (await ppState(f)).gap === q, "the tap");
   await tap(g); await until(p, async () => (await ppState(f)).gap === g, "the tap back");
   /* a swipe moves the piece it starts on, only towards the gap; any other way is refused with the error sound */
-  const fb = await f.locator("#cv").boundingBox(), cx = (cell) => fb.x + ((cell % 3) + 0.5) * fb.width / 3, cy = (cell) => fb.y + (Math.floor(cell / 3) + 0.5) * fb.height / 3;
+  const fb = await f.locator("#cv").boundingBox();
+  const cx = (cell) => fb.x + ppCellXY(s.view, cell).x, cy = (cell) => fb.y + ppCellXY(s.view, cell).y;
   const swipe = async (cell, dx, dy) => { await p.mouse.move(cx(cell), cy(cell)); await p.mouse.down(); await p.mouse.move(cx(cell) + dx / 2, cy(cell) + dy / 2); await p.mouse.move(cx(cell) + dx, cy(cell) + dy); await p.mouse.up(); };
   const toward = (from, to) => [Math.sign((to % 3) - (from % 3)) * 40, Math.sign(Math.floor(to / 3) - Math.floor(from / 3)) * 40];
   const errs = () => p.evaluate(() => window.LOPDA_DEBUG.sfxLog.filter((x) => x === "err").length);
