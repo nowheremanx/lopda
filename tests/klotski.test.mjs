@@ -573,38 +573,33 @@ test("klotski app: the fitted stage covers all five phone sizes", async () => {
   }
 });
 
-test("klotski app: a band tap does not choose a title row, a world tap still does", async () => {
-  let { app } = await bootApp({}, "zh", { w: 346, h: 518 });
-  let game = app.ctx.get("game"), st = game.stage;
+test("klotski app: a band press is dropped, the same press inside the world acts", async () => {
+  /* the top band over board row 0 must not select the piece under that column */
+  let { app } = await bootApp({}, "zh", { w: 386, h: 738 });
+  let game = app.ctx.get("game"), st = game.stage, K = app.ctx.get("window").KLOTSKI;
   assert.ok(st.y > 0, "this stage has a top band");
-  const title = app.ctx.get("titleScene");
-  tapStage(app, game, 80, 3);                       /* top band, above the picture */
-  run(app, 6); await settle();
-  assert.equal(game.top(), title, "a top-band tap left the title");
-  tapStage(app, game, st.x + 80, st.y + 135);       /* the first row of the 2x2 grid, inside the world */
-  run(app, 6); await settle();
-  assert.notEqual(game.top(), title, "a tap on the title row itself still works");
-
-  /* a drag that starts in a side band is not a board gesture either */
-  ({ app } = await bootApp({}, "zh", { w: 348, h: 323 }));
-  game = app.ctx.get("game"); st = game.stage;
-  assert.ok(st.x > 0, "this stage has a side band");
-  const K = app.ctx.get("window").KLOTSKI;
-  assert.ok(K.open("k01"));
-  run(app, 5);
-  const before = K.state().moves;
-  app.pointerRaw("pointerdown", 2 * st.k, (st.y + 75) * st.k);
-  app.frame();
-  app.pointerRaw("pointermove", (st.x + 45) * st.k, (st.y + 75) * st.k);
-  app.pointerRaw("pointerup", (st.x + 45) * st.k, (st.y + 75) * st.k);
-  run(app, 10);
-  assert.equal(K.state().moves, before, "a drag from the side band moved a piece");
-
-  /* the same tap inside the world still selects the piece under the finger */
-  const selected = K.state().selected;
-  tapStage(app, game, st.x + 35, st.y + 67);        /* cell (0, 1), a movable horizontal bar */
+  assert.ok(K.open("k01")); run(app, 5);
+  assert.ok(K.step(1, 0, 1)); run(app, 10);          /* C down, so the bar at (0, 0) can move */
+  const before = K.state().selected;
+  tapStage(app, game, 30, 45);                       /* top band, over board column 0 */
   run(app, 3);
-  assert.notEqual(K.state().selected, selected, "a tap on the board stopped selecting");
+  assert.equal(K.state().selected, before, "a top-band tap selected a board piece");
+  tapStage(app, game, 30, st.y + 29);                /* board row 0, the same column */
+  run(app, 3);
+  assert.equal(K.state().selected, 0, "a tap in board row 0 did not select the bar");
+
+  /* and a case where the ungated near edge would act: the level list's header reads y 0 */
+  ({ app } = await bootApp({}, "zh", { w: 386, h: 738 }));
+  game = app.ctx.get("game"); st = game.stage;
+  K = app.ctx.get("window").KLOTSKI;
+  game.go("levels", null, { fade: false }); run(app, 3);
+  const list = app.ctx.get("levelList"), filter = list.filter;
+  tapStage(app, game, 30, 45);                       /* top band; the near edge is y 0, the filter row */
+  run(app, 3);
+  assert.equal(list.filter, filter, "a top-band tap changed the level filter");
+  tapStage(app, game, 30, st.y + 35);                /* the first row inside the world */
+  run(app, 5);
+  assert.equal(K.state().id, "k01", "a tap on the first list row did not open the level");
 });
 
 test("klotski title: the key hint sits between the grid and the progress line, in both languages", async () => {
