@@ -1,8 +1,10 @@
 # 和弦大全 / Chords: notes for maintainers
 
-A guitar chord dictionary for Lo-PDA, standard tuning only. It has 19 chord qualities plus slash chords and up to 24
-voicings each. There are four pictures of a chord, 23 common progressions with a note on why each works, a scale view
-for improvising, and a finder that names the chord your fingers make. Sound is a plucked string made in the app.
+A guitar chord dictionary for Lo-PDA. This version covers **19 chord qualities plus slash chords, in standard tuning
+(EADGBE) only, with no capo**; a capo is planned for v2 (section 11), while other tunings and a left-handed layout are
+not planned yet. It has up to 24 voicings each, four pictures of a chord, 23 common progressions with a note on why each
+works, a scale view for improvising, and a finder that names the chord your fingers make. Sound is a plucked string made
+in the app.
 
 This file says where things are and what must not break. Why things are the way they are is in
 [`docs/design/chord-book.md`](../../../docs/design/chord-book.md) (the design, section 13 for each version's changes) and
