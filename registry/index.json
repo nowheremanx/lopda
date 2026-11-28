@@ -172,7 +172,7 @@
         "................",
         "................"
       ],
-      "version": "0.1.6",
+      "version": "0.1.7",
       "released": "2026-10-28",
       "updated": "2026-11-28",
       "description": "七天，守住山脚的小馆：采买、打怪、备菜、待客。",
@@ -185,8 +185,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/shanjiao-diner/index.html",
-      "sha256": "b1a70aeb73c976b1383c086efdc32282f95f8856d82edff7f4eff64b4751b49b",
-      "bytes": 252543
+      "sha256": "324ca327ffb3b0ff5069e855e80ded9abfa38e7881d611aca32b19b35b2ee93c",
+      "bytes": 273229
     },
     {
       "spec": "lopda/1",

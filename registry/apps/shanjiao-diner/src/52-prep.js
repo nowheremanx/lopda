@@ -75,7 +75,7 @@ game.scene("prep", {
        whole menu, so the confirm sits on the footer's A hint. */
     var tapped = tapRow(8, 82, 200, 75, 15, list.length, PREP_SCROLL);
     if (tapped >= 0) {
-      var t = list[tapped], px = game.pointer.x;
+      var t = list[tapped], px = tapX();
       var add = tapped === PREP_SEL || (px >= 136 && px < 166);
       PREP_SEL = tapped;
       if (add) prepAdd(t); else game.sfx("move");
