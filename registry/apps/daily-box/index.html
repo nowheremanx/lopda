@@ -434,6 +434,13 @@ var LoGame = (function () {
       pointer.stageY = (e.clientY - r.top) * H / r.height;
       pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
     }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
+    }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
     ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
@@ -504,8 +511,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -610,7 +617,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
