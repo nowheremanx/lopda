@@ -173,6 +173,52 @@ Four tones and big pixels are the charm, not an excuse. The models to copy are L
 4. Read every text at arm's length on a phone. If you squint, it is too small or too low in contrast.
 5. Run `node tools/check-app.mjs` (it checks colors, size and the rest of SPEC.md; it cannot check layout).
 
+## 13. A game's play screen: fill the phone
+
+A game whose world has a fixed size (a 160 × 144 mine, a board, a level) still fills the whole app screen during play.
+A small fixed square with HTML bars above and below it reads as a prototype. `registry/apps/lao-zhang`
+(`src/22-hud.js`, `GM.frameLayout`) is the worked example. These rules come from making it fit on an iPhone.
+
+1. **The world keeps its size and its rules.** Never stretch or reshape the playfield to fit a phone: levels, item
+   positions, reach and difficulty would change with the screen. Grow the canvas around the world instead.
+2. **One canvas, edge to edge.** The play screen is one `<canvas>` filling the stage, with no HTML bars around it.
+   Work out the layout from the stage's size, in canvas pixels, with `k` CSS pixels to a canvas pixel:
+   - Normally the world's width fills the stage's width (`k = w / worldW`). The canvas is as many rows as the height
+     allows, and the rows over the world's height become scenery: sky above, bedrock or a floor below.
+   - When the stage is too short for that (Safari's bars leave as little as **348 × 323**, shorter than the
+     331 × 359 the handheld promises), fit by height instead and make the canvas **wider** than the world. The
+     extra columns at the sides carry the world's edge on: the same sky, ground line and dirt, with no items, and
+     out of the hook's or player's reach. A wide desktop window works the same way.
+   - Paper (or any flat bars) beside or under the canvas is the bug this section is about.
+3. **Size the canvas from the exact box, and round toward covering.** Read the stage with
+   `getBoundingClientRect()`, whose sizes can be fractional on an iPhone. Set the canvas's CSS size to
+   `W * k` and `H * k` without rounding: a rounded width left a one-pixel line of paper down each side in the
+   home-screen app. Round the canvas's rows *up* (`Math.ceil`), so the stage cuts off part of a row rather than
+   leaving a gap, and centre the canvas in a stage with `overflow: hidden`.
+4. **Fit again whenever the stage changes, not only on `resize`.** On the iPhone the page can be sized after the app
+   starts, with no resize event afterwards, so the game kept its first, too-small size. Compare the stage's
+   `clientWidth` / `clientHeight` with the last fit on every animation frame, and fit again when they differ (it
+   costs two reads a frame). Setting `canvas.height` clears the canvas, so redraw straight after a fit.
+5. **The scoreboard is drawn in the scenery, not on the world.** Paint level, score, target, time and items into
+   the extra sky with the app's pixel font (lopix12, at 1x and 2x). Keep it outside the world's own rows, so nothing
+   in the world (a rival, a speech bubble, a label) can cover it or be covered by it. Plan the rows it needs:
+   - full: a label, the number at 2x and a gauge, about 56 canvas rows;
+   - slim: one line of about 18 rows, for when the screen is short.
+   Check the screens where the most is on screen at once (lao-zhang: level 11, with Old Wang and his taunts).
+6. **Use the leftover space for something that plays along.** On tall phones, lao-zhang's bedrock band has mine carts
+   that fill as the level's cash comes in, one for the player and one for the rival. Blank bands read as unfinished.
+   Keep such extras for the screen sizes that have room for them, and skip them on the smallest.
+7. **Count progress within the level.** When the score runs over the whole game, a gauge of score / target opens
+   nearly full on later levels. Remember the score when the level started, and count from that.
+8. **Teach the keys when the level opens**, in the tip box over the world, not in a key line under it all game.
+9. **Paint with `putImageData` into ImageData only.** Put the world at its offset (`x0`, the sky's height) and each
+   band at its own position. Never `drawImage` one canvas onto another (Safari swaps red and blue on that path).
+   Repaint a band only when what it shows changes: build a key from its values and compare it with the last one.
+10. **Test the layout as numbers, then look.** Write a unit test that the layout covers the stage edge to edge
+    (`W * k >= w`, `H * k >= h`, less than one canvas pixel over) for 331 × 359, 346 × 518, 386 × 606, a Safari-short
+    stage (348 × 323) and a wide window. Then take screenshots at those sizes in `sdk/dev.html`, and try the app in
+    both Safari and the home-screen app on an iPhone: they differ.
+
 ## Mistakes seen in this repo, and the fix
 
 | Mistake | Fix |
@@ -182,3 +228,5 @@ Four tones and big pixels are the charm, not an excuse. The models to copy are L
 | A two-column button grid where every arrow moved to the next button in reading order: Down went right, and the lower rows sat below the fold | Keep the screen fixed, use 4 buttons in a 2×2 grid, and make Up/Down move a row (section 5) |
 | Hints in 12 px dark text on paper | 13 px or more, or ink |
 | A gem or pickup chirp on a square wave, climbing to 1.8 kHz; it stings after the tenth haul at full volume | Drop an octave, use `triangle`, keep the top note under 1.2 kHz and soften `vol` (section 7) |
+| A game played in a fixed square with HTML stat bars above and below, and paper at the sides in Safari | One canvas over the whole stage: the world at full width, the scoreboard in the extra sky, wider scenery when short (section 13) |
+| A canvas sized once at start, and to rounded pixels: thin paper lines down both sides on an iPhone | Fit from `getBoundingClientRect()` without rounding, rows rounded up, and fit again on any frame where the stage's size changed (section 13) |

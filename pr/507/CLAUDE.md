@@ -244,7 +244,8 @@ node --test                                  # the test suite; must pass
   every runtime string lives in `runtime/strings.js` (`tr(key, vars)` in the runtime scripts); add both languages.
   Only zh and en (see docs/decisions.md section 11).
 - App screens (registry apps, test apps too) follow `sdk/UI.md`: one scrolling main area, 44 px targets, ink text on paper,
-  no chin pad unless the app needs it. Design for 331×359, the smallest screen.
+  no chin pad unless the app needs it. Design for 331×359, the smallest screen. A game's play screen fills the whole
+  stage edge to edge, in Safari too (UI.md section 13; lao-zhang's `src/22-hud.js` is the example).
 - Every text input styles its placeholder too: `::placeholder{color:var(--ink-2)}` in the runtime, `#4a5a32` in an
   app. The browser's default light gray reads as a washed-out white box on the green LCD (owner, 2026-10-25).
 - Every pixel the user sees on the LCD is one of the four tones. One exception (owner, 2026-10-15): the darkroom's photo
