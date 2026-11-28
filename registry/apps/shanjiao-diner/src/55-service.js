@@ -392,14 +392,16 @@ game.scene("service", {
       if (game.pressed("a")) {
         if (SERV.pauseSel === 0) { SERV.paused = false; game.sfx("tap"); }
         else { game.sfx("tap"); finishService(true); }
-      } else {
-        /* the pause box's two rows (98 and 118, 20 px apart) */
-        var pr = tapRow(48, 94, 120, 42, 20, 2, 0);
-        if (pr >= 0) {
-          SERV.pauseSel = pr;
-          if (pr === 0) { SERV.paused = false; game.sfx("tap"); }
-          else { game.sfx("tap"); finishService(true); }
-        }
+      } else if (tapInside(60, 98, 96, 16)) {
+        /* the drawn rows only: y 98-114 继续, 118-134 打烊; the gap and the
+           box's top are inert, so a stray tap never ends the evening */
+        SERV.pauseSel = 0;
+        SERV.paused = false;
+        game.sfx("tap");
+      } else if (tapInside(60, 118, 96, 16)) {
+        SERV.pauseSel = 1;
+        game.sfx("tap");
+        finishService(true);
       }
       if (game.pressed("start")) { SERV.paused = false; game.sfx("tap"); }
       return;

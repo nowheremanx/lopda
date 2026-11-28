@@ -19,6 +19,22 @@ function newGame() {
   game.go("morning");
 }
 
+/* The label x of each title item: the draw and the tap test share these, so a
+ * tap on 说明 really opens 说明.  The labels are ~26 px wide, so the centre is
+ * x + 13. */
+function titleXs(n) {
+  return n === 3 ? [38, 78, 118] : n === 2 ? [62, 118] : [96];
+}
+function titleTap(n) {
+  if (!tapInside(28, 190, 160, 32)) return -1;
+  var xs = titleXs(n), best = 0, dist = 1e9;
+  for (var i = 0; i < n; i++) {
+    var d = Math.abs(game.pointer.x - (xs[i] + 13));
+    if (d < dist) { dist = d; best = i; }
+  }
+  return best;
+}
+
 /* A, START and a tap all come here: the tapped item is in TITLE_SEL first. */
 function titleChoose() {
   var opts = titleOptions();
@@ -59,8 +75,8 @@ game.scene("title", {
     if (game.repeat("right")) { TITLE_SEL = (TITLE_SEL + 1) % opts.length; game.sfx("move"); }
     if (game.pressed("a") || game.pressed("start")) { titleChoose(); return; }
     /* the whole menu window is the target: 32 game px is 49 css px on the
-       smallest phone, and the three cells are 53 game px wide */
-    var hit = tapCell(opts.length, 28, 190, 160, 32);
+       smallest phone; the nearest label centre wins */
+    var hit = titleTap(opts.length);
     if (hit >= 0) { TITLE_SEL = hit; titleChoose(); }
   },
   draw: function (g) {
@@ -72,7 +88,7 @@ game.scene("title", {
     // menu
     var opts = titleOptions();
     g.window(28, 190, 160, 32, { thin: true });
-    var xs = opts.length === 3 ? [38, 78, 118] : opts.length === 2 ? [62, 118] : [96];
+    var xs = titleXs(opts.length);
     for (var i = 0; i < opts.length; i++) {
       if (i === TITLE_SEL) {
         g.rect(xs[i] - 5, 196, 36, 18, g.INK);
