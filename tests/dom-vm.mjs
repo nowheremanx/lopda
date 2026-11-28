@@ -55,6 +55,7 @@ export function bootDom(file, opt = {}) {
   const g = {
     console, document, ImageData: class { constructor(d, w, h) { this.data = d; this.width = w; this.height = h; } },
     performance: { now: () => now }, innerWidth: 331, innerHeight: 359, devicePixelRatio: 1,
+    atob: (s) => Buffer.from(String(s), "base64").toString("binary"), btoa: (s) => Buffer.from(String(s), "binary").toString("base64"),
     requestAnimationFrame: (f) => { raf.push(f); return raf.length; }, cancelAnimationFrame() {},
     setTimeout: (f, ms) => { const t = { f, at: now + (ms || 0), id: timers.length + 1 }; timers.push(t); return t.id; },
     clearTimeout: (id) => { const t = timers.find((x) => x.id === id); if (t) t.f = null; },

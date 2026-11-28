@@ -108,9 +108,9 @@
         "................",
         "................"
       ],
-      "version": "4.2.0",
+      "version": "4.3.0",
       "released": "2026-10-07",
-      "updated": "2026-11-26",
+      "updated": "2026-11-28",
       "description": "十关闯关、60 秒冲分或无尽生存。头盔两下，金鼠加分，避开地雷。",
       "i18n": {
         "en": {
@@ -121,8 +121,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "58e0cf28aeb8f8ef3963d8c2b70ef7d3cb8ec0b4a6b105e6981a0f8eedb64389",
-      "bytes": 47583
+      "sha256": "b80a2913144a34d3ae94fa2b41694a5cdc105df1c49c84b1d8413a0139544d8a",
+      "bytes": 58692
     },
     {
       "spec": "lopda/1",
