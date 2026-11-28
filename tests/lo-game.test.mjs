@@ -28,13 +28,19 @@ test("the docs and templates ask for the current version", () => {
   assert.ok(read("CLAUDE.md").includes(want), "CLAUDE.md");
 });
 
-test("registry games are already built: running the tool changes nothing", () => {
+test("registry games are already built: current, or pinning a released copy", () => {
+  /* An app may stay on an older released lo-game (sdk/lo-game.versions.json; check-app accepts it too) while
+     the framework moves on, so a new version touches only the apps that take it. Running the tool on one of
+     those updates it; the test only rejects a block that is neither current nor a released copy. */
+  const released = readJSON("sdk/lo-game.versions.json");
   let games = 0;
   for (const dir of APPS) {
     const html = readFileSync(join(dir, "index.html"), "utf8");
-    if (!LIB_BLOCK.test(html)) continue;
+    const block = html.match(LIB_BLOCK);
+    if (!block) continue;
     games++;
-    assert.equal(build(html), html, `${dir}: run node tools/lo-game.mjs ${dir}`);
+    if (build(html) === html) continue;
+    assert.equal(released[block[1]], sha(block[2]), `${dir}: run node tools/lo-game.mjs ${dir}`);
   }
   assert.ok(games > 0);
 });

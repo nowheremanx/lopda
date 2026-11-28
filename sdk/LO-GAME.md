@@ -1,6 +1,6 @@
 # lo-game.js
 
-A small game framework for Lo-PDA apps. MIT License. Version 1.4.0.
+A small game framework for Lo-PDA apps. MIT License. Version 1.5.0.
 
 It gives every game the same base: a four-tone pixel screen, crisp Chinese and English text,
 the chin buttons, scenes, dialogue boxes, menus, tile maps and saving. You write
@@ -27,7 +27,7 @@ registry/apps/<id>/
 <html lang="zh">
 <head><meta charset="utf-8"><title>My game</title></head>
 <body>
-<script data-lo-game="1.4.0"></script>
+<script data-lo-game="1.5.0"></script>
 <script>
 var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
 var T = game.t;
@@ -62,7 +62,8 @@ map, talking to a cat, a choice, picking up an item, and saving, in Chinese and 
 - `LoGame.create({ width, height, lang })`. `lang` is your game's own language
   (`"zh"`, the default, or `"en"`), used when the runtime does not say (section 7.1). The default size is 160×144, the size of a Game Boy
   screen. Any size works; keep it small. The framework scales it to fit with even
-  pixels and fills the rest of the screen with paper.
+  pixels and fills the rest of the screen with paper — or, with `fill: true` and a
+  `bands` callback, grows the canvas to cover the whole stage (section 2.1).
 - Every pixel is one of four tones. Use the numbers, not colours:
 
 | Name | Value | Hex |
@@ -78,6 +79,63 @@ map, talking to a cat, a choice, picking up an item, and saving, in Chinese and 
   only, never `g.MID` text on `g.PAPER`. Menus and dialogues follow `sdk/UI.md` sections 5 and 6:
   the selected item inverted, a hint line with only the keys that work, and arrows moving through a grid
   by rows and columns, not one item at a time in reading order.
+
+### 2.1 Filling the phone (1.5.0)
+
+A phone is taller than a small game screen, and a square game with paper bars above and below it reads as a
+prototype. `fill: true` grows the canvas around the world; the world keeps its size, its drawing and its hit tests
+(`sdk/UI.md` section 13):
+
+```js
+var game = LoGame.create({
+  width: 160, height: 144, fill: true,
+  bands: function (s, stage) {          /* paint the whole canvas first, then the world goes on top */
+    s.clear(s.PAPER);
+    s.rect(0, stage.y - 6, stage.w, 6, s.DARK);        /* sky above the world */
+    s.rect(0, stage.y + stage.worldH, stage.w, stage.h, s.INK);   /* floor below it */
+  }
+});
+```
+
+The canvas is laid out to cover the stage edge to edge from the stage's own
+`getBoundingClientRect` (fractional on an iPhone), with `k` CSS pixels to a canvas pixel:
+
+- Normally the world's width fills the stage (`k = stageW / worldW`); the canvas has as many rows as the height
+  allows, and the rows above and below the world are scenery. The world is centred in those rows.
+- A stage too short for that (Safari's bars leave as little as 348 × 323) fits by height instead and the canvas
+  grows **wider** than the world; the extra columns at the sides carry the scenery, never paper.
+- Canvas rows round up, CSS sizes are exact (never rounded), and the canvas is re-laid-out whenever the stage's
+  size changes, checked every animation frame after it starts. The canvas is repainted immediately.
+- The canvas covers the stage edge to edge; a fractional CSS size may overshoot the bottom or sides by less than
+  one canvas pixel. If you pass your own `parent`, give that stage `overflow: hidden`, or the overshoot can show
+  as a scrollbar or a line at the edge.
+
+`bands(s, stage)` is called on every drawn frame, before the world is copied in:
+
+- `s` is a drawing surface with all of section 3's methods, in **stage pixels**: `(0, 0)` is the canvas's top
+  left and `s.width`/`s.height` are the canvas's size. It has its own origin and clip. The surface persists
+  between frames, so `bands` must clear it (or paint every pixel it owns) on every call, or what it drew last
+  frame remains as a ghost wherever this frame paints nothing.
+- `stage` is `{w, h, k, x, y, worldW, worldH}`: the canvas's size, CSS pixels a canvas pixel, where the world
+  sits in the canvas, and the world's size. The object is reused between frames.
+- Anything the world draws covers what `bands` painted in the world's rect, so a HUD in `bands` goes in the
+  bands. Palette effects (`game.fade`, `game.flash`, `game.shake`) apply to the whole canvas.
+
+The world itself is unchanged: `game.g` draws into a `game.width` × `game.height` buffer and all hit tests stay
+in world pixels. With fill on:
+
+- `game.stage` is `{w, h, k, x, y}` (the canvas and the world's place in it); `game.scale` is `k`.
+- `game.pointer.x` / `y` stay in **world** pixels (clamped to the world, so a tap on a band lands on the near
+  edge); `game.pointer.stageX` / `stageY` give the same tap in canvas pixels.
+- A press that starts in a band is **not** a world tap: `game.ok()`, the built-in dialogue box and `game.choose`
+  ignore it. `game.pointer.pressed` is still true, so a game reading it directly must check `stageX`/`stageY`
+  against `game.stage` (`x` to `x + width`, `y` to `y + height`).
+
+With fill off (the default) nothing changes: the world is scaled to fit with even pixels and paper around it.
+`LoGame.fillLayout(stageW, stageH, worldW, worldH)` returns `{w, h, k, x, y}` for the fill case and
+`LoGame.containLayout(stageW, stageH, worldW, worldH, dpr)` returns `{w, h, k}` for the old one, so a game can
+reason about its canvas without a browser. `registry/apps/lost-deck/src/60-game.js` (`paintBands`) is the
+worked example.
 
 ## 3. Drawing: `g`
 
@@ -177,7 +235,7 @@ game.pressed("a")       // went down this frame (never missed, even a very quick
 game.released("a")
 game.repeat("down")     // on press, then every 0.09 s after 0.32 s held: for menus
 game.dir()              // {x, y}: -1, 0 or 1 from the D-pad, with repeat
-game.ok()               // A, START or a tap on the screen
+game.ok()               // A, START or a tap inside the world (a band tap with fill does not count)
 game.pointer            // {x, y, down, pressed, released} in screen pixels
 ```
 
@@ -307,5 +365,5 @@ var r = LoGame.rng(seed)    // r.next() 0..1, r.int(a, b), r.pick(array), r.chan
 ## 11. Rules that still apply
 
 Everything in `SPEC.md` holds: one HTML file up to 512 KB with the framework
-included (it is about 28 KB), no network, no `eval`, no emoji, short text in Chinese,
+included (it is about 33 KB), no network, no `eval`, no emoji, short text in Chinese,
 English or (recommended) both, and a first screen that says how to play.

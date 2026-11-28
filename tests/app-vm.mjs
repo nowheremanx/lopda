@@ -20,12 +20,16 @@ export function boot(file, opt = {}) {
     getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
     measureText: () => ({ width: 12 }), fillText() {}, clearRect() {}
   };
-  /* every element's listeners by event type: the canvas's pointer listeners are how pointer() taps the screen */
+  /* every element's listeners by event type: the canvas's pointer listeners are how pointer() taps the screen.
+     opt.stage ({w, h}) gives the page a phone-sized stage: lo-game's fill mode reads it from getBoundingClientRect. */
   const elListeners = {};
+  const rect = opt.stage
+    ? { left: 0, top: 0, width: opt.stage.w, height: opt.stage.h }
+    : { left: 0, top: 0, width: 160, height: 144 };
   const el = () => ({
     style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
     addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); }, appendChild() {}, setPointerCapture() {},
-    getContext: () => ctx2d, getBoundingClientRect: () => ({ left: 0, top: 0, width: 160, height: 144 })
+    getContext: () => ctx2d, getBoundingClientRect: () => rect
   });
   class KeyboardEvent { constructor(type, o = {}) { this.type = type; this.key = o.key; this.repeat = false; } preventDefault() {} }
   /* the page's globals. The scripts run as one function in this realm rather than in a vm context, whose
@@ -56,7 +60,13 @@ export function boot(file, opt = {}) {
     const e = { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
     (elListeners[type] || []).forEach((f) => f(e));
   };
-  return { ctx, frame: g.__frame, hashes, pointer };
+  /* pointerRaw(type, clientX, clientY): at page CSS pixels (the fake rect starts at 0, 0), for fill apps whose
+     stage is not the world's size */
+  const pointerRaw = (type, clientX, clientY) => {
+    const e = { pointerId: 1, clientX, clientY, preventDefault() {} };
+    (elListeners[type] || []).forEach((f) => f(e));
+  };
+  return { ctx, frame: g.__frame, hashes, pointer, pointerRaw };
 }
 
 export function mulberry32(seed) {

@@ -4,9 +4,70 @@
 (function () {
   "use strict";
   var LD = window.LD, R = LD.R;
-  var game = LoGame.create({ width: 160, height: 160, lang: "zh" });
+  /* the 160 x 160 screen is the whole game; on a phone lo-game's fill canvas grows around it (sdk/UI.md 13)
+     and paintBands fills the extra stage with the station, never paper */
+  var game = LoGame.create({ width: 160, height: 160, lang: "zh", fill: true, bands: paintBands });
   var T = game.t, g = game.g;
   var W = 160, VH = R.VH;
+
+  /* ---------------- the bands around the world ----------------
+     Levels, maps, hit tests and the HUD keep the 160 x 160 screen. The rows above it are the station's sky,
+     the rows below its deck; when Safari's bars leave a short stage the canvas fits by height and the extra
+     columns at the sides are hull. Fixed stars, so the sky looks the same every run and in screenshots. */
+  var bandStars = [];
+  (function () {
+    var seed = 0x6c6f7374;   /* "lost" */
+    function next() {
+      seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+      return seed / 4294967296;
+    }
+    for (var i = 0; i < 150; i++) bandStars.push({ u: next(), v: next(), t: i % 9 === 0 ? 3 : i % 3 === 0 ? 2 : 1 });
+  })();
+  function paintBands(s, i) {
+    var w = i.w, h = i.h, sky = i.y, ground = i.y + i.worldH, floor = h - ground, n, st, x, y;
+    s.clear(0);
+    if (sky > 0) {
+      /* the pause map is a flat dark board: keep its sky quiet, not a busy star strip */
+      var stars = pauseOpen ? 18 : bandStars.length;
+      for (n = 0; n < stars; n++) {
+        st = bandStars[n];
+        x = Math.floor(st.u * w);
+        y = Math.floor(st.v * sky);
+        if (x >= 0 && x < w) s.pixel(x, y, pauseOpen ? 1 : st.t);
+      }
+      /* the station's moon, only where the sky is tall enough for it */
+      if (!pauseOpen && sky >= 30) {
+        var mx = Math.floor(w * 0.78), my = Math.floor(sky * 0.5), mr = Math.min(10, Math.floor(sky / 5));
+        s.circle(mx, my, mr, 2, true);
+        s.pixel(mx - 3, my - 2, 0); s.pixel(mx + 2, my + 3, 0); s.pixel(mx + 4, my - 4, 0);
+      }
+      if (sky > 2) s.dither(0, sky - 2, w, 2, 1, 1);
+      s.rect(0, sky - 1, w, 1, 1);
+    }
+    if (floor > 0) {
+      /* the deck below the screen: a lit edge, seams every few rows, rivets */
+      s.rect(0, ground, w, floor, 0);
+      s.rect(0, ground, w, 1, 2);
+      for (y = ground + 5; y < h; y += 7) s.dither(0, y, w, 1, 1, 1);
+      for (x = 5; x < w; x += 18) {
+        s.rect(x, ground + 2, 2, 2, 1);
+        s.pixel(x + 1, ground + 2, 2);
+      }
+      if (floor > 12) for (x = 14; x < w; x += 36) s.rect(x, ground + 10, 1, Math.min(4, floor - 10), 1);
+    }
+    /* a stage too short for the world's width: the extra columns are hull, not paper */
+    if (i.x > 0) {
+      s.rect(0, 0, i.x, h, 0);
+      s.rect(i.x - 1, 0, 1, h, 1);
+      if (i.x > 3) s.dither(0, 0, 2, h, 1, 1);
+    }
+    if (i.x + i.worldW < w) {
+      var rx = i.x + i.worldW;
+      s.rect(rx, 0, w - rx, h, 0);
+      s.rect(rx, 0, 1, h, 1);
+      if (w - rx > 3) s.dither(w - 2, 0, 2, h, 1, 1);
+    }
+  }
   document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
   function t(zh, en, vars) { return T({ zh: zh, en: en }, vars); }
 
@@ -135,14 +196,21 @@
       g.pixel(s.x, s.y, s.z > 0.75 ? 3 : s.z > 0.5 ? 2 : 1);
     }
   }
+  /* a tap that starts in the world, not in the bands lo-game's fill layout puts around it; the sticky edges would
+     otherwise turn a side-band tap into a tap on x 0 / y 0 (lo-game 1.5.0 game.stage) */
+  function worldTap() {
+    var p = game.pointer, st = game.stage;
+    return p.pressed && p.stageX >= st.x && p.stageX < st.x + game.width &&
+      p.stageY >= st.y && p.stageY < st.y + game.height;
+  }
   /* a tap on a menu row is that row chosen and A pressed (sdk/UI.md section 5); -1 when the tap misses every row */
   function tapRow(y0, step, h, n, x0, x1) {
     var pt = game.pointer;
-    if (!pt.pressed || pt.x < x0 || pt.x >= x1) return -1;
+    if (!worldTap() || pt.x < x0 || pt.x >= x1) return -1;
     var i = Math.floor((pt.y - y0) / step);
     return i >= 0 && i < n && pt.y - y0 - i * step < h ? i : -1;
   }
-  function tapped() { return game.pointer.pressed; }
+  function tapped() { return worldTap(); }
   function hint(str, y) { g.text(str, 80, y, { color: 3, align: "center" }); }
   function clock(sec) { sec = Math.max(0, Math.floor(sec)); var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
   function dname(d) { return T(d.name); }
@@ -265,7 +333,7 @@
     update: function (dt) {
       this.t += dt;
       if (game.pressed("b")) { sfx("tap"); game.go("decks"); return; }
-      if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
+      if (game.pressed("a") || game.pressed("start") || tapped()) {
         var D = LD.DECKS[deckIdx], full = T(D.brief).length;
         if (this.t * 30 < full) { this.t = 99; return; }
         sfx("ok"); game.go("play", null, { to: 0 });
@@ -374,7 +442,7 @@
       /* after a dialog or the pause menu, A fires only once it has been let go */
       if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
       var pt = game.pointer, touchFire = false;
-      if (pt.pressed && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
+      if (worldTap() && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
       if (touch) {
         if (pt.down) {
           touch.t += dt;
@@ -499,9 +567,10 @@
   }
 
   /* ---------------- pause and the map ---------------- */
-  var pauseSel = 0;
+  var pauseSel = 0, pauseOpen = false;
   game.scene("pause", {
-    enter: function () { pauseSel = 0; },
+    enter: function () { pauseSel = 0; pauseOpen = true; },
+    exit: function () { pauseOpen = false; },
     update: function () {
       var d = game.dir();
       if (d.y) { pauseSel = (pauseSel + d.y + 3) % 3; sfx("tick"); }
