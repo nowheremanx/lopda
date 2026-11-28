@@ -460,11 +460,20 @@ test("the play screen fills the phone: the mine stays 320 x 288, the sky always 
   for (const [w, h] of [[331, 359], [346, 518], [386, 606], [900, 500]]) {
     const L = GM.frameLayout(w, h);
     assert.equal(L.sky + GM.BH + L.rock, L.H, `${w}x${h}: the bands and the mine make the canvas`);
-    assert.ok(L.sky >= GM.SKY_MIN, `${w}x${h}: sky ${L.sky} under ${GM.SKY_MIN}`);
+    assert.ok(L.sky >= GM.SKY_MIN && !L.slim, `${w}x${h}: sky ${L.sky} under ${GM.SKY_MIN}`);
     assert.ok(L.rock === 0 || L.rock >= GM.ROCK_MIN, `${w}x${h}: a bedrock band of ${L.rock} rows has no room for the carts`);
-    assert.ok(GM.BW * L.k <= w + 0.5 && L.H * L.k <= h + 0.5, `${w}x${h}: the canvas runs off the stage`);
-    assert.ok(Math.abs(GM.BW * L.k - w) < 1 || Math.abs(L.H * L.k - h) < 1, `${w}x${h}: the canvas fills neither side`);
+    /* the height rounds up: at most part of one row is cut off, never a line of paper left */
+    assert.ok(GM.BW * L.k <= w + 0.01 && L.H * L.k < h + L.k, `${w}x${h}: the canvas runs off the stage`);
+    assert.ok(L.H * L.k >= h - 0.01 || Math.abs(GM.BW * L.k - w) < 0.01, `${w}x${h}: the canvas leaves paper`);
   }
+  /* Safari with its bars: shorter than the handheld's smallest screen; the width still fills, on a slim scoreboard */
+  for (const [w, h] of [[346, 340], [331, 330], [346.5, 352.33]]) {
+    const L = GM.frameLayout(w, h);
+    assert.ok(Math.abs(GM.BW * L.k - w) < 0.01, `${w}x${h}: the width must fill`);
+    assert.ok(L.H * L.k >= h - 0.01, `${w}x${h}: paper under the canvas`);
+    assert.ok(L.sky >= GM.SKY_SLIM, `${w}x${h}: no room for even the slim scoreboard`);
+  }
+  assert.equal(GM.frameLayout(346, 340).slim, true);
   assert.equal(GM.frameLayout(331, 359).rock, 0, "the smallest screen has no bedrock band");
   assert.ok(GM.frameLayout(386, 606).rock > 0, "a tall phone gets the carts");
 });
