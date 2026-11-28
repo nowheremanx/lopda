@@ -848,8 +848,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/vector-dream/index.html",
-      "sha256": "8acb1e745bbf3359f540a8ac4d12ba21a6bab43411369fa956d93e54f5714ddb",
-      "bytes": 50888
+      "sha256": "ca4f7cd40524d918014fa0d38fadc31048a89e3b22542e443d13d368f1659ab8",
+      "bytes": 51089
     },
     {
       "spec": "lopda/1",

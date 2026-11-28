@@ -10,6 +10,7 @@
   canvas { position: absolute; left: 0; top: 0; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
   /* 13 px on the smallest stage and 15 px from 360 px across (set with the stage's layout); paper on ink */
   #hud, #legend, #card { position: absolute; background: #1f2a14; color: #a3ad7e; border: 1px solid #7d8a58; padding: 3px 5px; white-space: pre; line-height: 1.3; pointer-events: none; }
+  /* the HUD and legend stay at the stage's corners, over the picture on a large stage, on purpose: they are the device's readout, not part of the room */
   #hud { left: 6px; top: 6px; font-size: 13px; display: none; }
   /* bottom-left, so it never covers the HUD; no pointer events, a drag over it still turns the view */
   #legend { left: 6px; bottom: 6px; font-size: 13px; }
@@ -605,6 +606,12 @@ var Lo3D = (function () {
     for (i = 24; i < cw; i += 24) roomRect(u32, cw, ch, i, 0, 1, ch, 1);
     for (i = 24; i < ch; i += 24) roomRect(u32, cw, ch, 0, i, cw, 1, 1);
     var b = 4, bx0 = L.x - b, by0 = L.y - b, bx1 = L.x + L.vw + b, by1 = L.y + L.vh + b;
+    /* its stand first: it belongs to the toy even when the stage is too tight for the bezel (or one of its sides) */
+    var cx = L.x + L.vw / 2, top = by1 + 6, half = Math.min(60, Math.round(L.vw * 0.19));
+    if (top + 9 <= ch) {
+      roomRect(u32, cw, ch, cx - 14, by1 + 1, 28, top - by1 - 1, 1);
+      for (i = 0; i < 9; i++) roomRect(u32, cw, ch, cx - half - i * 1.5, top + i, (half + i * 1.5) * 2, 1, i === 0 ? 2 : 1);
+    }
     if (bx0 < 0 || by0 < 0 || bx1 >= cw || by1 >= ch) return img;
     /* the bezel: ink around the toy so the grid stops at it, lit on the top and left */
     roomRect(u32, cw, ch, bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1, 0);
@@ -612,12 +619,6 @@ var Lo3D = (function () {
     roomRect(u32, cw, ch, bx0, by0, 1, by1 - by0 + 1, 2);
     roomRect(u32, cw, ch, bx0, by1, bx1 - bx0 + 1, 1, 1);
     roomRect(u32, cw, ch, bx1, by0, 1, by1 - by0 + 1, 1);
-    /* its stand, when the band below has room for a neck and a foot */
-    var cx = L.x + L.vw / 2, top = by1 + 6, half = Math.min(60, Math.round(L.vw * 0.19));
-    if (top + 9 <= ch) {
-      roomRect(u32, cw, ch, cx - 14, by1 + 1, 28, top - by1 - 1, 1);
-      for (i = 0; i < 9; i++) roomRect(u32, cw, ch, cx - half - i * 1.5, top + i, (half + i * 1.5) * 2, 1, i === 0 ? 2 : 1);
-    }
     return img;
   }
 

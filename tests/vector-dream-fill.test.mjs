@@ -13,8 +13,9 @@ import { vecdream } from "./frame-hashes.mjs";
 
 const FILE = join(ROOT, "registry", "apps", "vector-dream", "index.html");
 const W = 160, H = 144;
-/* sdk/UI.md section 1 and 13: the smallest (chin pad), the two modern phones without a pad, Safari-short, the largest */
-const SIZES = [[331, 359], [346, 518], [386, 606], [348, 323], [386, 738]];
+/* sdk/UI.md section 1 and 13: the smallest (chin pad), the two modern phones without a pad, Safari-short, the largest,
+   a wide desktop window (fit by height, canvas wider than the toy) and a fractional iPhone stage */
+const SIZES = [[331, 359], [346, 518], [386, 606], [348, 323], [386, 738], [1200, 800], [331.5, 359]];
 const TONE = { "31,42,20": 0, "74,90,50": 1, "125,138,88": 2, "163,173,126": 3 };
 const sha = (buf) => createHash("sha256").update(buf).digest("hex").slice(0, 16);
 
@@ -106,6 +107,19 @@ test("vector-dream fill: the room covers the stage, uses the four tones, and lea
 
 /* The picture itself must be untouched: the view put is the 160 x 144 buffer at exactly K x K, whole pixels, no
    resampling. Run the same frames at 1x and at a phone size and compare every source pixel with its block. */
+test("vector-dream fill: a stage too tight for the bezel still keeps the stand", () => {
+  const v = launch(320, 359);           /* the view touches both sides at 2x, so the bezel cannot be drawn */
+  v.run(2);
+  const L = v.state().layout;
+  assert.equal(L.k, 2);
+  assert.equal(L.x, 0);
+  const room = v.puts.find((p) => p.w === L.cw && p.h === L.ch);
+  assert.ok(room, "no room was painted");
+  let lit = 0;
+  for (let y = L.y + L.vh; y < room.h; y++) for (let x = 0; x < room.w; x++) if (toneAt(room.data, room.w, x, y) === 2) lit++;
+  assert.ok(lit >= 100, `the stand's lit top is missing below the toy (${lit} mid pixels)`);
+});
+
 test("vector-dream fill: every view put is a whole-pixel copy of the 160 x 144 buffer", () => {
   const small = launch(W, H), big = launch(331, 359);
   small.run(9); big.run(9);
