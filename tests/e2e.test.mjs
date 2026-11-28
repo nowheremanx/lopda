@@ -11918,42 +11918,31 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   /* the smallest screen, as on an iPhone SE with the chin pad */
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
-  /* a fresh start: the name over a short menu, the first row inverted, RANDOM dashed and closed */
+  /* a fresh start: the shared fog title over the whole stage, 继续 first, RANDOM closed */
   const title = await f.evaluate(() => {
-    const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
-    const artEl = document.getElementById("title-art"), artBox = artEl.getBoundingClientRect();
+    const root = document.documentElement, c = document.getElementById("lotitle");
+    const r = c.getBoundingClientRect(), info = game.title;
     return {
-      nameHidden: document.getElementById("cover-text").hidden,
-      rows: rows.map((li) => li.textContent),
-      sel: rows.map((li) => li.classList.contains("sel")),
-      locked: rows.map((li) => li.classList.contains("locked")),
-      dashed: rows[2] ? getComputedStyle(rows[2]).borderTopStyle : "",
-      icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
-      art: { tag: artEl.tagName, painted: artEl.width >= 156, w: artBox.width, h: artBox.height },
-      progress: [...document.querySelectorAll("#cover-list .prog")].map((el) => el.textContent),
+      info,
+      canvas: [r.left, r.top, r.width, r.height],
+      pixels: [c.width, c.height],
+      shown: getComputedStyle(c).display !== "none",
+      oldArt: !!document.getElementById("title-art"),
       size: [root.clientWidth, root.clientHeight],
-      gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
-      fit: [document.getElementById("title-art"), document.getElementById("cover-text"), ...rows, document.getElementById("cover-foot")].every((el) => {
-        const r = el.getBoundingClientRect();
-        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
-      }),
-      scroll: cover.scrollHeight, client: cover.clientHeight,
     };
   });
   assert.deepEqual(title.size, [331, 359]);
-  assert.equal(title.nameHidden, true, "the picture carries the name, so no line repeats it");
-  assert.deepEqual(title.rows, ["继续 · 第 1 关", "选关", "随机关通关 30 关后开放", "玩法"]);
-  assert.deepEqual(title.sel, [true, false, false, false], "the title opens on CONTINUE");
-  assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 30");
-  assert.equal(title.dashed, "dashed", "the locked row has a dashed border");
-  assert.deepEqual(title.icons, [true, true, true, true], "every title row has its pixel icon");
-  assert.equal(title.art.tag, "CANVAS", "the title picture is a canvas");
-  assert.ok(title.art.painted && title.art.w >= 60 && title.art.w === title.art.h, "the square picture is painted and shown: " + title.art.w);
-  assert.deepEqual(title.progress, [], "a fresh start has no progress on the ROUNDS row");
-  assert.ok(title.gaps.length === 3 && title.gaps.every((g) => g >= 8), "the menu rows keep 8 px apart: " + title.gaps);
-  assert.equal(title.fit, true, "the title and its art stay inside 331x359");
-  assert.ok(title.scroll <= title.client, "the title needs no scrolling: " + title.scroll + " <= " + title.client);
-  /* START opens the first row: round 1 and its demo */
+  assert.deepEqual(title.canvas, [0, 0, 331, 359], "the title canvas fills the smallest stage");
+  assert.deepEqual(title.pixels, [331, 359], "one device pixel a screen pixel at dpr 1");
+  assert.equal(title.shown, true);
+  assert.equal(title.oldArt, false, "the old framed picture is gone");
+  assert.deepEqual(title.info.items.map((i) => i.label), ["继续", "选关", "随机关", "玩法"]);
+  assert.equal(title.info.items[0].status, "第 1 关", "a fresh title continues at round 1");
+  assert.deepEqual(title.info.items.map((i) => i.locked === true), [false, false, true, false], "RANDOM is locked before round 30");
+  assert.equal(title.info.items[2].reason, "通关 30 关后开放", "the locked item says why in the bar");
+  assert.equal(title.info.note, "从第 1 关开始", "a fresh start has no record yet");
+  assert.equal(title.info.hint, "选 · A 确定");
+  /* START picks the chosen item: round 1 and its demo */
   await p.locator('#pad [data-b="start"]').click();
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
@@ -12193,7 +12182,7 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await press("b");
   await f.waitForFunction(() => game.phase === "title");
   assert.equal(await bookCalls(), bookCallsBeforeB, "B on NEXT makes no word book call");
-  const continuedFromCard = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  const continuedFromCard = await f.evaluate(() => game.title.items.map((li) => li.label + (li.status ? " · " + li.status : "")));
   assert.equal(continuedFromCard[0], "继续 · 第 2 关", "B on NEXT goes to the title, which continues at round 2");
   await p.waitForTimeout(350);         /* the title's 300 ms tap guard */
   await press("a");
@@ -12247,13 +12236,10 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await f.waitForFunction(() => game.phase === "leave");
   await f.locator("#cover-btn2").tap();
   await f.waitForFunction(() => game.phase === "title");
-  const continued = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  const continued = await f.evaluate(() => game.title.items.map((li) => li.label + (li.status ? " · " + li.status : "")));
   assert.equal(continued[0], "继续 · 第 2 关", "the title continues at round 2");
-  const progress = await f.evaluate(() => {
-    const row = document.querySelector('#cover-list li[data-row="1"]'), prog = row && row.querySelector(".prog");
-    return prog ? prog.textContent : "";
-  });
-  assert.equal(progress, "1/100", "the ROUNDS row shows how far the player has come");
+  const progress = await f.evaluate(() => game.title.note);
+  assert.equal(progress, "已通关 1/100", "the bar shows how far the player has come");
   const saved2 = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
   assert.equal(saved2.cleared, 1, "round 1 is recorded cleared");
   assert.equal(saved2.round, 2, "the save continues at round 2");
@@ -12354,17 +12340,18 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
   const endTitle = await f.evaluate(() => {
-    const rows = [...document.querySelectorAll("#cover-list li")], badge = document.getElementById("round");
+    const info = game.title;
     return {
-      rows: rows.map((li) => li.textContent),
-      locked: rows.map((li) => li.classList.contains("locked")),
-      sel: rows.map((li) => li.classList.contains("sel")),
-      badge: [badge.textContent, badge.className],
+      labels: info.items.map((li) => li.label),
+      locked: info.items.map((li) => li.locked === true),
+      index: info.index,
+      note: info.note,
     };
   });
-  assert.equal(endTitle.rows[0], "随机关", "after round 100 RANDOM takes the first row");
+  assert.deepEqual(endTitle.labels, ["随机关", "选关", "玩法"], "after round 100 RANDOM takes the first place and 继续 goes");
   assert.deepEqual(endTitle.locked, [false, false, false], "RANDOM is unlocked");
-  assert.deepEqual(endTitle.sel, [true, false, false], "the cursor starts on it");
+  assert.equal(endTitle.index, 0, "the cursor starts on it");
+  assert.equal(endTitle.note, "100 关都过了", "the bar says the hundred are behind");
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "demo" || game.phase === "play"), "the random round");
   const rand = await f.evaluate(() => {
@@ -12448,29 +12435,27 @@ test("crossing: in English the line under the grid is an English definition", { 
   }, "the title screen");
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
-  /* the picture spells CROSSING itself, so no separate English word sits under it */
-  const enTitleName = await f.evaluate(() => ({ hidden: document.getElementById("cover-text").hidden, tag: document.getElementById("title-art").tagName }));
-  assert.equal(enTitleName.tag, "CANVAS", "the English title has the picture too");
-  assert.equal(enTitleName.hidden, true, "no English word repeats the picture");
-  /* the English locked row is the longest label: it, the rows' 8 px gaps and the footer still fit 331x359 */
+  /* the shared title paints the English name and its line over the picture */
   const enTitle = await f.evaluate(() => {
-    const root = document.documentElement, rows = [...document.querySelectorAll("#cover-list li")], cover = document.getElementById("cover");
+    const root = document.documentElement, c = document.getElementById("lotitle");
+    const r = c.getBoundingClientRect(), info = game.title;
     return {
+      info,
       size: [root.clientWidth, root.clientHeight],
-      icons: rows.map((li) => !!li.querySelector("svg") && li.querySelectorAll("svg rect").length > 0),
-      gaps: rows.slice(1).map((li, i) => li.getBoundingClientRect().top - rows[i].getBoundingClientRect().bottom),
-      fit: [document.getElementById("title-art"), ...rows, document.getElementById("cover-foot")].every((el) => {
-        const r = el.getBoundingClientRect();
-        return r.top >= 0 && r.left >= 0 && r.bottom <= root.clientHeight && r.right <= root.clientWidth;
-      }),
-      scroll: cover.scrollHeight, client: cover.clientHeight,
+      canvas: [r.left, r.top, r.width, r.height],
+      pixels: [c.width, c.height],
+      oldArt: !!document.getElementById("title-art"),
     };
   });
   assert.deepEqual(enTitle.size, [331, 359]);
-  assert.deepEqual(enTitle.icons, [true, true, true, true], "the English rows have icons too");
-  assert.ok(enTitle.gaps.every((g) => g >= 8), "the English menu rows keep 8 px apart: " + enTitle.gaps);
-  assert.equal(enTitle.fit, true, "the English title and its art stay inside 331x359");
-  assert.ok(enTitle.scroll <= enTitle.client, "the English title needs no scrolling");
+  assert.deepEqual(enTitle.canvas, [0, 0, 331, 359], "the English title canvas fills the stage too");
+  assert.deepEqual(enTitle.pixels, [331, 359]);
+  assert.equal(enTitle.oldArt, false, "the old framed picture is gone");
+  assert.deepEqual(enTitle.info.items.map((i) => i.label), ["CONTINUE", "ROUNDS", "RANDOM", "HOW TO PLAY"]);
+  assert.equal(enTitle.info.items[0].status, "ROUND 1");
+  assert.equal(enTitle.info.items[2].reason, "Clear 30 levels to unlock", "the English locked item says why");
+  assert.equal(enTitle.info.note, "Start at round 1");
+  assert.equal(enTitle.info.hint, "A picks");
   await p.locator('#pad [data-b="start"]').click();
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
@@ -12515,7 +12500,7 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
     await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
     await p.waitForTimeout(100);
   };
-  const titles = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => li.textContent));
+  const titles = () => f.evaluate(() => game.title.items.map((li) => li.label + (li.status ? " · " + li.status : "")));
   const pickerCells = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => ({
     n: +li.textContent,
     cleared: li.classList.contains("cleared"),
@@ -12616,23 +12601,13 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   const readSave = async () => (await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null));
   const withoutTaught = (g) => { const c = Object.assign({}, g); delete c.taught; return c; };
   const beforeSave = withoutTaught(await readSave());
-  const titleRows = await f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => {
-    const r = li.getBoundingClientRect();
-    return {
-      row: +li.getAttribute("data-row"), text: li.textContent, locked: li.classList.contains("locked"),
-      l: r.left, t: r.top, r: r.right, b: r.bottom,
-    };
-  }));
   const wordsCallsBefore = ((await p.textContent("#log")).match(/dict\.words/g) || []).length;
-  /* the HOW TO PLAY row keeps its place and its icon, and A starts the practice round */
-  const helpRow = await f.evaluate(() => {
-    const li = document.querySelector('#cover-list li[data-row="3"]');
-    return { text: li.textContent, icons: li.querySelectorAll("svg rect").length > 0 };
-  });
-  assert.equal(helpRow.text, "玩法", "the fourth row is still HOW TO PLAY");
-  assert.equal(helpRow.icons, true, "the row keeps its icon");
+  /* HOW TO PLAY is still the fourth item; the pad rolls to it and A starts the practice round */
+  const helpRow = await f.evaluate(() => game.title.items[3]);
+  assert.equal(helpRow.label, "玩法", "the fourth item is still HOW TO PLAY");
   const enterPractice = async () => {
-    await f.locator('#cover-list li[data-row="3"]').tap();
+    await press("down"); await press("down"); await press("down");
+    await press("a");
     await until(p, () => f.evaluate(() => game.phase === "demo"), "the practice demo");
   };
   await enterPractice();
@@ -12783,17 +12758,11 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   assert.equal(card.fit, true, "the card's button stays inside 331x359");
   assert.ok(card.scroll <= card.client, "the practice card needs no scrolling: " + card.scroll + " <= " + card.client);
 
-  /* (d) the card's button closes onto the title; a tap at the same spot within 100 ms is that same press, not a row */
-  const overlap = titleRows.map((row) => {
-    if (row.locked) return null;
-    const l = Math.max(card.btn.l, row.l), r = Math.min(card.btn.r, row.r);
-    const t = Math.max(card.btn.t, row.t), b = Math.min(card.btn.b, row.b);
-    if (r - l < 4 || b - t < 4) return null;
-    return { row: row.row, x: (l + r) / 2 - row.l, y: (t + b) / 2 - row.t, area: (r - l) * (b - t) };
-  }).filter(Boolean).sort((a, b) => b.area - a.area)[0];
-  assert.ok(overlap, "the card's button sits over a title row: " + JSON.stringify(titleRows.map((r) => [r.row, r.locked, r.t, r.b])));
+  /* (d) the card's button closes onto the title; a tap at the same spot within the guard is that same press,
+     not a pick. A raw mouse click dispatches at once; Playwright's tap would outlast the 300 ms guard. */
   await f.locator("#cover-btn").tap();
-  await f.locator(`#cover-list li[data-row="${overlap.row}"]`).tap({ position: { x: overlap.x, y: overlap.y } });
+  const titleBox = await f.locator("#lotitle").boundingBox();
+  await p.mouse.click(titleBox.x + (card.btn.l + card.btn.r) / 2, titleBox.y + (card.btn.t + card.btn.b) / 2);
   await p.waitForTimeout(100);
   assert.equal(await f.evaluate(() => game.phase), "title", "the tap under the old button opens nothing");
   assert.equal(await f.evaluate(() => game.mode), "fixed", "closing the card clears the practice mode");

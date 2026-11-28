@@ -1,4 +1,4 @@
-// 拼字格 / Crossing 1.7.0 on the smallest screen (331x359, as on an iPhone SE with the chin pad):
+// 拼字格 / Crossing 2.0.0 on the smallest screen (331x359, as on an iPhone SE with the chin pad):
 // a long hint stays two lines and the keys line under it never moves, RANDOM opens after round 30, and the
 // results card's rows are 32 px so the six-word card still fits without scrolling.
 // Needs Playwright, which the repo does not depend on, so the test skips without it:
@@ -126,33 +126,36 @@ test("crossing at 331x359: a long hint keeps two lines and the keys line under i
   assert.deepEqual(errors, [], "no page errors");
 });
 
-test("crossing at 331x359: RANDOM opens after round 30, and before it the locked row says 30", { skip, timeout: 90000 }, async (t) => {
-  /* a player past 30: the RANDOM row is open and really starts a random round */
+test("crossing at 331x359: RANDOM opens after round 30, and before it the locked item says 30", { skip, timeout: 90000 }, async (t) => {
+  /* a player past 30: the RANDOM item is open and really starts a random round */
   let { p, errors, frame } = await open(t, { round: 31, cleared: 30, taught: true });
   const title = (f) => f.evaluate(() => {
-    const rows = [...document.querySelectorAll("#cover-list li")];
+    const t = game.title;
     return {
-      rows: rows.map((li) => li.textContent),
-      locked: rows.map((li) => li.classList.contains("locked")),
+      labels: t.items.map((li) => li.label),
+      status: t.items.map((li) => li.status || ""),
+      locked: t.items.map((li) => li.locked === true),
+      reason: t.items[2] ? t.items[2].reason || "" : "",
+      note: t.note,
       size: [document.documentElement.clientWidth, document.documentElement.clientHeight],
     };
   });
   let ts = await title(frame());
   assert.deepEqual(ts.size, [331, 359]);
-  assert.equal(ts.rows[0], "继续 · 第 31 关");
-  assert.equal(ts.rows[2], "随机关", "past round 30 RANDOM is open");
-  assert.deepEqual(ts.locked, [false, false, false, false], "no row is locked at cleared 30");
+  assert.deepEqual(ts.labels, ["继续", "选关", "随机关", "玩法"]);
+  assert.equal(ts.status[0], "第 31 关", "继续 names the round it opens");
+  assert.deepEqual(ts.locked, [false, false, false, false], "no item is locked at cleared 30");
   await press(p, "down");
   await press(p, "down");
   await press(p, "a");
   await until(p, () => frame().evaluate(() => game.mode === "random"), "a random round past round 30");
   assert.deepEqual(errors, [], "no page errors");
 
-  /* a save at round 12 is still before the unlock, and its row says which round opens it */
+  /* a save at round 12 is still before the unlock, and the bar says which round opens it */
   ({ p, errors, frame } = await open(t, { round: 12, cleared: 11, taught: true }));
   ts = await title(frame());
-  assert.equal(ts.rows[0], "继续 · 第 12 关");
-  assert.equal(ts.rows[2], "随机关通关 30 关后开放", "the locked row names round 30");
+  assert.equal(ts.status[0], "第 12 关");
+  assert.equal(ts.reason, "通关 30 关后开放", "the locked item names round 30");
   assert.deepEqual(ts.locked, [false, false, true, false], "RANDOM is closed at round 12");
   await press(p, "down");
   await press(p, "down");
@@ -161,10 +164,12 @@ test("crossing at 331x359: RANDOM opens after round 30, and before it the locked
   assert.equal(await frame().evaluate(() => game.phase), "title", "a locked RANDOM does not start");
   assert.deepEqual(errors, [], "no page errors");
 
-  /* the English row says the same number */
+  /* the English item says the same number */
   ({ p, errors, frame } = await open(t, { round: 12, cleared: 11, taught: true }, "en"));
   ts = await title(frame());
-  assert.equal(ts.rows[2], "RANDOMOpens after round 30", "the English locked row names round 30");
+  assert.deepEqual(ts.labels, ["CONTINUE", "ROUNDS", "RANDOM", "HOW TO PLAY"]);
+  assert.equal(ts.status[0], "ROUND 12");
+  assert.equal(ts.reason, "Clear 30 levels to unlock", "the English locked item names round 30");
   assert.deepEqual(ts.locked, [false, false, true, false], "RANDOM is closed at round 12 in English too");
   assert.deepEqual(errors, [], "no page errors");
 });
