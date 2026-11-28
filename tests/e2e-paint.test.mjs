@@ -1,11 +1,13 @@
-// Paint 1.2.0 at the smallest app frame, 331x359, in both languages: the tool rows are a fixed five-column
-// grid (no label wraps onto a line of its own), the canvas takes the rest of the screen, and Redo mirrors Undo.
+// Paint at the smallest app frame, 331x359, in both languages: the tool rows are a fixed five-column
+// grid (no label wraps onto a line of its own), the board takes the rest of the screen, and Redo mirrors Undo.
+// 1.4.0 draws the board at a whole number of CSS pixels a dot (192 px on the SE, 288 px on the Pro Max),
+// so no pixel block is 2 px wide and its neighbour 3.
 // Needs Playwright, which the repo does not depend on, so the test skips without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-paint.test.mjs
 //
-// Canvas width before this change, measured on the 1.1.1 layout at 331x359: 178 px with Chinese tools and
-// 132 px with English ones (the English second row wrapped, so the tools ate the stage). 1.2.0 gives 202 px
-// in both languages; the assertion below keeps at least 200.
+// Canvas width before the 1.2.0 layout, measured at 331x359: 178 px with Chinese tools and 132 px with
+// English ones (the English second row wrapped, so the tools ate the stage). 1.2.0 gave 202 px; 1.4.0
+// gives the crisp 192 px, and a tall screen adds the six-sheet strip under it.
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
@@ -41,16 +43,16 @@ const MESSAGES = { zh: { noredo: "没有可以重做的了。" }, en: { noredo: 
 const INK = [31, 42, 20], PAPER = [163, 173, 126];
 
 /* the dev harness (as tests/e2e-gomoku-link.test.mjs uses it), the app pinned to UI.md's smallest screen */
-async function open(t, locale) {
+async function open(t, locale, [w, h] = [331, 359]) {
   const lang = /^zh/i.test(locale) ? "zh" : "en";
-  const p = await browser.newPage({ viewport: { width: 500, height: 700 }, hasTouch: true, locale });
+  const p = await browser.newPage({ viewport: { width: 500, height: 900 }, hasTouch: true, locale });
   const errors = [];
   p.on("pageerror", (e) => errors.push(e.message));
   t.after(() => p.close());
   await p.goto(`${base}/sdk/dev.html?app=registry/apps/paint`, { waitUntil: "load" });
   await p.waitForFunction(() => /loaded registry\/apps\/paint/.test(document.getElementById("log").textContent));
   /* set the size first, then the language (the harness starts the app again on a language change) */
-  await p.evaluate(() => { const f = document.getElementById("app"); f.style.width = "331px"; f.style.height = "359px"; });
+  await p.evaluate(([w, h]) => { const f = document.getElementById("app"); f.style.width = w + "px"; f.style.height = h + "px"; }, [w, h]);
   if (lang === "en") await p.selectOption("#lang", "en");
   const app = p.frameLocator("#app");
   await app.locator("#cv").waitFor();
@@ -69,11 +71,12 @@ async function open(t, locale) {
 const readPixel = (frame, x, y) => frame.evaluate(([x, y]) =>
   Array.from(document.getElementById("cv").getContext("2d").getImageData(x, y, 1, 1).data.slice(0, 3)), [x, y]);
 
-/* one tap in the middle of a pixel, through the canvas's pointer handlers */
+/* one tap in the middle of a dot, through the canvas's pointer handlers.
+   The 3 px ink frame is not picture, so the dots start 3 px in and are (box - 6) / 96 wide */
 async function dot(p, frame, x, y) {
   const box = await frame.locator("#cv").boundingBox();
-  const k = box.width / 96;
-  await p.mouse.click(box.x + (x + 0.5) * k, box.y + (y + 0.5) * k);
+  const k = (box.width - 6) / 96;
+  await p.mouse.click(box.x + 3 + (x + 0.5) * k, box.y + 3 + (y + 0.5) * k);
   await p.waitForTimeout(50);
 }
 
@@ -112,8 +115,10 @@ for (const locale of ["zh-CN", "en-US"]) {
     }
     assert.equal(layout.buttons.length, 10, "colours and width, tool / undo / redo / more, and the sheet number in the title");
 
-    /* (b) the canvas takes what the tools leave: square, crisp, and larger than the 1.1.1 layout */
-    assert.ok(layout.canvas.w >= 200, `canvas is at least 200 css px wide (got ${layout.canvas.w}; was 178 zh / 132 en)`);
+    /* (b) the board is square, crisp, and exactly two CSS pixels a dot: 96 x 2 + the 3 px frame each side */
+    const cvStyle = await frame.evaluate(() => document.getElementById("cv").style.width);
+    assert.equal(cvStyle, "192px", "the dots are exactly 2 CSS px");
+    assert.equal(layout.canvas.w, 198, "192 px of dots plus the 3 px ink frame each side");
     assert.equal(layout.canvas.w, layout.canvas.h, "the canvas is square");
     assert.ok(/pixelated|crisp-edges/.test(layout.rendering), `the canvas stays crisp (${layout.rendering})`);
 
@@ -143,12 +148,51 @@ for (const locale of ["zh-CN", "en-US"]) {
   });
 }
 
+test("paint at 386x738: three CSS px a dot and the six-sheet strip", { skip, timeout: 60000 }, async (t) => {
+  const { p, app, frame, errors } = await open(t, "zh-CN", [386, 738]);
+  const layout = await frame.evaluate(() => {
+    const box = (e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; };
+    const cv = document.getElementById("cv");
+    return {
+      vw: innerWidth, vh: innerHeight, sw: document.scrollingElement.scrollWidth, sh: document.scrollingElement.scrollHeight,
+      style: cv.style.width, canvas: box(cv), sheets: box(document.getElementById("sheets")),
+      hidden: document.getElementById("sheets").classList.contains("hide"),
+      tabs: [...document.querySelectorAll("#sheets .tab")].map((b) => ({ ...box(b), label: b.getAttribute("aria-label"), current: b.getAttribute("aria-current") }))
+    };
+  });
+  assert.deepEqual([layout.vw, layout.vh], [386, 738]);
+  assert.ok(layout.sh <= 738 && layout.sw <= 386, "no scrolling in either direction");
+  /* 96 x 3 = 288 px of dots; the 3 px ink frame each side makes the element 294 px */
+  assert.equal(layout.style, "288px", "three CSS px a dot");
+  assert.equal(layout.canvas.w, layout.canvas.h, "the board is square");
+  assert.ok(layout.canvas.w >= 288 && layout.canvas.w < 288 + 2 * 3 + 4, `the board keeps its 288 px of dots (${layout.canvas.w})`);
+  assert.equal(layout.hidden, false, "a tall stage shows the six-sheet strip");
+  assert.equal(layout.tabs.length, 6);
+  layout.tabs.forEach((b, i) => {
+    assert.ok(b.w >= 44 && b.h >= 44, `tab ${i + 1} is a thumb target (${b.w}x${b.h})`);
+    assert.equal(b.label, `第 ${i + 1} 张`);
+    assert.equal(b.current, i === 0 ? "true" : "false");
+  });
+  assert.ok(layout.sheets.y >= layout.canvas.y + layout.canvas.h, "the strip is below the board");
+  assert.ok(Math.abs(layout.canvas.x + layout.canvas.w / 2 - 193) <= 3, `the board is centred (x=${layout.canvas.x})`);
+
+  /* a tap in dot (10, 10) is that dot at 3x, and tab 2 opens sheet 2 */
+  await dot(p, frame, 10, 10);
+  assert.deepEqual(await readPixel(frame, 10, 10), INK, "the tap lands on the dot under the finger");
+  assert.deepEqual(await readPixel(frame, 11, 10), PAPER, "no spill into the next dot");
+  await app.locator("#sheets .tab").nth(1).click();
+  await p.waitForTimeout(250);
+  assert.equal((await frame.textContent("#sheet")).trim(), "2/6", "tab 2 opens sheet 2");
+  assert.deepEqual(await readPixel(frame, 10, 10), PAPER, "sheet 2 is blank");
+  assert.deepEqual(errors, []);
+});
+
 /* ---------- 1.3.0: tools, mirror and six sheets ---------- */
 
 /* drag on the canvas from one pixel to another (press, a few moves, release) */
 async function drag(p, frame, [x0, y0], [x1, y1]) {
   const box = await frame.locator("#cv").boundingBox();
-  const k = box.width / 96, at = (x, y) => [box.x + (x + 0.5) * k, box.y + (y + 0.5) * k];
+  const k = (box.width - 6) / 96, at = (x, y) => [box.x + 3 + (x + 0.5) * k, box.y + 3 + (y + 0.5) * k];
   await p.mouse.move(...at(x0, y0)); await p.mouse.down();
   await p.mouse.move(...at(x1, y1), { steps: 5 }); await p.mouse.up();
   await p.waitForTimeout(50);

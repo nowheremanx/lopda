@@ -791,9 +791,9 @@
         ".0000...........",
         "................"
       ],
-      "version": "1.3.0",
+      "version": "1.4.0",
       "released": "2026-10-11",
-      "updated": "2026-11-26",
+      "updated": "2026-11-28",
       "description": "96×96 四色点阵画板，六页可画：笔、线、框、油漆桶、左右镜像，撤销重做，能导入图片转成点阵，也能导出 PNG。",
       "i18n": {
         "en": {
@@ -807,8 +807,8 @@
         "files"
       ],
       "path": "apps/paint/index.html",
-      "sha256": "ddf6c0452f9757e1419ab65ed94f791891fa2026fd3bf0c954a22c2c3bbb4d74",
-      "bytes": 20003
+      "sha256": "ea3080f94cd605306e53eec93ac723f298c8e75995656b9094c6ab8acbd1c07d",
+      "bytes": 24666
     },
     {
       "spec": "lopda/1",
