@@ -55,11 +55,17 @@ export function bootDom(file, opt = {}) {
   const g = {
     console, document, ImageData: class { constructor(d, w, h) { this.data = d; this.width = w; this.height = h; } },
     performance: { now: () => now }, innerWidth: 331, innerHeight: 359, devicePixelRatio: 1,
+    atob: (s) => Buffer.from(String(s), "base64").toString("binary"), btoa: (s) => Buffer.from(String(s), "binary").toString("base64"),
     requestAnimationFrame: (f) => { raf.push(f); return raf.length; }, cancelAnimationFrame() {},
     setTimeout: (f, ms) => { const t = { f, at: now + (ms || 0), id: timers.length + 1 }; timers.push(t); return t.id; },
     clearTimeout: (id) => { const t = timers.find((x) => x.id === id); if (t) t.f = null; },
     setInterval: () => 0, clearInterval() {},
     addEventListener: (type, f) => { (winListeners[type] = winListeners[type] || []).push(f); },
+    removeEventListener: (type, f) => {
+      const list = winListeners[type] || [];
+      const i = list.indexOf(f);
+      if (i >= 0) list.splice(i, 1);
+    },
     Date: { now: () => now },
     Math: Object.create(Math, { random: { value: mulberry32(opt.seed || 1) } })
   };

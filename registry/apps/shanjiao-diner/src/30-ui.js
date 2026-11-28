@@ -10,6 +10,42 @@
  * measured header, a list that scrolls inside its own box, and order tags
  * drawn in the wall band instead of on top of the tables.
  */
+/* Touch.  lo-game's `game.pointer` is in game pixels and `pressed` lasts one
+ * step, so one tap is one action.  A screen keeps its cursor in the same
+ * variable the pad moves: a tap sets it first (the highlight lands on the
+ * tapped item) and then runs what A runs there.  `tapWorld` is the only place
+ * that reads the stage, so a tap on the scenery outside the 216 x 240 world is
+ * always a no-op, as it is for game.ok() in fill mode (LO-GAME.md 2.1). */
+function tapWorld() {
+  var p = game.pointer, s = game.stage;
+  return !!p.pressed && p.stageX >= s.x && p.stageX < s.x + W &&
+    p.stageY >= s.y && p.stageY < s.y + H;
+}
+function tapInside(x, y, w, h) {
+  var p = game.pointer;
+  return tapWorld() && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
+}
+/* where the tap landed, in world pixels.  Only for the few screens that need
+ * the point itself (a title label's centre, a prep row's 定 column): ask
+ * tapWorld() or tapInside() first, which every hit test does. */
+function tapX() { return game.pointer.x; }
+function tapY() { return game.pointer.y; }
+
+/* a horizontal row of `count` cells: title menu, morning actions, battle grid */
+function tapCell(count, x, y, w, h) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = Math.floor((game.pointer.x - x) * count / w);
+  return i < 0 ? 0 : i >= count ? count - 1 : i;
+}
+
+/* a scrolling list in the UI.list layout: the visible window, its row height,
+ * the scroll the last draw used */
+function tapRow(x, y, w, h, rowH, count, scroll) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = (scroll || 0) + Math.floor((game.pointer.y - y) / rowH);
+  return i >= 0 && i < count ? i : -1;
+}
+
 var UI = (function () {
   var R = {
     W: 216, H: 240,

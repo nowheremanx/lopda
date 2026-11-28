@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import vm from "node:vm";
 import { join } from "node:path";
-import { read, ROOT } from "./helpers.mjs";
+import { read, readJSON, ROOT, runScript } from "./helpers.mjs";
 import { boot } from "./app-vm.mjs";
 
 const RULES_REL = "registry/apps/klotski/src/rules.js";
@@ -229,12 +229,22 @@ async function settle() { for (let i = 0; i < 8; i++) await new Promise((resolve
 function tapButton(app, pad, button) {
   pad.press(button); run(app, 1); pad.release(button); run(app, 3);
 }
-async function bootApp(initial, lang) {
+async function bootApp(initial, lang, stage) {
   const pad = fakePad(initial, lang);
-  const app = boot(join(ROOT, APP_REL), { pad: pad.pad, seed: 1 });
+  const opt = { pad: pad.pad, seed: 1 };
+  if (stage) opt.stage = stage;
+  const app = boot(join(ROOT, APP_REL), opt);
   await settle();
   run(app, 3);
   return { app, pad };
+}
+/* a pointer event at stage (canvas) pixels: the fake rect starts at 0, 0 and k CSS px is one canvas pixel */
+function tapStage(app, game, sx, sy) {
+  const k = game.stage.k, x = sx * k, y = sy * k;
+  app.pointerRaw("pointerdown", x, y);
+  app.frame();
+  app.pointerRaw("pointerup", x, y);
+  run(app, 3);
 }
 
 test("klotski app: a level played through the solver reaches the card and writes the record", async () => {
@@ -512,4 +522,115 @@ test("klotski app: the level list opens on the first level not cleared yet (#342
   const list = app.ctx.get("levelList");
   assert.equal(list.list[list.sel].id, "k08");
   assert.ok(list.sel >= list.top && list.sel < list.top + 5, "the row is on the screen");
+});
+
+/* --- filling the phone (sdk/UI.md 13, sdk/LO-GAME.md 2.1) --------------------------------------- */
+
+const SIZES = [[331, 359], [346, 518], [386, 606], [348, 323], [386, 738]];
+const LoGame = runScript("sdk/lo-game.js").LoGame;
+
+test("klotski app: 1.2.0 asks lo-game for a fill screen with bands", () => {
+  assert.equal(readJSON("registry/apps/klotski/manifest.json").version, "1.2.0");
+  assert.match(read("registry/apps/klotski/src/game.js"), /LoGame\.create\(\{[^}]*fill: true, bands: paintBands/);
+});
+
+test("klotski fill: the canvas covers all five phone sizes with the world whole and centred", () => {
+  for (const [sw, sh] of SIZES) {
+    const L = LoGame.fillLayout(sw, sh, 160, 200);
+    assert.ok(L.w * L.k >= sw - 1e-9, `${sw}x${sh}: narrower than the stage`);
+    assert.ok(L.h * L.k >= sh - 1e-9, `${sw}x${sh}: shorter than the stage`);
+    assert.ok(L.w * L.k - sw < L.k, `${sw}x${sh}: a paper line at the sides`);
+    assert.ok(L.h * L.k - sh < L.k, `${sw}x${sh}: a paper line above or below`);
+    assert.ok(L.x >= 0 && L.y >= 0 && L.x + 160 <= L.w && L.y + 200 <= L.h, `${sw}x${sh}: the world is cut`);
+    assert.equal(L.x, Math.floor((L.w - 160) / 2), `${sw}x${sh}: the world is not centred across`);
+    assert.equal(L.y, Math.floor((L.h - 200) / 2), `${sw}x${sh}: the world is not centred down`);
+  }
+});
+
+test("klotski fill: fill off keeps the old contain layout, paper columns and all", () => {
+  /* 331 x 359: the old 287 x 359 board with 22 px columns; fill grows wider instead (185 x 200 canvas) */
+  const c = LoGame.containLayout(331, 359, 160, 200, 1);
+  assert.equal(c.w, 287); assert.equal(c.h, 359); assert.equal(c.k, 1.795);
+  assert.ok(c.w <= 331 && c.h <= 359, "containment never overflows the stage");
+  const L = LoGame.fillLayout(331, 359, 160, 200);
+  assert.ok(L.w > 160, "the fill layout grows the canvas wider than the world");
+  for (const [sw, sh] of SIZES) {
+    const k = LoGame.containLayout(sw, sh, 160, 200, 1);
+    assert.ok(k.k <= Math.min(sw / 160, sh / 200) + 1e-9, `${sw}x${sh}: contain grew past the stage`);
+    assert.ok(k.w <= Math.ceil(sw) && k.h <= Math.ceil(sh), `${sw}x${sh}: contain overflows`);
+  }
+});
+
+test("klotski app: the fitted stage covers all five phone sizes", async () => {
+  for (const [sw, sh] of SIZES) {
+    const { app } = await bootApp({}, "zh", { w: sw, h: sh });
+    const game = app.ctx.get("game"), st = game.stage;
+    assert.equal(game.width, 160);
+    assert.equal(game.height, 200);
+    const want = LoGame.fillLayout(sw, sh, 160, 200);
+    for (const key of ["w", "h", "k", "x", "y"]) assert.equal(st[key], want[key], `${sw}x${sh}: the app fitted another ${key}`);
+    assert.ok(st.w * st.k >= sw - 1e-9 && st.h * st.k >= sh - 1e-9, `${sw}x${sh}: paper at an edge`);
+  }
+});
+
+test("klotski app: a band press is dropped, the same press inside the world acts", async () => {
+  /* the top band over board row 0 must not select the piece under that column */
+  let { app } = await bootApp({}, "zh", { w: 386, h: 738 });
+  let game = app.ctx.get("game"), st = game.stage, K = app.ctx.get("window").KLOTSKI;
+  assert.ok(st.y > 0, "this stage has a top band");
+  assert.ok(K.open("k01")); run(app, 5);
+  assert.ok(K.step(1, 0, 1)); run(app, 10);          /* C down, so the bar at (0, 0) can move */
+  const before = K.state().selected;
+  tapStage(app, game, 30, 45);                       /* top band, over board column 0 */
+  run(app, 3);
+  assert.equal(K.state().selected, before, "a top-band tap selected a board piece");
+  tapStage(app, game, 30, st.y + 29);                /* board row 0, the same column */
+  run(app, 3);
+  assert.equal(K.state().selected, 0, "a tap in board row 0 did not select the bar");
+
+  /* and a case where the ungated near edge would act: the level list's header reads y 0 */
+  ({ app } = await bootApp({}, "zh", { w: 386, h: 738 }));
+  game = app.ctx.get("game"); st = game.stage;
+  K = app.ctx.get("window").KLOTSKI;
+  game.go("levels", null, { fade: false }); run(app, 3);
+  const list = app.ctx.get("levelList"), filter = list.filter;
+  tapStage(app, game, 30, 45);                       /* top band; the near edge is y 0, the filter row */
+  run(app, 3);
+  assert.equal(list.filter, filter, "a top-band tap changed the level filter");
+  tapStage(app, game, 30, st.y + 35);                /* the first row inside the world */
+  run(app, 5);
+  assert.equal(K.state().id, "k01", "a tap on the first list row did not open the level");
+});
+
+test("klotski title: the key hint sits between the grid and the progress line, in both languages", async () => {
+  for (const lang of ["zh", "en"]) {
+    const { app } = await bootApp({}, lang);
+    const game = app.ctx.get("game"), shown = [], draw = game.g.text;
+    game.g.text = function (str, x, y, o) { shown.push({ str: str, x: x, y: y }); return draw.call(game.g, str, x, y, o); };
+    run(app, 1);
+    game.g.text = draw;
+    const hint = lang === "zh" ? "↑↓←→ 选 · A 好" : "arrows · A ok";
+    const line = shown.find((v) => v.str === hint);
+    assert.ok(line, `${lang}: the title has no key hint`);
+    assert.ok(line.y > 170 && line.y + 13 <= 187, `${lang}: the hint is outside the footer row`);
+    assert.ok(game.g.measure(hint) <= 160, `${lang}: the hint is wider than the screen`);
+  }
+});
+
+test("klotski bands: the table round the board, flat lacquer on calm screens", async () => {
+  const { app } = await bootApp({}, "zh", { w: 346, h: 518 });
+  const game = app.ctx.get("game"), calm = app.ctx.get("bandCalm"), table = app.ctx.get("table");
+  assert.equal(calm(), false, "the title is the table");
+  game.go("levels", null, { fade: false }); run(app, 2);
+  assert.equal(calm(), true, "the level list is calm");
+  game.go("lessons", null, { fade: false }); run(app, 2);
+  assert.equal(calm(), true, "the lesson list is calm");
+  game.go("pages", { section: "x", blocks: [] }, { fade: false }); run(app, 2);
+  assert.equal(calm(), true, "the pages are calm");
+  game.go("table", { kind: "level", id: "k01" }, { fade: false }); run(app, 2);
+  assert.equal(calm(), false, "the board is the table");
+  for (const ui of ["menu", "confirm", "card"]) {
+    table.ui = ui;
+    assert.equal(calm(), true, `${ui} is calm`);
+  }
 });

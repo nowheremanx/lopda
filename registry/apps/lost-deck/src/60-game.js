@@ -4,9 +4,78 @@
 (function () {
   "use strict";
   var LD = window.LD, R = LD.R;
-  var game = LoGame.create({ width: 160, height: 160, lang: "zh" });
+  /* the 160 x 160 screen is the whole game; on a phone lo-game's fill canvas grows around it (sdk/UI.md 13)
+     and paintBands fills the extra stage with the station, never paper */
+  var game = LoGame.create({ width: 160, height: 160, lang: "zh", fill: true, bands: paintBands });
   var T = game.t, g = game.g;
   var W = 160, VH = R.VH;
+
+  /* ---------------- the bands around the world ----------------
+     Levels, maps, hit tests and the HUD keep the 160 x 160 screen. The rows around it are the station itself:
+     a panelled ceiling above, the same deck's plated floor below, and riveted hull at the sides when Safari's
+     bars leave a short stage. Both bands use RIB / RIVET / SEAM, so they read as one corridor. */
+  var RIB = 36, RIB_X = 14, RIVET = 18, SEAM = 7;
+
+  /* the ceiling: plating, ribs, rivets and recessed strip lights, lit along the lip that frames the world */
+  function paintCeiling(s, w, sky) {
+    if (!(sky > 0)) return;
+    s.rect(0, 0, w, sky, 0);
+    var x, y, lx;
+    /* seams count up from the lip, mirroring the floor's rows below */
+    for (y = sky - 5; y >= 1; y -= SEAM) s.dither(0, y, w, 1, 1, 1);
+    /* ribs at the floor's columns */
+    for (x = RIB_X; x < w; x += RIB) s.rect(x, 0, 1, Math.max(0, sky - 2), 1);
+    /* rivets on the plate rows */
+    for (x = 5; x < w; x += RIVET) {
+      s.rect(x, 2, 2, 2, 1); s.pixel(x + 1, 2, 2);
+      if (sky >= 12) { s.rect(x, sky - 5, 2, 2, 1); s.pixel(x + 1, sky - 5, 2); }
+    }
+    /* strip lights: a slim row in a shallow band, recessed tubes in a deep one */
+    if (sky >= 6) {
+      var slim = sky < 16, ly = slim ? 1 : Math.round(sky * 0.3), lw = slim ? 8 : 16, step = slim ? 32 : 48;
+      for (x = slim ? 12 : 26; x + lw < w; x += step) {
+        if (slim) { s.rect(x, ly, lw, 1, 2); s.pixel(x + 3, ly, 3); continue; }
+        s.rect(x, ly, lw, 3, 1);
+        s.rect(x + 1, ly + 1, lw - 2, 1, 2);
+        for (lx = x + 3; lx < x + lw - 2; lx += 5) s.pixel(lx, ly + 1, 3);
+      }
+    }
+    if (sky > 2) s.rect(0, sky - 2, w, 1, 1);
+    s.rect(0, sky - 1, w, 1, 2);          /* the lit lip, like the floor's edge below */
+  }
+
+  /* the floor below the screen: plating, seams, rivets, ribs */
+  function paintFloor(s, w, ground, floor) {
+    if (!(floor > 0)) return;
+    var h = s.height, x, y;
+    s.rect(0, ground, w, floor, 0);
+    s.rect(0, ground, w, 1, 2);
+    for (y = ground + 5; y < h; y += SEAM) s.dither(0, y, w, 1, 1, 1);
+    for (x = 5; x < w; x += RIVET) { s.rect(x, ground + 2, 2, 2, 1); s.pixel(x + 1, ground + 2, 2); }
+    if (floor > 12) for (x = RIB_X; x < w; x += RIB) s.rect(x, ground + 10, 1, floor - 11, 1);
+  }
+
+  /* a side band on a stage too short for the world's width: hull plates, not paper */
+  function paintHull(s, x0, w, h, left) {
+    var x, y, edge = left ? x0 + w - 1 : x0;
+    s.rect(x0, 0, w, h, 0);
+    s.rect(edge, 0, 1, h, 1);
+    for (y = 3; y < h; y += SEAM) s.dither(left ? x0 : x0 + 1, y, Math.max(0, w - 2), 1, 1, 1);
+    if (w >= 5) for (y = 5; y < h; y += RIVET) {
+      x = left ? x0 + w - 4 : x0 + 2;
+      s.rect(x, y, 2, 2, 1); s.pixel(x + 1, y, 2);
+    }
+    if (w > 3) s.dither(left ? x0 : x0 + w - 1, 0, 1, h, 1, 1);
+  }
+
+  function paintBands(s, i) {
+    var w = i.w, h = i.h, ground = i.y + i.worldH;
+    s.clear(0);
+    paintCeiling(s, w, i.y);
+    paintFloor(s, w, ground, h - ground);
+    if (i.x > 0) paintHull(s, 0, i.x, h, true);
+    if (i.x + i.worldW < w) paintHull(s, i.x + i.worldW, w - i.x - i.worldW, h, false);
+  }
   document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
   function t(zh, en, vars) { return T({ zh: zh, en: en }, vars); }
 
@@ -135,14 +204,21 @@
       g.pixel(s.x, s.y, s.z > 0.75 ? 3 : s.z > 0.5 ? 2 : 1);
     }
   }
+  /* a tap that starts in the world, not in the bands lo-game's fill layout puts around it; the sticky edges would
+     otherwise turn a side-band tap into a tap on x 0 / y 0 (lo-game 1.5.0 game.stage) */
+  function worldTap() {
+    var p = game.pointer, st = game.stage;
+    return p.pressed && p.stageX >= st.x && p.stageX < st.x + game.width &&
+      p.stageY >= st.y && p.stageY < st.y + game.height;
+  }
   /* a tap on a menu row is that row chosen and A pressed (sdk/UI.md section 5); -1 when the tap misses every row */
   function tapRow(y0, step, h, n, x0, x1) {
     var pt = game.pointer;
-    if (!pt.pressed || pt.x < x0 || pt.x >= x1) return -1;
+    if (!worldTap() || pt.x < x0 || pt.x >= x1) return -1;
     var i = Math.floor((pt.y - y0) / step);
     return i >= 0 && i < n && pt.y - y0 - i * step < h ? i : -1;
   }
-  function tapped() { return game.pointer.pressed; }
+  function tapped() { return worldTap(); }
   function hint(str, y) { g.text(str, 80, y, { color: 3, align: "center" }); }
   function clock(sec) { sec = Math.max(0, Math.floor(sec)); var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
   function dname(d) { return T(d.name); }
@@ -265,7 +341,7 @@
     update: function (dt) {
       this.t += dt;
       if (game.pressed("b")) { sfx("tap"); game.go("decks"); return; }
-      if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
+      if (game.pressed("a") || game.pressed("start") || tapped()) {
         var D = LD.DECKS[deckIdx], full = T(D.brief).length;
         if (this.t * 30 < full) { this.t = 99; return; }
         sfx("ok"); game.go("play", null, { to: 0 });
@@ -374,7 +450,7 @@
       /* after a dialog or the pause menu, A fires only once it has been let go */
       if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
       var pt = game.pointer, touchFire = false;
-      if (pt.pressed && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
+      if (worldTap() && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
       if (touch) {
         if (pt.down) {
           touch.t += dt;

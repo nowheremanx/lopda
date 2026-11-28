@@ -6,13 +6,13 @@
 <!-- A 216x240 four-tone restaurant game for Lo-PDA. MIT License. -->
 </head>
 <body>
-<script data-lo-game="1.4.0">
+<script data-lo-game="1.5.0">
 /*
- * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.5.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.5.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -23,7 +23,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -121,6 +121,38 @@ var LoGame = (function () {
     };
   }
 
+  /* Layout of a fill screen (1.5.0): the world keeps its size, the canvas around it covers the stage.
+     Returns {w, h, k, x, y}: canvas columns and rows, CSS pixels a canvas pixel, and where the world sits.
+     The caller works in CSS pixels from the stage's getBoundingClientRect (fractional on an iPhone). */
+  function fillLayout(stageW, stageH, worldW, worldH) {
+    var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
+    if (stageW > 0 && stageH > 0) {
+      k = stageW / worldW;
+      ch = Math.ceil(stageH / k);
+      if (ch < worldH) {
+        /* a stage too short for the world's width: fit by height and grow wider at the sides */
+        k = stageH / worldH;
+        cw = Math.max(worldW, Math.ceil(stageW / k));
+        ch = worldH;
+        x = Math.floor((cw - worldW) / 2);
+      } else {
+        /* the world's width fills the stage; the rows over it become scenery */
+        cw = worldW;
+        y = Math.floor((ch - worldH) / 2);
+      }
+    }
+    return { w: cw, h: ch, k: k, x: x, y: y };
+  }
+  /* The contain layout the framework has always used with fill off: the world stays whole, paper around it.
+     Returns {w, h, k} with the CSS size rounded, as the canvas style has always been set. */
+  function containLayout(stageW, stageH, worldW, worldH, dpr) {
+    dpr = dpr || 1;
+    var best = Math.min(stageW / worldW, stageH / worldH), k = Math.floor(best * dpr) / dpr;
+    if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+    k = Math.max(0.5, k);
+    return { w: Math.round(worldW * k), h: Math.round(worldH * k), k: k };
+  }
+
   /* ---------------- the game ---------------- */
   function create(opt) {
     opt = opt || {};
@@ -150,19 +182,41 @@ var LoGame = (function () {
     parent.appendChild(canvas);
     var ctx = canvas.getContext("2d");
     var image = ctx.createImageData(W, H);
+    var fill = !!opt.fill, bands = typeof opt.bands === "function" ? opt.bands : null;
+    var lay = { w: W, h: H, k: 1, x: 0, y: 0 };
+    var stageInfo = { w: W, h: H, k: 1, x: 0, y: 0, worldW: W, worldH: H };
+    var stageBuf = null, bandSurface = null, stageImage = null, lastFitW = -1, lastFitH = -1;
     function fit() {
+      if (fill) { fitFill(); return; }
       var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
-      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
-      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
-      k = Math.max(0.5, k);
-      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
-      game.scale = k;
+      var c = containLayout(aw, ah, W, H, window.devicePixelRatio || 1);
+      canvas.style.width = c.w + "px"; canvas.style.height = c.h + "px";
+      game.scale = c.k;
+      game.stage = { w: W, h: H, k: c.k, x: 0, y: 0 };
+    }
+    /* the stage's own box, fractional: the layout that leaves no paper at the sides, top or bottom */
+    function fitFill() {
+      var r = parent.getBoundingClientRect ? parent.getBoundingClientRect() : null;
+      var w = r ? r.width : 0, h = r ? r.height : 0;
+      if (!(w > 0) || !(h > 0)) { w = parent.clientWidth || innerWidth; h = parent.clientHeight || innerHeight; }
+      if (w === lastFitW && h === lastFitH && stageBuf) return;
+      lastFitW = w; lastFitH = h;
+      var L = fillLayout(w, h, W, H);
+      lay = L;
+      stageInfo.w = L.w; stageInfo.h = L.h; stageInfo.k = L.k; stageInfo.x = L.x; stageInfo.y = L.y;
+      canvas.width = L.w; canvas.height = L.h;
+      /* exact sizes, not rounded: a rounded width leaves a line of paper down each side on an iPhone */
+      canvas.style.width = (L.w * L.k) + "px"; canvas.style.height = (L.h * L.k) + "px";
+      stageBuf = new Uint8Array(L.w * L.h); stageBuf.fill(PAPER);
+      bandSurface = makeSurface({ buf: stageBuf, w: L.w, h: L.h });
+      stageImage = ctx.createImageData(L.w, L.h);
+      game.scale = L.k;
+      game.stage = { w: L.w, h: L.h, k: L.k, x: L.x, y: L.y };
+      if (stack.length) render();   /* canvas.width cleared it: draw straight away */
     }
 
     /* --- framebuffer and drawing --- */
     var buf = new Uint8Array(W * H);
-    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
-    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
 
     var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
     function fontCtx() {
@@ -210,108 +264,117 @@ var LoGame = (function () {
       return lines;
     }
 
-    var g = {
-      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
-      clear: function (c) { buf.fill(c == null ? PAPER : c); },
-      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
-      clip: function (x, y, w, h) {
-        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
-        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
-        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
-      },
-      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
-      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
-      rect: function (x, y, w, h, c) {
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
-        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
-      },
-      frame: function (x, y, w, h, c) {
-        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
-      },
-      line: function (x0, y0, x1, y1, c) {
-        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
-        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
-        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
-      },
-      circle: function (cx, cy, r, c, fill) {
-        cx = Math.round(cx); cy = Math.round(cy);
-        for (var y = -r; y <= r; y++) {
-          var span = Math.round(Math.sqrt(r * r + r - y * y));
-          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
-          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
-        }
-        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
-      },
-      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
-      dither: function (x, y, w, h, c, level) {
-        level = clamp(level == null ? 2 : level, 0, 4);
-        x = Math.round(x); y = Math.round(y);
-        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
-          var px = (x + xx) & 1, py = (y + yy) & 1;
-          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
-          if (on) put(x + xx + ox, y + yy + oy, c);
-        }
-      },
-      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
-      sprite: function (s, x, y, o) {
-        o = o || {};
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
-        for (var yy = 0; yy < h; yy++) {
-          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
-          var sy = o.flipY ? h - 1 - yy : yy;
-          for (var xx = 0; xx < w; xx++) {
-            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
-            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
-            if (v === CLEAR) continue;
-            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+    /* a drawing surface over any tone buffer: the world, and with fill a band canvas the app's `bands`
+       callback paints in stage coordinates. Both get the same methods and clip/origin state. */
+    function makeSurface(t) {
+      var sbuf = t.buf, SW = t.w, SH = t.h;
+      var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = SW, cy1 = SH;
+      function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) sbuf[y * SW + x] = c; }
+      var s = {
+        width: SW, height: SH, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+        clear: function (c) { sbuf.fill(c == null ? PAPER : c); },
+        origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+        clip: function (x, y, w, h) {
+          if (x == null) { cx0 = 0; cy0 = 0; cx1 = SW; cy1 = SH; return; }
+          cx0 = clamp(Math.round(x + ox), 0, SW); cy0 = clamp(Math.round(y + oy), 0, SH);
+          cx1 = clamp(Math.round(x + ox + w), 0, SW); cy1 = clamp(Math.round(y + oy + h), 0, SH);
+        },
+        pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+        get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= SW || y >= SH ? null : sbuf[y * SW + x]; },
+        rect: function (x, y, w, h, c) {
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+          for (var yy = ya; yy < yb; yy++) sbuf.fill(c, yy * SW + xa, yy * SW + Math.max(xa, xb));
+        },
+        frame: function (x, y, w, h, c) {
+          s.rect(x, y, w, 1, c); s.rect(x, y + h - 1, w, 1, c); s.rect(x, y, 1, h, c); s.rect(x + w - 1, y, 1, h, c);
+        },
+        line: function (x0, y0, x1, y1, c) {
+          x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+          var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+          for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+        },
+        circle: function (cx, cy, r, c, fill) {
+          cx = Math.round(cx); cy = Math.round(cy);
+          for (var y = -r; y <= r; y++) {
+            var span = Math.round(Math.sqrt(r * r + r - y * y));
+            if (fill) s.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+            else { s.pixel(cx - span, cy + y, c); s.pixel(cx + span, cy + y, c); }
+          }
+          if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); s.pixel(cx + x, cy - s2, c); s.pixel(cx + x, cy + s2, c); }
+        },
+        /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+        dither: function (x, y, w, h, c, level) {
+          level = clamp(level == null ? 2 : level, 0, 4);
+          x = Math.round(x); y = Math.round(y);
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+            var px = (x + xx) & 1, py = (y + yy) & 1;
+            var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+            if (on) put(x + xx + ox, y + yy + oy, c);
+          }
+        },
+        /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+        sprite: function (sp, x, y, o) {
+          o = o || {};
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var w = sp.w, h = sp.h, px = sp.px, one = o.color, map = o.map;
+          for (var yy = 0; yy < h; yy++) {
+            var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+            var sy = o.flipY ? h - 1 - yy : yy;
+            for (var xx = 0; xx < w; xx++) {
+              var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+              var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+              if (v === CLEAR) continue;
+              sbuf[dy * SW + dx] = one != null ? one : map ? map[v] : v;
+            }
+          }
+        },
+        /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+        text: function (str, x, y, o) {
+          o = o || {};
+          var color = o.color == null ? INK : o.color;
+          var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+          lines.forEach(function (ln) {
+            /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+            var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+            if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+            else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+            Array.from(ln).forEach(function (ch) {
+              var gl = glyph(ch);
+              for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+                if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+                put(xx + i + ox, yy + j + oy, color);
+              }
+              xx += gl.adv;
+            });
+            yy += FONT.line;
+          });
+          return lines.length * FONT.line;
+        },
+        measure: measure,
+        wrap: wrap,
+        lineHeight: FONT.line,
+        /* the standard window: paper inside, ink border with cut corners */
+        window: function (x, y, w, h, o) {
+          o = o || {};
+          s.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+          var c = o.border == null ? INK : o.border;
+          s.rect(x + 1, y, w - 2, 1, c); s.rect(x + 1, y + h - 1, w - 2, 1, c);
+          s.rect(x, y + 1, 1, h - 2, c); s.rect(x + w - 1, y + 1, 1, h - 2, c);
+          if (!o.thin) { s.rect(x + 2, y + 2, w - 4, 1, MID); }
+        },
+        /* a small arrow used by menus and "more" markers */
+        arrow: function (x, y, dir, c) {
+          c = c == null ? INK : c;
+          for (var i = 0; i < 4; i++) {
+            if (dir === "down") s.rect(x + i, y + i, 7 - 2 * i, 1, c);
+            else s.rect(x + i, y + i, 1, 7 - 2 * i, c);
           }
         }
-      },
-      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
-      text: function (str, x, y, o) {
-        o = o || {};
-        var color = o.color == null ? INK : o.color;
-        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
-        lines.forEach(function (ln) {
-          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
-          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
-          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
-          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
-          Array.from(ln).forEach(function (ch) {
-            var gl = glyph(ch);
-            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
-              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
-              put(xx + i + ox, yy + j + oy, color);
-            }
-            xx += gl.adv;
-          });
-          yy += FONT.line;
-        });
-        return lines.length * FONT.line;
-      },
-      measure: measure,
-      wrap: wrap,
-      lineHeight: FONT.line,
-      /* the standard window: paper inside, ink border with cut corners */
-      window: function (x, y, w, h, o) {
-        o = o || {};
-        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
-        var c = o.border == null ? INK : o.border;
-        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
-        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
-        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
-      },
-      /* a small arrow used by menus and "more" markers */
-      arrow: function (x, y, dir, c) {
-        c = c == null ? INK : c;
-        for (var i = 0; i < 4; i++) {
-          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
-          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
-        }
-      }
-    };
+      };
+      return s;
+    }
+    var g = makeSurface({ buf: buf, w: W, h: H });
 
     /* --- palette effects: every frame the indexed buffer goes through this map --- */
     var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
@@ -319,8 +382,23 @@ var LoGame = (function () {
       var map = pal.slice();
       if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
       if (flashT > 0) map = map.map(function (v) { return 3 - v; });
-      var d = image.data, n = W * H;
       if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      if (fill) {
+        if (!stageBuf || !stageImage) return 0;
+        var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
+        for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
+          var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
+          var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
+          sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
+        }
+        ctx.putImageData(stageImage, 0, 0);
+        return n2;
+      }
+      var d = image.data, n = W * H;
       for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
         var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
         var c = RGB[map[v]], o = (y * W + x) * 4;
@@ -340,10 +418,27 @@ var LoGame = (function () {
       addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
     }
     addEventListener("blur", function () { BUTTONS.forEach(up); });
-    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    var pointer = { x: 0, y: 0, stageX: 0, stageY: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
     function toScreen(e) {
       var r = canvas.getBoundingClientRect();
-      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+      if (fill) {
+        /* stage pixels (canvas pixels), then the world inside them; a tap in a band still lands on the near edge */
+        var px = (e.clientX - r.left) / (lay.k || 1), py = (e.clientY - r.top) / (lay.k || 1);
+        pointer.stageX = px; pointer.stageY = py;
+        pointer.x = clamp(Math.floor(px - lay.x), 0, W - 1);
+        pointer.y = clamp(Math.floor(py - lay.y), 0, H - 1);
+        return;
+      }
+      pointer.stageX = (e.clientX - r.left) * W / r.width;
+      pointer.stageY = (e.clientY - r.top) * H / r.height;
+      pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
+    }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
     }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
@@ -377,7 +472,8 @@ var LoGame = (function () {
     function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
 
     var game = {
-      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      VERSION: VERSION, width: W, height: H, stage: { w: W, h: H, k: 1, x: 0, y: 0 },
+      g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
       t: function (text, vars) { return pick(text, LANG, vars); },
       INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
 
@@ -414,8 +510,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -520,7 +616,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -552,13 +648,30 @@ var LoGame = (function () {
       game.time += STEP; game.frame++;
       inputEnd();
     }
+    /* the world into the stage: a plain copy, every frame, so the bands can be painted under it */
+    function compose() {
+      var sb = stageBuf, cw = lay.w, x0 = lay.x, y0 = lay.y;
+      for (var y = 0; y < H; y++) {
+        var src = y * W, dst = (y0 + y) * cw + x0;
+        for (var x = 0; x < W; x++) sb[dst + x] = buf[src + x];
+      }
+    }
     function render() {
+      if (fill) {
+        if (!stageBuf) return;
+        /* the app paints the full stage first: sky above the world, floor below, a HUD if it has one */
+        bandSurface.origin(0, 0); bandSurface.clip();
+        if (bands) bands(bandSurface, stageInfo);
+      }
       g.origin(0, 0); g.clip();
       for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      if (fill) compose();
       present();
     }
     function frame(ts) {
       requestAnimationFrame(frame);
+      /* the stage can settle after the app starts with no resize event (an iPhone's bars): check it every frame */
+      if (fill) fitFill();
       if (!last) last = ts;
       acc += Math.min(0.1, (ts - last) / 1000); last = ts;
       var n = 0;
@@ -578,6 +691,7 @@ var LoGame = (function () {
   return {
     VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
     create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    fillLayout: fillLayout, containLayout: containLayout,
     clamp: clamp, lerp: lerp, approach: approach, t: t
   };
 })();
@@ -691,7 +805,19 @@ LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAA
 </script>
 <script data-src="src/00-main.js">
 /* 山脚小馆 — the game object and a few globals. */
-var game = LoGame.create({ width: 216, height: 240, lang: "zh" });
+/* The world stays 216 x 240; on a phone the canvas grows around it and
+ * paintBands (src/26-bands.js, loaded after this file) paints the diner's
+ * walls, shelf and floor outside it (sdk/UI.md 13).  The wrapper only calls
+ * paintBands at draw time, so the name is there by then. */
+var game = LoGame.create({
+  width: 216, height: 240, lang: "zh", fill: true,
+  bands: function (s, stage) { paintBands(s, stage); }
+});
+
+/* Which screen's scenery the bands paint.  Set by the scene wrapper below; a
+ * dialog or a choice leaves it alone, so its room stays behind it.  The event
+ * overlay (dawn, shop, forest) keeps the diner around it too. */
+var bandScreen = "title";
 
 /* SELECT opens the codex from any playable scene.  It used to toggle a
  * layout grid, which looked like a bug to players; the grid is still in
@@ -700,6 +826,7 @@ var sceneBase = game.scene;
 game.scene = function (name, def) {
   var update = def.update;
   def.update = function (dt) {
+    bandScreen = name;
     var canCodex = !busy && name !== "title" && name !== "help" && name !== "ending" &&
                    name !== "event" && name !== "battle" && name !== "codex";
     if (canCodex && game.pressed("select")) {
@@ -2077,6 +2204,332 @@ ART.plate = function (g, p, x, y) {
   g.sprite(plateSprite(p), x || 0, y || 0);
 };
 </script>
+<script data-src="src/26-bands.js">
+/* The room around the world.  lo-game's fill canvas grows past the 216 x 240
+ * screen (sdk/UI.md 13, LO-GAME.md 2.1) and calls this before the world is
+ * copied on top, so a tall phone is the diner's wall, shelf and floor, never
+ * paper bars.  Scenery only: the day, the money and the reputation stay in the
+ * world, where the game draws them.
+ *
+ * Every band keeps the tone of the world's own edge beside it — the day wall
+ * is paper with ink posts, the night wall dark, the mountain's sky mid — so the
+ * picture reads as one room.  A band row is never left bare paper, and nothing
+ * in a band moves, so the frame stays calm behind menus, dialogs and play.
+ */
+var BAND_SCREENS = { night: "night", ending: "valley", title: "valley", battle: "battle", forest: "forest" };
+
+/* The event overlay paints its own full background (src/58-event.js): the shop
+ * and dawn are the diner at night, and forest and deep are ART.battleBg, so its
+ * bands follow those instead of the room the portrait was pushed from. */
+function bandKind() {
+  if (bandScreen === "event") {
+    var bg = typeof EVENT_ARGS !== "undefined" && EVENT_ARGS && EVENT_ARGS.bg;
+    if (bg === "forest" || bg === "deep") return "battle";
+    return "night";
+  }
+  return BAND_SCREENS[bandScreen] || "room";
+}
+/* the shrine fight's dark stage: a battle event says so itself, B says so in a fight */
+function bandsDeep() {
+  if (bandScreen === "event") return !!(typeof EVENT_ARGS !== "undefined" && EVENT_ARGS && EVENT_ARGS.bg === "deep");
+  return typeof B !== "undefined" && !!B && B.from === "deep";
+}
+
+function paintBands(s, st) {
+  var kind = bandKind();
+  if (kind === "room" || kind === "night") roomBands(s, st, kind === "night");
+  else if (kind === "valley") valleyBands(s, st, bandScreen);
+  else if (kind === "battle") battleBands(s, st);
+  else forestBands(s, st);
+}
+
+/* ---------------- the diner ---------------- */
+function roomBands(s, st, night) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var fb = y0 + wh;
+  s.clear(night ? 1 : 3);
+  if (y0 > 0) roomCeiling(s, w, y0, night);
+  if (fb < h) floorBoards(s, 0, w, fb, h - fb, wh, night);
+  if (x0 > 0) roomSide(s, st, 0, x0, night, true);
+  if (x0 + ww < w) roomSide(s, st, x0 + ww, w - (x0 + ww), night, false);
+}
+/* the ceiling over the world: a beam, its posts, the shelf of jars by the
+ * right wall and the noren that hangs over the kitchen pass */
+function roomCeiling(s, w, rows, night) {
+  var wall = night ? 1 : 3, beam = Math.min(4, rows);
+  s.rect(0, 0, w, rows, wall);
+  s.rect(0, 0, w, beam, 0);
+  if (rows > beam) s.rect(0, beam, w, 1, 1);
+  var floorLine = rows - 2;
+  if (floorLine > beam + 1) {
+    for (var px = 18; px < w - 8; px += 46) {
+      s.rect(px, beam + 1, 3, floorLine - beam - 1, 0);
+      s.rect(px + 3, beam + 1, 1, floorLine - beam - 1, 1);
+    }
+  }
+  if (rows >= 16) jarShelf(s, Math.max(Math.floor(w * 0.5), 40), w - 8, rows - 6, night);
+  if (rows >= 26) noren(s, 10, beam + 4, Math.min(Math.floor(w * 0.42), 84),
+    Math.min(rows - beam - 14, 34));
+  if (rows >= 8) {
+    /* the rail the band ends on, so the wall above the screen is wood, not paper */
+    s.rect(0, rows - 2, w, 1, 1);
+    s.rect(0, rows - 1, w, 1, 0);
+  }
+}
+
+/* a plank with the restaurant's jars and bottles standing on it */
+function jarShelf(s, x0, x1, plank, night) {
+  if (x1 - x0 < 24) return;
+  var top = plank;
+  s.rect(x0, top, x1 - x0, 2, 0);
+  s.rect(x0, top + 2, x1 - x0, 1, 1);
+  var n = Math.max(3, Math.floor((x1 - x0) / 15));
+  var step = (x1 - x0) / n;
+  for (var i = 0; i < n; i++) {
+    var jx = Math.round(x0 + i * step + step / 2);
+    var hgt = Math.min(6 + ((i * 5) % 7), Math.max(2, top - 6));
+    var wid = 4 + ((i * 3) % 4);
+    var tone = i % 4 === 0 ? 0 : i % 4 === 1 ? 1 : i % 4 === 2 ? 2 : (night ? 3 : 1);
+    s.rect(jx - (wid >> 1), top - hgt, wid, hgt, tone);
+    if (tone !== 0) s.rect(jx - (wid >> 1), top - hgt, wid, 1, 0);   /* the jar's mouth */
+    if (wid > 5) s.pixel(jx, top - hgt + 3, 3);                       /* a glint of glaze */
+  }
+}
+
+/* the noren over the pass: a rod and four cloth strips, the same cloth the
+ * plate's doorway hangs */
+function noren(s, x, y, w, h) {
+  if (w < 20 || h < 8) return;
+  var cloth = 2, edge = 0;                 /* the plate's cloth is mid on either wall */
+  s.rect(x - 1, y, w + 2, 1, 0);
+  var panels = w >= 60 ? 5 : 4, pw = Math.floor((w - (panels - 1)) / panels);
+  for (var i = 0; i < panels; i++) {
+    var px0 = x + i * (pw + 1);
+    s.rect(px0, y + 1, pw, h, cloth);
+    s.rect(px0, y + 1, 1, h, edge);
+    s.rect(px0 + pw - 1, y + 1, 1, h, edge);
+    s.rect(px0, y + h, pw, 1, edge);
+    s.rect(px0 + 1, y + Math.floor(h * 0.62), Math.max(1, pw - 2), 1, 1);
+    if (i === ((panels - 1) >> 1)) s.circle(px0 + (pw >> 1), y + Math.floor(h * 0.32), 2, 3, true);
+  }
+}
+
+/* the side columns: the wall's rails and post beside the world's own ink edge,
+ * then the floor boards below the rail.  A stage too short for the world's
+ * width grows these instead of showing paper. */
+function roomSide(s, st, rx, rw, night, left) {
+  var top = st.y, wh = st.worldH, wallH = Math.min(96, wh);
+  var post = Math.min(3, rw);
+  s.rect(rx, top, rw, wallH, night ? 1 : 3);
+  s.rect(rx, top + 28, rw, 3, 0);
+  s.rect(rx, top + 92, rw, Math.min(4, Math.max(0, wh - 92)), 0);
+  if (post > 0) {
+    var px = left ? rx + rw - post : rx;
+    s.rect(px, top, post, wallH, 0);
+    var edge = left ? px - 1 : px + post;
+    if (rw - post > 1 && edge >= rx && edge < rx + rw) s.rect(edge, top, 1, wallH, 1);
+  }
+  if (wh > wallH) floorBoards(s, rx, rw, top + wallH, wh - wallH, wallH, night);
+}
+
+/* floor boards: the plate's own rhythm (a seam every 12 world rows, the first
+ * at world row 240, the row after the world's bottom) carries on past the edge */
+function floorBoards(s, rx, rw, ry, rh, worldY, night) {
+  var floor = night ? 1 : 2, seam = night ? 0 : 1, joint = night ? 0 : 1;
+  for (var i = 0; i < rh; i++) {
+    var y = ry + i, wy = worldY + i, plank = Math.floor(wy / 12);
+    if (wy % 12 === 0) {
+      s.rect(rx, y, rw, 1, seam);
+      continue;
+    }
+    s.rect(rx, y, rw, 1, floor);
+    if (!night && wy % 12 === 1) {
+      /* a short lit edge on the plank, in runs: never a row of bare paper */
+      for (var sx = rx + 2 + (plank * 7) % 9; sx < rx + rw - 6; sx += 19) s.rect(sx, y, 9, 1, 3);
+    }
+    if (night && wy % 12 === 2) s.dither(rx, y, rw, 1, 2, 1);
+    var jx = rx + (plank * 37) % 96;
+    if (jx < rx + rw) s.rect(jx, y, 1, 1, joint);
+  }
+}
+
+/* ---------------- the mountain ---------------- */
+function valleyBands(s, st, screen) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var fb = y0 + wh;
+  s.clear(screen === "ending" ? 3 : 2);
+  if (y0 > 0) valleySky(s, w, y0, screen);
+  if (fb < h) valleyGround(s, 0, w, fb, h - fb, screen);
+  if (x0 > 0) valleySide(s, st, 0, x0, screen);
+  if (x0 + ww < w) valleySide(s, st, x0 + ww, w - (x0 + ww), screen);
+}
+
+function valleySky(s, w, rows, screen) {
+  if (screen === "ending") {
+    /* the ending's sky is a mid dither on paper: keep the band the same sky */
+    s.rect(0, 0, w, rows, 3);
+    s.dither(0, 0, w, rows, 2, 1);
+    for (var b = 0; b < 3; b++) {
+      var bx = Math.round(w * (0.18 + b * 0.3)), by = Math.round(rows * (0.34 + b * 0.14));
+      if (by < rows - 2) {
+        s.line(bx, by, bx + 3, by - 2, 1);
+        s.line(bx + 3, by - 2, bx + 6, by, 1);
+      }
+    }
+    return;
+  }
+  /* the title's sky: the plate's mid, its paper stars and a couple of clouds */
+  s.rect(0, 0, w, rows, 2);
+  for (var i = 0; i < 46; i++) {
+    var sx = (i * 53 + 11) % w, sy = (i * 29 + 7) % rows;
+    s.rect(sx, sy, i % 3 === 0 ? 2 : 1, 1, 3);
+  }
+  for (var c = 0; c < 2; c++) {
+    var cx = Math.round(w * (0.18 + c * 0.5)), cy = Math.round(rows * (0.42 + c * 0.2));
+    if (cy < rows - 1) {
+      s.rect(cx, cy, Math.max(10, Math.round(w * 0.13)), 1, 3);
+      s.rect(cx + 4, cy - 2, Math.max(6, Math.round(w * 0.07)), 1, 3);
+    }
+  }
+}
+
+function valleyGround(s, rx, rw, ry, rh, screen) {
+  var ending = screen === "ending";
+  s.rect(rx, ry, rw, rh, ending ? 3 : 2);
+  if (ending) s.dither(rx, ry, rw, rh, 2, 1);
+  else {
+    /* the title's road runs out of the world's bottom: keep walking it */
+    var road = Math.max(24, Math.round(rw * 0.19)), rx0 = Math.round(rw / 2 - road / 2);
+    s.rect(rx0, ry, road, rh, 3);
+    s.rect(rx0 - 1, ry, 1, rh, 1);
+    s.rect(rx0 + road, ry, 1, rh, 1);
+    for (var sy = ry + 3; sy < ry + rh; sy += 6) s.rect(rx0, sy, road, 1, 2);
+  }
+  /* grass and stones, the plate's own ground cover */
+  for (var gx = rx + 5; gx < rx + rw - 2; gx += 23) {
+    var gy = ry + 2 + (gx * 7) % Math.max(1, rh - 3);
+    s.rect(gx, gy, 3, 1, 1);
+    s.rect(gx + 1, gy >= ry + 2 ? gy - 2 : gy, 1, 2, 1);
+  }
+}
+
+function valleySide(s, st, rx, rw, screen) {
+  var top = st.y, wh = st.worldH, horizon = Math.min(126, wh);
+  var sky = screen === "ending" ? 3 : 2;
+  s.rect(rx, top, rw, wh, sky);
+  if (screen === "ending") s.dither(rx, top, rw, wh, 2, 1);
+  if (wh > horizon) {
+    s.rect(rx, top + horizon, rw, wh - horizon, screen === "ending" ? 3 : 2);
+    s.rect(rx, top + horizon, rw, 1, 1);
+    s.dither(rx, top + horizon + 1, rw, 2, 1, 1);
+    for (var gx = rx + 2; gx < rx + rw; gx += 9) s.rect(gx, top + horizon + 6 + (gx * 5) % 9, 2, 1, 1);
+  }
+  if (screen === "title") {
+    for (var i = 0; i < rw * wh / 70; i++) {
+      var sx = rx + (i * 17 + 3) % rw, sy = top + (i * 31 + 5) % Math.max(1, horizon);
+      s.pixel(sx, sy, 3);
+    }
+  }
+}
+
+/* ---------------- the fight on the mountain ---------------- */
+function battleBands(s, st) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var deep = bandsDeep();
+  var stage = deep ? 1 : 3, sky = deep ? 1 : 2;
+  var fb = y0 + wh, cut = Math.min(108, wh);            /* the world's stage starts at y 108 */
+  s.clear(sky);
+  if (y0 > 0) {
+    s.rect(0, 0, w, y0, sky);
+    /* the fight's own shafts of light, stacked up the band */
+    for (var b = 0; b * 72 - 18 < w; b++) {
+      for (var j = 0; j < 12; j++) {
+        var bx = 18 + b * 72 + j * 2, by = y0 - 8 - j * 9;
+        if (by > -8) s.rect(bx, Math.max(-8, by), 4, Math.min(8, y0), 3);
+      }
+    }
+    if (deep) s.dither(0, 0, w, y0, 0, 2);
+    /* the story's own weather (src/58-event.js) dapples the top of its world
+       with paper: the band keeps that haze just above it, so the sky does not
+       step at the world's top edge */
+    if (bandScreen === "event") {
+      var haze = Math.min(y0, typeof EVENT_ARGS !== "undefined" && EVENT_ARGS && EVENT_ARGS.bg === "deep" ? 90 : 40);
+      if (haze > 0) s.dither(0, y0 - haze, w, haze, 3, 1);
+    }
+  }
+  if (fb < h) {
+    s.rect(0, fb, w, h - fb, stage);
+    s.dither(0, fb, w, Math.min(4, h - fb), 2, 1);
+    for (var i = 0; i < (h - fb) / 3; i++) {
+      var gx = (i * 37 + 5) % w, gy = fb + 3 + (i * 17) % Math.max(1, h - fb - 3);
+      s.rect(gx, gy, 5, 1, 2);
+      if (i % 3 === 0) s.rect(gx + 2, Math.max(fb, gy - 2), 1, 2, 1);
+    }
+  }
+  if (x0 > 0) battleSide(s, st, 0, x0, cut, sky, stage, deep);
+  if (x0 + ww < w) battleSide(s, st, x0 + ww, w - (x0 + ww), cut, sky, stage, deep);
+}
+
+function battleSide(s, st, rx, rw, cut, sky, stage, deep) {
+  var top = st.y, wh = st.worldH;
+  s.rect(rx, top, rw, wh, sky);
+  var cutH = Math.max(0, Math.min(cut, wh));
+  if (cutH < wh) {
+    s.rect(rx, top + cutH, rw, wh - cutH, stage);
+    s.dither(rx, top + cutH, rw, Math.min(4, wh - cutH), 2, 1);
+    for (var gy = top + cutH + 5; gy < top + wh; gy += 7) s.rect(rx + 2, gy, Math.max(1, rw - 4), 1, 2);
+  }
+  if (deep) s.dither(rx, top, rw, cutH, 0, 2);
+}
+
+/* ---------------- the forest ---------------- */
+function forestBands(s, st) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var fb = y0 + wh;
+  s.clear(2);
+  if (y0 > 0) {
+    /* the canopy hangs over the top of the map */
+    s.rect(0, 0, w, y0, 2);
+    for (var c = 0; c < w; c += 17) {
+      var ch = 6 + ((c / 17 | 0) * 7) % Math.max(3, y0 - 4);
+      s.rect(c, 0, 15, ch, 0);
+      s.rect(c + 2, ch - 3, 11, 3, 0);
+      s.rect(c + 4, ch - 5, 5, 2, 0);
+      s.rect(c + 6, ch - 2, 2, 2, 1);
+    }
+    s.rect(0, y0 - 1, w, 1, 1);
+  }
+  if (fb < h) {
+    s.rect(0, fb, w, h - fb, 2);
+    for (var i = 0; i < (h - fb) / 2; i++) {
+      var gx = (i * 29 + 3) % w, gy = fb + 2 + (i * 11) % Math.max(1, h - fb - 2);
+      s.rect(gx, gy, 3, 1, 1);
+      if (i % 3 === 0) s.rect(gx + 1, Math.max(fb, gy - 2), 1, 2, 1);
+    }
+    s.rect(0, fb, w, 1, 1);
+  }
+  if (x0 > 0) forestSide(s, st, 0, x0);
+  if (x0 + ww < w) forestSide(s, st, x0 + ww, w - (x0 + ww));
+}
+
+function forestSide(s, st, rx, rw) {
+  var top = st.y, wh = st.worldH, mid = rx + (rw >> 1);
+  s.rect(rx, top, rw, wh, 2);
+  /* the canopy only along the top edge; the rest is the wood's floor and trees */
+  s.rect(rx, top, rw, 3, 1);
+  s.dither(rx, top + 3, rw, 3, 1, 1);
+  for (var ty = top + 18; ty < top + wh; ty += 52) {
+    var th = Math.min(34, top + wh - ty);
+    s.rect(mid, ty, 3, th, 0);
+    s.rect(mid + 3, ty, 1, th, 1);
+    s.rect(mid - 3, ty + 4, 9, 2, 0);
+  }
+  for (var gy = top + 12; gy < top + wh; gy += 13) {
+    var gx = rx + 2 + (gy * 3) % Math.max(1, rw - 4);
+    s.rect(gx, gy, 2, 1, 1);
+  }
+}
+</script>
 <script data-src="src/30-ui.js">
 /* The UI kit: every screen lays out inside the same five bands.
  *
@@ -2090,6 +2543,42 @@ ART.plate = function (g, p, x, y) {
  * measured header, a list that scrolls inside its own box, and order tags
  * drawn in the wall band instead of on top of the tables.
  */
+/* Touch.  lo-game's `game.pointer` is in game pixels and `pressed` lasts one
+ * step, so one tap is one action.  A screen keeps its cursor in the same
+ * variable the pad moves: a tap sets it first (the highlight lands on the
+ * tapped item) and then runs what A runs there.  `tapWorld` is the only place
+ * that reads the stage, so a tap on the scenery outside the 216 x 240 world is
+ * always a no-op, as it is for game.ok() in fill mode (LO-GAME.md 2.1). */
+function tapWorld() {
+  var p = game.pointer, s = game.stage;
+  return !!p.pressed && p.stageX >= s.x && p.stageX < s.x + W &&
+    p.stageY >= s.y && p.stageY < s.y + H;
+}
+function tapInside(x, y, w, h) {
+  var p = game.pointer;
+  return tapWorld() && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
+}
+/* where the tap landed, in world pixels.  Only for the few screens that need
+ * the point itself (a title label's centre, a prep row's 定 column): ask
+ * tapWorld() or tapInside() first, which every hit test does. */
+function tapX() { return game.pointer.x; }
+function tapY() { return game.pointer.y; }
+
+/* a horizontal row of `count` cells: title menu, morning actions, battle grid */
+function tapCell(count, x, y, w, h) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = Math.floor((game.pointer.x - x) * count / w);
+  return i < 0 ? 0 : i >= count ? count - 1 : i;
+}
+
+/* a scrolling list in the UI.list layout: the visible window, its row height,
+ * the scroll the last draw used */
+function tapRow(x, y, w, h, rowH, count, scroll) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = (scroll || 0) + Math.floor((game.pointer.y - y) / rowH);
+  return i >= 0 && i < count ? i : -1;
+}
+
 var UI = (function () {
   var R = {
     W: 216, H: 240,
@@ -2608,6 +3097,47 @@ function newGame() {
   game.go("morning");
 }
 
+/* The label x of each title item: the draw and the tap test share these, so a
+ * tap on 说明 really opens 说明.  The labels are ~26 px wide, so the centre is
+ * x + 13. */
+function titleXs(n) {
+  return n === 3 ? [38, 78, 118] : n === 2 ? [62, 118] : [96];
+}
+function titleTap(n) {
+  if (!tapInside(28, 190, 160, 32)) return -1;
+  var xs = titleXs(n), best = 0, dist = 1e9;
+  for (var i = 0; i < n; i++) {
+    var d = Math.abs(tapX() - (xs[i] + 13));
+    if (d < dist) { dist = d; best = i; }
+  }
+  return best;
+}
+
+/* A, START and a tap all come here: the tapped item is in TITLE_SEL first. */
+function titleChoose() {
+  var opts = titleOptions();
+  var id = opts[TITLE_SEL].id;
+  game.sfx("tap");
+  if (id === "continue") {
+    S = bootSave;
+    if (S.phase === "night") game.go("night");
+    else if (S.phase === "ending") game.go("ending");
+    else if (S.phase === "service") game.go("service");
+    else game.go("morning");
+  } else if (id === "new" && bootSave) {
+    /* the only save slot: ask before a new week replaces it */
+    busy = true;
+    game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
+      busy = false;
+      if (c === 0) newGame();
+    });
+  } else if (id === "new") {
+    newGame();
+  } else {
+    game.go("help", { from: "title" });
+  }
+}
+
 game.scene("title", {
   enter: function () {
     TITLE_SEL = 0;
@@ -2621,28 +3151,11 @@ game.scene("title", {
     if (TITLE_SEL >= opts.length) TITLE_SEL = 0;
     if (game.repeat("left")) { TITLE_SEL = (TITLE_SEL + opts.length - 1) % opts.length; game.sfx("move"); }
     if (game.repeat("right")) { TITLE_SEL = (TITLE_SEL + 1) % opts.length; game.sfx("move"); }
-    if (game.pressed("a") || game.pressed("start")) {
-      var id = opts[TITLE_SEL].id;
-      game.sfx("tap");
-      if (id === "continue") {
-        S = bootSave;
-        if (S.phase === "night") game.go("night");
-        else if (S.phase === "ending") game.go("ending");
-        else if (S.phase === "service") game.go("service");
-        else game.go("morning");
-      } else if (id === "new" && bootSave) {
-        /* the only save slot: ask before a new week replaces it */
-        busy = true;
-        game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
-          busy = false;
-          if (c === 0) newGame();
-        });
-      } else if (id === "new") {
-        newGame();
-      } else {
-        game.go("help", { from: "title" });
-      }
-    }
+    if (game.pressed("a") || game.pressed("start")) { titleChoose(); return; }
+    /* the whole menu window is the target: 32 game px is 49 css px on the
+       smallest phone; the nearest label centre wins */
+    var hit = titleTap(opts.length);
+    if (hit >= 0) { TITLE_SEL = hit; titleChoose(); }
   },
   draw: function (g) {
     ART.title(g, game.time);
@@ -2653,7 +3166,7 @@ game.scene("title", {
     // menu
     var opts = titleOptions();
     g.window(28, 190, 160, 32, { thin: true });
-    var xs = opts.length === 3 ? [38, 78, 118] : opts.length === 2 ? [62, 118] : [96];
+    var xs = titleXs(opts.length);
     for (var i = 0; i < opts.length; i++) {
       if (i === TITLE_SEL) {
         g.rect(xs[i] - 5, 196, 36, 18, g.INK);
@@ -2677,7 +3190,7 @@ game.scene("title", {
 game.scene("help", {
   enter: function (args) { this.from = (args && args.from) || "title"; },
   update: function () {
-    if (game.pressed("a") || game.pressed("b") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("b") || game.pressed("start") || tapWorld()) {
       game.sfx("tap");
       game.go(this.from);
     }
@@ -2799,6 +3312,11 @@ game.scene("morning", {
     if (game.repeat("right")) { MORNING_SEL = (MORNING_SEL + 1) % acts.length; game.sfx("move"); }
     // up/down still move the same row on a one-row bar
     if (game.pressed("a")) morningAct(MORNING_SEL);
+    else {
+      /* the action bar: 30 game px tall (44 css px at 331 px wide) */
+      var hit = tapCell(acts.length, 6, 190, 204, 30);
+      if (hit >= 0) { MORNING_SEL = hit; morningAct(hit); }
+    }
     if (game.pressed("b")) game.go("help", { from: "morning" });
     if (game.pressed("start")) {
       game.sfx("tap");
@@ -2866,6 +3384,13 @@ function prepConfirm() {
   game.go("morning");
 }
 
+/* one more portion, if the pantry can spare it: the → key and a tap on the row */
+function prepAdd(id) {
+  var room = prepRoom(id);
+  if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
+  else game.sfx("err");
+}
+
 game.scene("prep", {
   enter: function () {
     if (S.flags.prepared) { game.go("morning"); return; }
@@ -2887,11 +3412,20 @@ game.scene("prep", {
       game.sfx("tick");
     }
     if (game.repeat("right")) {
-      var room = prepRoom(id);
-      if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
-      else game.sfx("err");
+      prepAdd(id);
     }
-    if (game.pressed("a")) prepConfirm();
+    /* Touch: a tap on another row selects it; a second tap on the selected row
+       (or a tap on its 定 column) adds a portion, like →.  A is 「备好」 for the
+       whole menu, so the confirm sits on the footer's A hint. */
+    var tapped = tapRow(8, 82, 200, 75, 15, list.length, PREP_SCROLL);
+    if (tapped >= 0) {
+      var t = list[tapped], px = tapX();
+      var add = tapped === PREP_SEL || (px >= 136 && px < 166);
+      PREP_SEL = tapped;
+      if (add) prepAdd(t); else game.sfx("move");
+      return;
+    }
+    if (game.pressed("a") || tapInside(0, 216, 216, 24)) prepConfirm();
     if (game.pressed("b")) { game.sfx("tap"); game.go("morning"); }
     if (game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },
@@ -3447,9 +3981,18 @@ game.scene("battle", {
       if (game.repeat("up")) { B.sel ^= 2; game.sfx("move"); }
       if (game.repeat("down")) { B.sel ^= 2; game.sfx("move"); }
       if (game.pressed("a")) playerAction(B.sel);
+      else {
+        /* the drawn 2x2 grid: cells x 6..106 / 106..200, rows y 178..191 / 191..205 */
+        var cell = -1;
+        if (tapWorld()) {
+          var tx = tapX(), ty = tapY();
+          if (tx >= 6 && tx < 200 && ty >= 178 && ty < 206) cell = (ty < 191 ? 0 : 2) + (tx < 106 ? 0 : 1);
+        }
+        if (cell >= 0) { B.sel = cell; playerAction(cell); }
+      }
       if (game.pressed("b")) playerAction(4);
     } else if (B.mode === "end") {
-      if (game.pressed("a") || game.pressed("b")) {
+      if (game.pressed("a") || game.pressed("b") || tapWorld()) {
         game.sfx("tap");
         game.pop({ result: B.result, drops: B.drops, money: B.money });
       }
@@ -3528,6 +4071,20 @@ function tablePos(i) {
 function seatPos(i) {
   var p = tablePos(i);
   return { x: p[0] + 16, y: p[1] - 20 };
+}
+
+/* A table is one touch target: its order tag above (y - 44) down to the
+ * action bar (the second row's feet are under it), 58 px wide.  The two rows
+ * are split at y 120, where the lower row's order tag starts. */
+function tapSeat() {
+  if (!tapWorld()) return -1;
+  var tx = tapX(), ty = tapY();
+  for (var i = 0; i < SERV.seats; i++) {
+    var tp = tablePos(i), top = tp[1] < 130 ? 44 : 120;
+    var bottom = tp[1] < 130 ? 120 : 194;
+    if (tx >= tp[0] - 6 && tx < tp[0] + 52 && ty >= top && ty < bottom) return i;
+  }
+  return -1;
 }
 function dishPool() {
   // A passing customer does not order the feast dish; it is cooked for the
@@ -3895,12 +4452,23 @@ game.scene("service", {
       if (game.pressed("a")) {
         if (SERV.pauseSel === 0) { SERV.paused = false; game.sfx("tap"); }
         else { game.sfx("tap"); finishService(true); }
+      } else if (tapInside(60, 98, 96, 16)) {
+        /* the drawn rows only: y 98-114 继续, 118-134 打烊; the gap and the
+           box's top are inert, so a stray tap never ends the evening */
+        SERV.pauseSel = 0;
+        SERV.paused = false;
+        game.sfx("tap");
+      } else if (tapInside(60, 118, 96, 16)) {
+        SERV.pauseSel = 1;
+        game.sfx("tap");
+        finishService(true);
       }
       if (game.pressed("start")) { SERV.paused = false; game.sfx("tap"); }
       return;
     }
     if (SERV.menuOpen) {
-      if (game.pressed("b") || game.pressed("a") || game.pressed("start")) { SERV.menuOpen = false; game.sfx("tap"); }
+      /* the stock list is a modal with one way out: tap anywhere on it */
+      if (game.pressed("b") || game.pressed("a") || game.pressed("start") || tapInside(20, 52, 176, 128)) { SERV.menuOpen = false; game.sfx("tap"); }
       return;
     }
     if (game.pressed("start")) { SERV.paused = true; SERV.pauseSel = 0; game.sfx("tap"); return; }
@@ -3909,6 +4477,10 @@ game.scene("service", {
     if (game.repeat("left")) { SERV.sel = (SERV.sel + SERV.seats - 1) % SERV.seats; game.sfx("move"); }
     if (game.repeat("right")) { SERV.sel = (SERV.sel + 1) % SERV.seats; game.sfx("move"); }
     if (game.pressed("a")) serveSeat(SERV.sel);
+    else {
+      var seat = tapSeat();
+      if (seat >= 0) { SERV.sel = seat; serveSeat(seat); }
+    }
     // story
     if (SERV.storyQueue.length) {
       var st = SERV.storyQueue.shift();
@@ -4148,7 +4720,7 @@ game.scene("night", {
   },
   update: function () {
     if (busy) return;
-    if (game.pressed("a") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("start") || tapWorld()) {
       game.sfx("tap");
       if (S.day === 7) {
         if (!S.flags.finalChoice && (S.flags.vip || 0) >= 2 && (S.npc.ahe || 0) >= 4) {
@@ -4264,6 +4836,18 @@ function shopStatus(id) {
   return "可买";
 }
 
+/* A and a tap on a row do the same: buy the selected upgrade. */
+function shopBuy() {
+  var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
+  if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
+  if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+  if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+  if (buyUpgrade(id)) {
+    game.sfx("ok");
+    sayToast("买下了「" + u.name + "」");
+  }
+}
+
 game.scene("shop", {
   enter: function () {
     SHOP_SEL = 0;
@@ -4275,16 +4859,11 @@ game.scene("shop", {
     if (busy) return;
     if (game.repeat("up")) { SHOP_SEL = (SHOP_SEL + DATA.UPGRADE_ORDER.length - 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
     if (game.repeat("down")) { SHOP_SEL = (SHOP_SEL + 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
-    if (game.pressed("a")) {
-      var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
-      if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
-      if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
-      if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
-      if (buyUpgrade(id)) {
-        game.sfx("ok");
-        sayToast("买下了「" + u.name + "」");
-      }
-    }
+    if (game.pressed("a")) shopBuy();
+    /* the list is not scrolling (5 rows of 16 in an 80 px window): tap a row
+       to move the cursor there and buy, exactly as A does */
+    var hit = tapRow(8, 112, 200, 80, 16, DATA.UPGRADE_ORDER.length, 0);
+    if (hit >= 0) { SHOP_SEL = hit; shopBuy(); }
     if (game.pressed("b") || game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },
   draw: function (g) {
@@ -4564,7 +5143,7 @@ game.scene("ending", {
     if (typeof playMusic === "function") playMusic("ending");
   },
   update: function () {
-    if (game.pressed("a") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("start") || tapWorld()) {
       game.sfx("tap");
       /* the finished week stays saved: the title offers 结局 and asks before 新局 */
       bootSave = S;
@@ -4679,6 +5258,17 @@ game.scene("codex", {
       CODEX_SCROLL = 0;
       game.sfx("move");
     }
+    /* the tab strip (10 + 50 each) switches category, like ← → */
+    var tab = tapCell(CODEX_TABS.length, 10, 32, 200, 20);
+    if (tab >= 0) {
+      if (tab !== CODEX_TAB) {
+        CODEX_TAB = tab;
+        CODEX_SEL = 0;
+        CODEX_SCROLL = 0;
+        game.sfx("move");
+      }
+      return;
+    }
     if (game.repeat("up")) {
       CODEX_SEL = (CODEX_SEL + list.length - 1) % list.length;
       game.sfx("move");
@@ -4687,6 +5277,9 @@ game.scene("codex", {
       CODEX_SEL = (CODEX_SEL + 1) % list.length;
       game.sfx("move");
     }
+    /* the list window: a tap moves the cursor to that row */
+    var row = tapRow(8, 58, 200, 90, 15, list.length, CODEX_SCROLL);
+    if (row >= 0) { CODEX_SEL = row; game.sfx("move"); }
     if (game.pressed("b") || game.pressed("start")) {
       game.sfx("tap");
       if (CODEX_FROM) game.pop();

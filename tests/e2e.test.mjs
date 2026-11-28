@@ -975,7 +975,7 @@ test("zhenyao-tower: ZT.fight (tests only, not on any menu) starts a route fight
 });
 
 /* The whole game, played by tests/zhenyao-play.js ("full": breadth-first walking, A through every dialogue, the smart
-   battle player) from 进入小镇 on the title to 序章 完. Real time would be more than 20 minutes, so the app frame's clock is
+   battle player) from 新游戏 on the title to 序章 完. Real time would be more than 20 minutes, so the app frame's clock is
    ours: requestAnimationFrame is replaced (after the game has started; lo-game asks for the next frame every tick) by a queue
    that the script's own loop pumps, one 1/60 s step per call and a yield through a MessageChannel in between, which has none of
    setTimeout's 4 ms floor. Math.random is seeded, so the run is the same every time. */
@@ -9091,19 +9091,32 @@ const ppStartBuiltin = async (p, f) => {
   await press(p, "a");
   await until(p, async () => (await ppState(f)).screen === "play", "a game");
 };
-const ppShot = (f) => f.evaluate(() => document.getElementById("cv").toDataURL());
+/* the photo's own 128 x 112 pixels, wherever the stage-wide canvas places the card: comparing the whole canvas
+   would also catch the status band and the page margins, which move when the message or the menu changes */
+const ppShot = (f) => f.evaluate(() => {
+  const s = window.PUZZLE.state(), v = s.view, c = document.getElementById("cv"), x = c.getContext("2d");
+  const out = document.createElement("canvas"); out.width = 128; out.height = 112;
+  out.getContext("2d").putImageData(x.getImageData(v.x0, v.y0, 128, 112), 0, 0);
+  return out.toDataURL();
+});
 /* the hole is ink except its last row/column (the lit lip); sample 2 px in from the top-left so the hint arrow
-   in the middle of the hole does not colour this pixel */
+   in the middle of the hole does not colour this pixel. The canvas is the whole screen now, so the photo's own
+   offset (view.x0 / view.y0, in art pixels) comes off first. */
 const ppGapPixel = (f) => f.evaluate(() => {
   const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
   const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
-  return Array.from(x.getImageData(Math.floor(col * 128 / s.n) + 2, Math.floor(row * 112 / s.n) + 2, 1, 1).data);
+  return Array.from(x.getImageData(s.view.x0 + Math.floor(col * 128 / s.n) + 2, s.view.y0 + Math.floor(row * 112 / s.n) + 2, 1, 1).data);
 });
 /* the middle of the hole: ink, or paper when the hint arrow is drawn into it */
 const ppGapCenter = (f) => f.evaluate(() => {
   const s = window.PUZZLE.state(), c = document.getElementById("cv"), x = c.getContext("2d");
   const col = s.gap % s.n, row = Math.floor(s.gap / s.n);
-  return Array.from(x.getImageData(Math.floor((col + 0.5) * 128 / s.n), Math.floor((row + 0.5) * 112 / s.n), 1, 1).data);
+  return Array.from(x.getImageData(s.view.x0 + Math.floor((col + 0.5) * 128 / s.n), s.view.y0 + Math.floor((row + 0.5) * 112 / s.n), 1, 1).data);
+});
+/* a cell's centre in the app frame, on the photo (sdk/UI.md 13: the photo is an inset of the stage-wide canvas) */
+const ppCellXY = (v, cell) => ({
+  x: v.x0 * v.k + ((cell % 3) + 0.5) * 128 * v.k / 3,
+  y: v.y0 * v.k + (Math.floor(cell / 3) + 0.5) * 112 * v.k / 3
 });
 /* the shortest way home for a 3x3, breadth first over the gap's moves; returns the keys to press */
 function solve3(tiles) {
@@ -9237,13 +9250,15 @@ test("photo puzzle: a photo from the fake camera, shown first, then a 3x3 solved
   await until(p, async () => (await ppShot(f)) !== pieces, "the peek");
   await p.evaluate(() => window.LOPDA_DEBUG.setButton("a", false));
   await until(p, async () => (await ppShot(f)) === pieces, "the pieces again");
-  /* a tap on the piece next to the gap slides it, and a tap back puts it where it was */
-  const g = s.gap, q = g % 3 < 2 ? g + 1 : g - 1, box = await f.locator("#cv").boundingBox();
-  const tap = (cell) => f.locator("#cv").click({ position: { x: ((cell % 3) + 0.5) * box.width / 3, y: (Math.floor(cell / 3) + 0.5) * box.height / 3 } });
+  /* a tap on the piece next to the gap slides it, and a tap back puts it where it was (the photo is inset in the
+     stage-wide canvas, so the cell centres come from the view) */
+  const g = s.gap, q = g % 3 < 2 ? g + 1 : g - 1;
+  const tap = (cell) => { const pt = ppCellXY(s.view, cell); return f.locator("#cv").click({ position: pt }); };
   await tap(q); await until(p, async () => (await ppState(f)).gap === q, "the tap");
   await tap(g); await until(p, async () => (await ppState(f)).gap === g, "the tap back");
   /* a swipe moves the piece it starts on, only towards the gap; any other way is refused with the error sound */
-  const fb = await f.locator("#cv").boundingBox(), cx = (cell) => fb.x + ((cell % 3) + 0.5) * fb.width / 3, cy = (cell) => fb.y + (Math.floor(cell / 3) + 0.5) * fb.height / 3;
+  const fb = await f.locator("#cv").boundingBox();
+  const cx = (cell) => fb.x + ppCellXY(s.view, cell).x, cy = (cell) => fb.y + ppCellXY(s.view, cell).y;
   const swipe = async (cell, dx, dy) => { await p.mouse.move(cx(cell), cy(cell)); await p.mouse.down(); await p.mouse.move(cx(cell) + dx / 2, cy(cell) + dy / 2); await p.mouse.move(cx(cell) + dx, cy(cell) + dy); await p.mouse.up(); };
   const toward = (from, to) => [Math.sign((to % 3) - (from % 3)) * 40, Math.sign(Math.floor(to / 3) - Math.floor(from / 3)) * 40];
   const errs = () => p.evaluate(() => window.LOPDA_DEBUG.sfxLog.filter((x) => x === "err").length);
@@ -12033,33 +12048,34 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   /* the smallest screen, as on an iPhone SE with the chin pad */
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
-  /* a fresh start: the shared fog title (sdk/lo-title.js) fills the screen, its menu opens on CONTINUE with the
-     round on the bar, RANDOM locked with its reason */
+  /* a fresh start: the shared fog title over the whole stage, 继续 first, RANDOM closed */
   const title = await f.evaluate(() => {
-    const root = document.documentElement, cv = document.getElementById("title-cv"), box = cv.getBoundingClientRect();
-    const menu = game.titleMenu;
+    const root = document.documentElement, c = document.getElementById("lotitle");
+    const r = c.getBoundingClientRect(), info = game.title;
     return {
-      size: [root.clientWidth, root.clientHeight],
-      canvas: { tag: cv.tagName, painted: cv.width > 0 && cv.height > 0, box: [box.left, box.top, box.width, box.height] },
-      rows: menu.items.map((it) => it.label),
-      status: menu.items.map((it) => it.status || ""),
-      locked: menu.items.map((it) => it.locked),
-      reason: menu.items[2].reason,
-      index: menu.index,
+      info,
+      canvas: [r.left, r.top, r.width, r.height],
+      pixels: [c.width, c.height],
+      shown: getComputedStyle(c).display !== "none",
+      oldArt: !!document.getElementById("title-art"),
       oldRows: document.querySelectorAll("#cover-list li").length,
+      size: [root.clientWidth, root.clientHeight],
     };
   });
   assert.deepEqual(title.size, [331, 359]);
-  assert.equal(title.canvas.tag, "CANVAS");
-  assert.ok(title.canvas.painted, "the title canvas is drawn");
-  assert.deepEqual(title.canvas.box, [0, 0, 331, 359], "the title fills the screen edge to edge");
-  assert.deepEqual(title.rows, ["继续", "选关", "随机关", "玩法"]);
-  assert.deepEqual(title.status, ["第 1 关", "", "", ""], "a fresh start: the round on CONTINUE, no progress on ROUNDS");
-  assert.deepEqual(title.locked, [false, false, true, false], "RANDOM is locked before round 30");
-  assert.equal(title.reason, "通关 30 关后开放");
-  assert.equal(title.index, 0, "the title opens on CONTINUE");
+  assert.deepEqual(title.canvas, [0, 0, 331, 359], "the title canvas fills the smallest stage");
+  assert.deepEqual(title.pixels, [331, 359], "one device pixel a screen pixel at dpr 1");
+  assert.equal(title.shown, true);
+  assert.equal(title.oldArt, false, "the old framed picture is gone");
   assert.equal(title.oldRows, 0, "no DOM menu rows under the canvas");
-  /* START opens the first row: round 1 and its demo */
+  assert.deepEqual(title.info.items.map((i) => i.label), ["继续", "选关", "随机关", "玩法"]);
+  assert.deepEqual(title.info.items.map((i) => i.status || ""), ["第 1 关", "", "", ""], "a fresh start: the round on 继续, no progress on 选关");
+  assert.deepEqual(title.info.items.map((i) => i.locked === true), [false, false, true, false], "RANDOM is locked before round 30");
+  assert.equal(title.info.items[2].reason, "通关 30 关后开放", "the locked item says why in the bar");
+  assert.equal(title.info.index, 0, "the title opens on 继续");
+  assert.equal(title.info.note, "从第 1 关开始", "a fresh start has no record yet");
+  assert.equal(title.info.hint, "选 · A 确定");
+  /* START picks the chosen item: round 1 and its demo */
   await p.locator('#pad [data-b="start"]').click();
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
@@ -12299,8 +12315,8 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await press("b");
   await f.waitForFunction(() => game.phase === "title");
   assert.equal(await bookCalls(), bookCallsBeforeB, "B on NEXT makes no word book call");
-  const continuedFromCard = await f.evaluate(() => game.titleMenu.items[0]);
-  assert.deepEqual([continuedFromCard.label, continuedFromCard.status], ["继续", "第 2 关"], "B on NEXT goes to the title, which continues at round 2");
+  const continuedFromCard = await f.evaluate(() => game.title.items.map((li) => li.label + (li.status ? " · " + li.status : "")));
+  assert.equal(continuedFromCard[0], "继续 · 第 2 关", "B on NEXT goes to the title, which continues at round 2");
   await p.waitForTimeout(350);         /* the title's 300 ms tap guard */
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "play" && game.round === 2), "round 2");
@@ -12353,9 +12369,10 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await f.waitForFunction(() => game.phase === "leave");
   await f.locator("#cover-btn2").tap();
   await f.waitForFunction(() => game.phase === "title");
-  const continued = await f.evaluate(() => game.titleMenu.items);
-  assert.equal(continued[0].status, "第 2 关", "the title continues at round 2");
-  assert.equal(continued[1].status, "已过 1/100 关", "the ROUNDS item's bar line shows how far the player has come");
+  const continued = await f.evaluate(() => game.title.items.map((li) => li.label + (li.status ? " · " + li.status : "")));
+  assert.equal(continued[0], "继续 · 第 2 关", "the title continues at round 2");
+  const progress = await f.evaluate(() => game.title.note);
+  assert.equal(progress, "已通关 1/100", "the bar shows how far the player has come");
   const saved2 = await p.evaluate(() => (JSON.parse(localStorage.getItem("lopda-dev:crossing") || "{}").game) || null);
   assert.equal(saved2.cleared, 1, "round 1 is recorded cleared");
   assert.equal(saved2.round, 2, "the save continues at round 2");
@@ -12456,17 +12473,18 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
   const endTitle = await f.evaluate(() => {
-    const items = game.titleMenu.items, badge = document.getElementById("round");
+    const info = game.title;
     return {
-      rows: items.map((it) => it.label),
-      locked: items.map((it) => it.locked),
-      sel: items.map((it, i) => i === game.titleMenu.index),
-      badge: [badge.textContent, badge.className],
+      labels: info.items.map((li) => li.label),
+      locked: info.items.map((li) => li.locked === true),
+      index: info.index,
+      note: info.note,
     };
   });
-  assert.equal(endTitle.rows[0], "随机关", "after round 100 RANDOM takes the first row");
+  assert.deepEqual(endTitle.labels, ["随机关", "选关", "玩法"], "after round 100 RANDOM takes the first place and 继续 goes");
   assert.deepEqual(endTitle.locked, [false, false, false], "RANDOM is unlocked");
-  assert.deepEqual(endTitle.sel, [true, false, false], "the cursor starts on it");
+  assert.equal(endTitle.index, 0, "the cursor starts on it");
+  assert.equal(endTitle.note, "100 关都过了", "the bar says the hundred are behind");
   await press("a");
   await until(p, () => f.evaluate(() => game.phase === "demo" || game.phase === "play"), "the random round");
   const rand = await f.evaluate(() => {
@@ -12550,15 +12568,27 @@ test("crossing: in English the line under the grid is an English definition", { 
   }, "the title screen");
   await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
   await p.waitForTimeout(200);
-  /* the English title: the same fog canvas over the whole screen, the English labels and locked reason */
+  /* the shared title paints the English name and its line over the picture */
   const enTitle = await f.evaluate(() => {
-    const root = document.documentElement, box = document.getElementById("title-cv").getBoundingClientRect();
-    return { size: [root.clientWidth, root.clientHeight], box: [box.left, box.top, box.width, box.height], items: game.titleMenu.items };
+    const root = document.documentElement, c = document.getElementById("lotitle");
+    const r = c.getBoundingClientRect(), info = game.title;
+    return {
+      info,
+      size: [root.clientWidth, root.clientHeight],
+      canvas: [r.left, r.top, r.width, r.height],
+      pixels: [c.width, c.height],
+      oldArt: !!document.getElementById("title-art"),
+    };
   });
   assert.deepEqual(enTitle.size, [331, 359]);
-  assert.deepEqual(enTitle.box, [0, 0, 331, 359], "the English title fills the screen too");
-  assert.deepEqual(enTitle.items.map((it) => it.label), ["CONTINUE", "ROUNDS", "RANDOM", "HOW TO PLAY"]);
-  assert.equal(enTitle.items[2].reason, "Opens after round 30");
+  assert.deepEqual(enTitle.canvas, [0, 0, 331, 359], "the English title canvas fills the stage too");
+  assert.deepEqual(enTitle.pixels, [331, 359]);
+  assert.equal(enTitle.oldArt, false, "the old framed picture is gone");
+  assert.deepEqual(enTitle.info.items.map((i) => i.label), ["CONTINUE", "ROUNDS", "RANDOM", "HOW TO PLAY"]);
+  assert.equal(enTitle.info.items[0].status, "ROUND 1");
+  assert.equal(enTitle.info.items[2].reason, "Clear 30 levels to unlock", "the English locked item says why");
+  assert.equal(enTitle.info.note, "Start at round 1");
+  assert.equal(enTitle.info.hint, "A picks");
   await p.locator('#pad [data-b="start"]').click();
   await until(p, async () => {
     f = p.frames().find((x) => x !== p.mainFrame());
@@ -12603,7 +12633,7 @@ test("crossing: an old save, a replay and a quick re-entry", { skip, timeout: 60
     await p.locator("#app").evaluate((el) => { el.style.width = "331px"; el.style.height = "359px"; el.style.flex = "none"; });
     await p.waitForTimeout(100);
   };
-  const titles = () => f.evaluate(() => game.titleMenu.items.map((it) => it.label + (it.status ? " · " + it.status : "")));
+  const titles = () => f.evaluate(() => game.title.items.map((li) => li.label + (li.status ? " · " + li.status : "")));
   const pickerCells = () => f.evaluate(() => [...document.querySelectorAll("#cover-list li")].map((li) => ({
     n: +li.textContent,
     cleared: li.classList.contains("cleared"),
@@ -12705,13 +12735,15 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   const withoutTaught = (g) => { const c = Object.assign({}, g); delete c.taught; return c; };
   const beforeSave = withoutTaught(await readSave());
   const wordsCallsBefore = ((await p.textContent("#log")).match(/dict\.words/g) || []).length;
-  /* HOW TO PLAY is still the menu's fourth item; rolling down to it and A starts the practice round */
-  assert.equal(await f.evaluate(() => game.titleMenu.items[3].label), "玩法", "the fourth item is still HOW TO PLAY");
+  /* HOW TO PLAY is still the fourth item; the pad rolls to it and A starts the practice round */
+  const helpRow = await f.evaluate(() => game.title.items[3]);
+  assert.equal(helpRow.label, "玩法", "the fourth item is still HOW TO PLAY");
   const enterPractice = async () => {
-    const at = await f.evaluate(() => game.titleMenu.index);
+    /* roll from wherever the menu stands, as a player would, and let the roll finish before A */
+    const at = await f.evaluate(() => game.title.index);
     for (let k = at; k < 3; k++) await press("down");
     await p.waitForTimeout(200);       /* the menu's roll */
-    assert.equal(await f.evaluate(() => game.titleMenu.index), 3, "the menu rolled to HOW TO PLAY");
+    assert.equal(await f.evaluate(() => game.title.index), 3, "the menu rolled to HOW TO PLAY");
     await press("a");
     await until(p, () => f.evaluate(() => game.phase === "demo"), "the practice demo");
   };
@@ -12863,13 +12895,14 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   assert.equal(card.fit, true, "the card's button stays inside 331x359");
   assert.ok(card.scroll <= card.client, "the practice card needs no scrolling: " + card.scroll + " <= " + card.client);
 
-  /* (d) the card's button closes onto the title; a tap at the same spot within 100 ms is that same press: the
-     guard stops it before the title canvas sees it, so nothing opens and the menu does not roll */
+  /* (d) the card's button closes onto the title; a tap at the same spot within the guard is that same press,
+     not a pick. A raw mouse click dispatches at once; Playwright's tap would outlast the 300 ms guard. */
   await f.locator("#cover-btn").tap();
-  await f.locator("#title-cv").tap({ position: { x: (card.btn.l + card.btn.r) / 2, y: (card.btn.t + card.btn.b) / 2 } });
-  await p.waitForTimeout(300);
+  const titleBox = await f.locator("#lotitle").boundingBox();
+  await p.mouse.click(titleBox.x + (card.btn.l + card.btn.r) / 2, titleBox.y + (card.btn.t + card.btn.b) / 2);
+  await p.waitForTimeout(100);
   assert.equal(await f.evaluate(() => game.phase), "title", "the tap under the old button opens nothing");
-  assert.equal(await f.evaluate(() => game.titleMenu.index), 3, "the menu stays on HOW TO PLAY");
+  assert.equal(await f.evaluate(() => game.title.index), 3, "the menu stays on HOW TO PLAY");
   assert.equal(await f.evaluate(() => game.mode), "fixed", "closing the card clears the practice mode");
   assert.deepEqual(withoutTaught(await readSave()), beforeSave, "practice leaves round, cleared, hints, done, random and bookTip untouched");
   const kept = await readSave();

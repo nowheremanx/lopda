@@ -4,7 +4,9 @@
    and the picture. Earlier versions of this app (a different story) saved under "vn" and "chapters";
    this one never reads, writes or removes those, so nothing a player had is lost. */
 
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+/* the story is always 160 x 144; on a phone lo-game's fill canvas grows the rainy station around it
+   (sdk/UI.md 13), painted by paintBands in scenes.js */
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
@@ -16,7 +18,7 @@ var BOX_Y = PIC_H, LINES = 3, SPEED = 28;
 var S = null;       /* { v, at, flags, scene, stage } */
 var cur = null;     /* what waits for the player: { kind: "chapter" | "say" | "choice" | "end", ... } */
 var log = [];       /* the backlog: { who, text } */
-var view = "play", logTop = 0;
+var view = "play", logTop = 0, titleOn = false;   /* titleOn: the backdrops' weather (scenes.js paintBands) */
 var canSave = true; /* false when the save could not be read: then nothing is written over it */
 var live = { train: -200, dad: null, moving: false, slide: 0 };
 var slideSince = -1, heard;
@@ -123,6 +125,15 @@ function choiceRow(k, n) {
 }
 function inside(r, x, y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
+/* A tap counts only inside the world. With lo-game's fill layout the scenery bands are part of the
+   canvas, and the framework clamps a tap there to the near edge of the world: without this check a
+   tap on the rainy sky or the platform would press the title menu, a choice or the story. */
+function tapped() {
+  var p = game.pointer, s = game.stage;
+  return p.pressed && p.stageX >= s.x && p.stageX < s.x + game.width &&
+    p.stageY >= s.y && p.stageY < s.y + game.height;
+}
+
 function animate(dt) {
   var st = S.stage;
   var tx = st.train ? TRAIN_AT[st.train] : -200;
@@ -148,7 +159,7 @@ function animate(dt) {
 game.scene("play", {
   enter: function (saved) {
     S = valid(saved) ? saved : fresh();
-    view = "play"; heard = undefined;
+    view = "play"; titleOn = false; heard = undefined;
     game.musicStop();
     if (S.scene) { settle(); listen(S.scene, S.stage); }
     rebuildLog();
@@ -159,7 +170,7 @@ game.scene("play", {
     if (view === "log") {
       if (game.repeat("up")) logTop = Math.max(0, logTop - 1);
       if (game.repeat("down")) logTop = Math.min(Math.max(0, log.length - 1), logTop + 1);
-      if (game.pressed("b") || game.pressed("a") || game.pointer.pressed) { view = "play"; game.sfx("tap"); }
+      if (game.pressed("b") || game.pressed("a") || tapped()) { view = "play"; game.sfx("tap"); }
       return;
     }
     if (cur.kind === "say") cur.n += dt * SPEED;
@@ -167,7 +178,7 @@ game.scene("play", {
       var n = cur.items.length;
       if (game.repeat("up")) { cur.idx = (cur.idx + n - 1) % n; game.sfx("move"); }
       if (game.repeat("down")) { cur.idx = (cur.idx + 1) % n; game.sfx("move"); }
-      if (game.pointer.pressed) {
+      if (tapped()) {
         for (var k = 0; k < n; k++) if (inside(choiceRow(k, n), game.pointer.x, game.pointer.y)) { cur.idx = k; advance(); return; }
         /* a tap beside the rows never picks one (a branch cannot be taken back, #394), but it answers: a tick,
            and the box below says to tap a line */
@@ -180,7 +191,7 @@ game.scene("play", {
     }
     /* a card holds for a moment, so a tap meant for the line before does not skip it */
     if (cur.since !== undefined && game.time - cur.since < (cur.kind === "end" ? 1.5 : 0.5)) return;
-    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) advance();
+    if (game.pressed("a") || game.pressed("start") || tapped()) advance();
   },
   draw: function (g) {
     g.clear(g.PAPER);
@@ -265,7 +276,7 @@ var saved = null, loading = false, unreadable = false, newer = false, menuIdx = 
 function titleRow(k) { return { x: 28, y: BOX_Y + 3 + k * (ROW_H + ROW_GAP), w: 104, h: ROW_H }; }
 game.scene("title", {
   enter: function () {
-    saved = null; loading = true; unreadable = false; newer = false; menuIdx = 0; heard = undefined;
+    saved = null; loading = true; unreadable = false; newer = false; menuIdx = 0; titleOn = true; heard = undefined;
     listen("title", { rain: 2 });
     game.load(SAVE_KEY).then(function (v) {
       saved = valid(v) ? v : null;
@@ -286,7 +297,7 @@ game.scene("title", {
     if (loading) return;
     var n = saved ? 2 : 1;
     if (game.repeat("up") || game.repeat("down")) { if (n > 1) { menuIdx = (menuIdx + 1) % n; game.sfx("move"); } }
-    if (game.pointer.pressed) {
+    if (tapped()) {
       var hit = -1;
       for (var k = 0; k < n; k++) if (inside(titleRow(k), game.pointer.x, game.pointer.y)) hit = k;
       if (hit < 0) return;

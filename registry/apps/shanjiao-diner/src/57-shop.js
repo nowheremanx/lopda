@@ -9,6 +9,18 @@ function shopStatus(id) {
   return "可买";
 }
 
+/* A and a tap on a row do the same: buy the selected upgrade. */
+function shopBuy() {
+  var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
+  if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
+  if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+  if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+  if (buyUpgrade(id)) {
+    game.sfx("ok");
+    sayToast("买下了「" + u.name + "」");
+  }
+}
+
 game.scene("shop", {
   enter: function () {
     SHOP_SEL = 0;
@@ -20,16 +32,11 @@ game.scene("shop", {
     if (busy) return;
     if (game.repeat("up")) { SHOP_SEL = (SHOP_SEL + DATA.UPGRADE_ORDER.length - 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
     if (game.repeat("down")) { SHOP_SEL = (SHOP_SEL + 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
-    if (game.pressed("a")) {
-      var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
-      if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
-      if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
-      if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
-      if (buyUpgrade(id)) {
-        game.sfx("ok");
-        sayToast("买下了「" + u.name + "」");
-      }
-    }
+    if (game.pressed("a")) shopBuy();
+    /* the list is not scrolling (5 rows of 16 in an 80 px window): tap a row
+       to move the cursor there and buy, exactly as A does */
+    var hit = tapRow(8, 112, 200, 80, 16, DATA.UPGRADE_ORDER.length, 0);
+    if (hit >= 0) { SHOP_SEL = hit; shopBuy(); }
     if (game.pressed("b") || game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },
   draw: function (g) {

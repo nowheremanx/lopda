@@ -5,14 +5,19 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { boot } from "./app-vm.mjs";
 
-function bootApp(store = {}) {
-  const listeners = {};
+function bootApp(store = {}, opt = {}) {
+  const listeners = {}, sfx = [];
+  let releaseLoad = null;
+  const held = opt.holdLoad ? new Promise((r) => { releaseLoad = r; }) : null;
   const pad = {
     lang: "zh",
     save(k, v) { store[k] = JSON.parse(JSON.stringify(v)); },
-    load(k) { return Promise.resolve(store[k] == null ? null : JSON.parse(JSON.stringify(store[k]))); },
+    load(k) {
+      const value = store[k] == null ? null : JSON.parse(JSON.stringify(store[k]));
+      return held && k === "prog" ? held.then(() => value) : Promise.resolve(value);
+    },
     remove(k) { delete store[k]; },
-    sfx() {},
+    sfx(n) { sfx.push(n); },
     on(t, fn) { (listeners[t] ||= []).push(fn); },
     off() {}, isDown() { return false; }
   };
@@ -24,7 +29,7 @@ function bootApp(store = {}) {
     (listeners.press || []).forEach((f) => f(b)); await tick(2);
     (listeners.release || []).forEach((f) => f(b)); await tick(1);
   };
-  return { app, store, tick, press };
+  return { app, store, tick, press, sfx, release: () => releaseLoad && releaseLoad() };
 }
 
 const D4 = [[1, 0], [-1, 0], [0, 1], [0, -1]];
@@ -93,6 +98,43 @@ test("the app boots to the title, starts level 1 on the garden's card and rolls"
   await tick(100);
   assert.equal(app.ctx.get("state"), "roll", "the card goes on by itself");
   assert.ok(app.hashes.length > 100, "the play scene draws");
+});
+
+test("the title waits for the save, so a key on the way cannot start a returning player at level 1", async () => {
+  const { app, tick, press, release } = bootApp(
+    { prog: { v: 1, unlocked: 5, gems: new Array(12).fill(0), times: new Array(12).fill(null) } }, { holdLoad: true });
+  await tick(6);
+  assert.equal(app.ctx.get("loaded"), false, "the save is still on its way");
+  await press("right");
+  assert.equal(app.ctx.get("sel"), 0, "a key before the save lands does not move the picker");
+  release();
+  await tick(4);
+  assert.equal(app.ctx.get("loaded"), true);
+  assert.equal(app.ctx.get("sel"), 5, "the picker sits on the furthest open level");
+});
+
+test("a locked row says why on the footer and plays err, from a key or a tap", async () => {
+  const r = bootApp();
+  await r.tick(8);
+  await r.press("down");                                 /* the title's DOWN opens the level list */
+  await r.tick(40);
+  assert.equal(r.app.ctx.get("sel"), 0);
+  r.sfx.length = 0;
+  await r.press("down");                                 /* level 2 is still locked */
+  assert.equal(r.app.ctx.get("sel"), 0, "a locked row takes no selection");
+  assert.equal(r.app.ctx.get("note"), "通关前一关后开放");
+  assert.ok(r.app.ctx.get("noteUntil") > r.app.ctx.get("game").time, "the footer keeps the line a moment");
+  assert.deepEqual(r.sfx, ["err"]);
+  /* a finger on the locked row says the same where a key would */
+  await r.tick(120);                                      /* let the note run out */
+  r.sfx.length = 0;
+  r.app.pointer("pointerdown", 80, 65, 160, 176);         /* row 3: the garden's level 2 */
+  await r.tick(1);
+  r.app.pointer("pointerup", 80, 65, 160, 176);
+  await r.tick(1);
+  assert.equal(r.app.ctx.get("sel"), 0);
+  assert.equal(r.app.ctx.get("note"), "通关前一关后开放");
+  assert.deepEqual(r.sfx, ["err"]);
 });
 
 test("a 1.x save with best 7 opens level 12, without rewriting best", async () => {

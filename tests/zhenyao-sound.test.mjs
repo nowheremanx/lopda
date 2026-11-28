@@ -257,16 +257,16 @@ test("序章 完 holds the coda; the credits roll to the title's music, which go
 
 test("the music room: on the title only once the game is cleared; A plays, B goes back", async () => {
   const z = withPad({ extra: false }), d = driver(z), get = z.get;
-  const lists = [];
+  const labels = () => get("titleItems()").map((it) => it.label.zh);
   await d.run(5);
-  const choose = get("game").choose;
-  get("game").choose = (items, o) => { lists.push(items.slice()); return choose(items, o); };
   await d.tap("a"); await d.run(10);
-  assert.deepEqual(lists.pop(), ["进入小镇", "演武"]);
+  assert.deepEqual(labels(), ["新游戏", "演武", "听曲"]);
+  assert.equal(get("titleItems()")[2].locked, true, "听曲 is listed, and locked");
   await d.tap("b"); await d.run(10);
   get("(Cut.seen.cleared = true)");
   await d.tap("a"); await d.run(10);
-  assert.deepEqual(lists.pop(), ["进入小镇", "演武", "听曲"]);
+  assert.deepEqual(labels(), ["新游戏", "演武", "听曲"]);
+  assert.equal(get("titleItems()")[2].locked, false, "听曲 opens once the game is cleared");
   await d.tap("down"); await d.tap("down"); await d.tap("a"); await d.run(10);
   /* the list: A plays the first piece again from its start, down twice and A plays the road */
   const before = z.calls.length;

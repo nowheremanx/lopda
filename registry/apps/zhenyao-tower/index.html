@@ -6,6 +6,15 @@
 </head>
 <body>
 <!-- Source lives in src/; node tools/bundle-app.mjs registry/apps/zhenyao-tower fills every block below. -->
+<style>
+/* The stage is the whole screen. The game's canvas is a window inside an inset wrapper; the shrine behind
+   it (src/frame.js) covers every other pixel and never takes a touch. */
+html,body{margin:0;height:100%;overflow:hidden;background:#1f2a14;touch-action:none;-webkit-user-select:none;user-select:none}
+#frame-stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#1f2a14}
+#frame-art{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;image-rendering:pixelated;image-rendering:crisp-edges}
+#frame-view{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;width:calc(100% - 8px);height:calc(100% - 8px)}
+#frame-view canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges;touch-action:none}
+</style>
 <script data-lo-3d="1.2.0">
 /*
  * lo-3d.js 1.2.0, a small software 3D renderer for Lo-PDA apps.
@@ -498,13 +507,13 @@ var Lo3D = (function () {
   };
 })();
 </script>
-<script data-lo-game="1.4.0">
+<script data-lo-game="1.5.0">
 /*
- * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.5.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.5.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -515,7 +524,7 @@ var Lo3D = (function () {
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -613,6 +622,38 @@ var LoGame = (function () {
     };
   }
 
+  /* Layout of a fill screen (1.5.0): the world keeps its size, the canvas around it covers the stage.
+     Returns {w, h, k, x, y}: canvas columns and rows, CSS pixels a canvas pixel, and where the world sits.
+     The caller works in CSS pixels from the stage's getBoundingClientRect (fractional on an iPhone). */
+  function fillLayout(stageW, stageH, worldW, worldH) {
+    var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
+    if (stageW > 0 && stageH > 0) {
+      k = stageW / worldW;
+      ch = Math.ceil(stageH / k);
+      if (ch < worldH) {
+        /* a stage too short for the world's width: fit by height and grow wider at the sides */
+        k = stageH / worldH;
+        cw = Math.max(worldW, Math.ceil(stageW / k));
+        ch = worldH;
+        x = Math.floor((cw - worldW) / 2);
+      } else {
+        /* the world's width fills the stage; the rows over it become scenery */
+        cw = worldW;
+        y = Math.floor((ch - worldH) / 2);
+      }
+    }
+    return { w: cw, h: ch, k: k, x: x, y: y };
+  }
+  /* The contain layout the framework has always used with fill off: the world stays whole, paper around it.
+     Returns {w, h, k} with the CSS size rounded, as the canvas style has always been set. */
+  function containLayout(stageW, stageH, worldW, worldH, dpr) {
+    dpr = dpr || 1;
+    var best = Math.min(stageW / worldW, stageH / worldH), k = Math.floor(best * dpr) / dpr;
+    if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+    k = Math.max(0.5, k);
+    return { w: Math.round(worldW * k), h: Math.round(worldH * k), k: k };
+  }
+
   /* ---------------- the game ---------------- */
   function create(opt) {
     opt = opt || {};
@@ -642,19 +683,41 @@ var LoGame = (function () {
     parent.appendChild(canvas);
     var ctx = canvas.getContext("2d");
     var image = ctx.createImageData(W, H);
+    var fill = !!opt.fill, bands = typeof opt.bands === "function" ? opt.bands : null;
+    var lay = { w: W, h: H, k: 1, x: 0, y: 0 };
+    var stageInfo = { w: W, h: H, k: 1, x: 0, y: 0, worldW: W, worldH: H };
+    var stageBuf = null, bandSurface = null, stageImage = null, lastFitW = -1, lastFitH = -1;
     function fit() {
+      if (fill) { fitFill(); return; }
       var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
-      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
-      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
-      k = Math.max(0.5, k);
-      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
-      game.scale = k;
+      var c = containLayout(aw, ah, W, H, window.devicePixelRatio || 1);
+      canvas.style.width = c.w + "px"; canvas.style.height = c.h + "px";
+      game.scale = c.k;
+      game.stage = { w: W, h: H, k: c.k, x: 0, y: 0 };
+    }
+    /* the stage's own box, fractional: the layout that leaves no paper at the sides, top or bottom */
+    function fitFill() {
+      var r = parent.getBoundingClientRect ? parent.getBoundingClientRect() : null;
+      var w = r ? r.width : 0, h = r ? r.height : 0;
+      if (!(w > 0) || !(h > 0)) { w = parent.clientWidth || innerWidth; h = parent.clientHeight || innerHeight; }
+      if (w === lastFitW && h === lastFitH && stageBuf) return;
+      lastFitW = w; lastFitH = h;
+      var L = fillLayout(w, h, W, H);
+      lay = L;
+      stageInfo.w = L.w; stageInfo.h = L.h; stageInfo.k = L.k; stageInfo.x = L.x; stageInfo.y = L.y;
+      canvas.width = L.w; canvas.height = L.h;
+      /* exact sizes, not rounded: a rounded width leaves a line of paper down each side on an iPhone */
+      canvas.style.width = (L.w * L.k) + "px"; canvas.style.height = (L.h * L.k) + "px";
+      stageBuf = new Uint8Array(L.w * L.h); stageBuf.fill(PAPER);
+      bandSurface = makeSurface({ buf: stageBuf, w: L.w, h: L.h });
+      stageImage = ctx.createImageData(L.w, L.h);
+      game.scale = L.k;
+      game.stage = { w: L.w, h: L.h, k: L.k, x: L.x, y: L.y };
+      if (stack.length) render();   /* canvas.width cleared it: draw straight away */
     }
 
     /* --- framebuffer and drawing --- */
     var buf = new Uint8Array(W * H);
-    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
-    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
 
     var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
     function fontCtx() {
@@ -702,108 +765,117 @@ var LoGame = (function () {
       return lines;
     }
 
-    var g = {
-      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
-      clear: function (c) { buf.fill(c == null ? PAPER : c); },
-      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
-      clip: function (x, y, w, h) {
-        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
-        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
-        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
-      },
-      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
-      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
-      rect: function (x, y, w, h, c) {
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
-        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
-      },
-      frame: function (x, y, w, h, c) {
-        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
-      },
-      line: function (x0, y0, x1, y1, c) {
-        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
-        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
-        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
-      },
-      circle: function (cx, cy, r, c, fill) {
-        cx = Math.round(cx); cy = Math.round(cy);
-        for (var y = -r; y <= r; y++) {
-          var span = Math.round(Math.sqrt(r * r + r - y * y));
-          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
-          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
-        }
-        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
-      },
-      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
-      dither: function (x, y, w, h, c, level) {
-        level = clamp(level == null ? 2 : level, 0, 4);
-        x = Math.round(x); y = Math.round(y);
-        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
-          var px = (x + xx) & 1, py = (y + yy) & 1;
-          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
-          if (on) put(x + xx + ox, y + yy + oy, c);
-        }
-      },
-      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
-      sprite: function (s, x, y, o) {
-        o = o || {};
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
-        for (var yy = 0; yy < h; yy++) {
-          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
-          var sy = o.flipY ? h - 1 - yy : yy;
-          for (var xx = 0; xx < w; xx++) {
-            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
-            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
-            if (v === CLEAR) continue;
-            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+    /* a drawing surface over any tone buffer: the world, and with fill a band canvas the app's `bands`
+       callback paints in stage coordinates. Both get the same methods and clip/origin state. */
+    function makeSurface(t) {
+      var sbuf = t.buf, SW = t.w, SH = t.h;
+      var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = SW, cy1 = SH;
+      function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) sbuf[y * SW + x] = c; }
+      var s = {
+        width: SW, height: SH, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+        clear: function (c) { sbuf.fill(c == null ? PAPER : c); },
+        origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+        clip: function (x, y, w, h) {
+          if (x == null) { cx0 = 0; cy0 = 0; cx1 = SW; cy1 = SH; return; }
+          cx0 = clamp(Math.round(x + ox), 0, SW); cy0 = clamp(Math.round(y + oy), 0, SH);
+          cx1 = clamp(Math.round(x + ox + w), 0, SW); cy1 = clamp(Math.round(y + oy + h), 0, SH);
+        },
+        pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+        get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= SW || y >= SH ? null : sbuf[y * SW + x]; },
+        rect: function (x, y, w, h, c) {
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+          for (var yy = ya; yy < yb; yy++) sbuf.fill(c, yy * SW + xa, yy * SW + Math.max(xa, xb));
+        },
+        frame: function (x, y, w, h, c) {
+          s.rect(x, y, w, 1, c); s.rect(x, y + h - 1, w, 1, c); s.rect(x, y, 1, h, c); s.rect(x + w - 1, y, 1, h, c);
+        },
+        line: function (x0, y0, x1, y1, c) {
+          x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+          var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+          for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+        },
+        circle: function (cx, cy, r, c, fill) {
+          cx = Math.round(cx); cy = Math.round(cy);
+          for (var y = -r; y <= r; y++) {
+            var span = Math.round(Math.sqrt(r * r + r - y * y));
+            if (fill) s.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+            else { s.pixel(cx - span, cy + y, c); s.pixel(cx + span, cy + y, c); }
+          }
+          if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); s.pixel(cx + x, cy - s2, c); s.pixel(cx + x, cy + s2, c); }
+        },
+        /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+        dither: function (x, y, w, h, c, level) {
+          level = clamp(level == null ? 2 : level, 0, 4);
+          x = Math.round(x); y = Math.round(y);
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+            var px = (x + xx) & 1, py = (y + yy) & 1;
+            var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+            if (on) put(x + xx + ox, y + yy + oy, c);
+          }
+        },
+        /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+        sprite: function (sp, x, y, o) {
+          o = o || {};
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var w = sp.w, h = sp.h, px = sp.px, one = o.color, map = o.map;
+          for (var yy = 0; yy < h; yy++) {
+            var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+            var sy = o.flipY ? h - 1 - yy : yy;
+            for (var xx = 0; xx < w; xx++) {
+              var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+              var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+              if (v === CLEAR) continue;
+              sbuf[dy * SW + dx] = one != null ? one : map ? map[v] : v;
+            }
+          }
+        },
+        /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+        text: function (str, x, y, o) {
+          o = o || {};
+          var color = o.color == null ? INK : o.color;
+          var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+          lines.forEach(function (ln) {
+            /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+            var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+            if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+            else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+            Array.from(ln).forEach(function (ch) {
+              var gl = glyph(ch);
+              for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+                if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+                put(xx + i + ox, yy + j + oy, color);
+              }
+              xx += gl.adv;
+            });
+            yy += FONT.line;
+          });
+          return lines.length * FONT.line;
+        },
+        measure: measure,
+        wrap: wrap,
+        lineHeight: FONT.line,
+        /* the standard window: paper inside, ink border with cut corners */
+        window: function (x, y, w, h, o) {
+          o = o || {};
+          s.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+          var c = o.border == null ? INK : o.border;
+          s.rect(x + 1, y, w - 2, 1, c); s.rect(x + 1, y + h - 1, w - 2, 1, c);
+          s.rect(x, y + 1, 1, h - 2, c); s.rect(x + w - 1, y + 1, 1, h - 2, c);
+          if (!o.thin) { s.rect(x + 2, y + 2, w - 4, 1, MID); }
+        },
+        /* a small arrow used by menus and "more" markers */
+        arrow: function (x, y, dir, c) {
+          c = c == null ? INK : c;
+          for (var i = 0; i < 4; i++) {
+            if (dir === "down") s.rect(x + i, y + i, 7 - 2 * i, 1, c);
+            else s.rect(x + i, y + i, 1, 7 - 2 * i, c);
           }
         }
-      },
-      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
-      text: function (str, x, y, o) {
-        o = o || {};
-        var color = o.color == null ? INK : o.color;
-        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
-        lines.forEach(function (ln) {
-          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
-          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
-          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
-          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
-          Array.from(ln).forEach(function (ch) {
-            var gl = glyph(ch);
-            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
-              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
-              put(xx + i + ox, yy + j + oy, color);
-            }
-            xx += gl.adv;
-          });
-          yy += FONT.line;
-        });
-        return lines.length * FONT.line;
-      },
-      measure: measure,
-      wrap: wrap,
-      lineHeight: FONT.line,
-      /* the standard window: paper inside, ink border with cut corners */
-      window: function (x, y, w, h, o) {
-        o = o || {};
-        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
-        var c = o.border == null ? INK : o.border;
-        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
-        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
-        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
-      },
-      /* a small arrow used by menus and "more" markers */
-      arrow: function (x, y, dir, c) {
-        c = c == null ? INK : c;
-        for (var i = 0; i < 4; i++) {
-          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
-          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
-        }
-      }
-    };
+      };
+      return s;
+    }
+    var g = makeSurface({ buf: buf, w: W, h: H });
 
     /* --- palette effects: every frame the indexed buffer goes through this map --- */
     var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
@@ -811,8 +883,23 @@ var LoGame = (function () {
       var map = pal.slice();
       if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
       if (flashT > 0) map = map.map(function (v) { return 3 - v; });
-      var d = image.data, n = W * H;
       if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      if (fill) {
+        if (!stageBuf || !stageImage) return 0;
+        var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
+        for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
+          var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
+          var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
+          sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
+        }
+        ctx.putImageData(stageImage, 0, 0);
+        return n2;
+      }
+      var d = image.data, n = W * H;
       for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
         var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
         var c = RGB[map[v]], o = (y * W + x) * 4;
@@ -832,10 +919,27 @@ var LoGame = (function () {
       addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
     }
     addEventListener("blur", function () { BUTTONS.forEach(up); });
-    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    var pointer = { x: 0, y: 0, stageX: 0, stageY: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
     function toScreen(e) {
       var r = canvas.getBoundingClientRect();
-      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+      if (fill) {
+        /* stage pixels (canvas pixels), then the world inside them; a tap in a band still lands on the near edge */
+        var px = (e.clientX - r.left) / (lay.k || 1), py = (e.clientY - r.top) / (lay.k || 1);
+        pointer.stageX = px; pointer.stageY = py;
+        pointer.x = clamp(Math.floor(px - lay.x), 0, W - 1);
+        pointer.y = clamp(Math.floor(py - lay.y), 0, H - 1);
+        return;
+      }
+      pointer.stageX = (e.clientX - r.left) * W / r.width;
+      pointer.stageY = (e.clientY - r.top) * H / r.height;
+      pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
+    }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
     }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
@@ -869,7 +973,8 @@ var LoGame = (function () {
     function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
 
     var game = {
-      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      VERSION: VERSION, width: W, height: H, stage: { w: W, h: H, k: 1, x: 0, y: 0 },
+      g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
       t: function (text, vars) { return pick(text, LANG, vars); },
       INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
 
@@ -906,8 +1011,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -1012,7 +1117,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -1044,13 +1149,30 @@ var LoGame = (function () {
       game.time += STEP; game.frame++;
       inputEnd();
     }
+    /* the world into the stage: a plain copy, every frame, so the bands can be painted under it */
+    function compose() {
+      var sb = stageBuf, cw = lay.w, x0 = lay.x, y0 = lay.y;
+      for (var y = 0; y < H; y++) {
+        var src = y * W, dst = (y0 + y) * cw + x0;
+        for (var x = 0; x < W; x++) sb[dst + x] = buf[src + x];
+      }
+    }
     function render() {
+      if (fill) {
+        if (!stageBuf) return;
+        /* the app paints the full stage first: sky above the world, floor below, a HUD if it has one */
+        bandSurface.origin(0, 0); bandSurface.clip();
+        if (bands) bands(bandSurface, stageInfo);
+      }
       g.origin(0, 0); g.clip();
       for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      if (fill) compose();
       present();
     }
     function frame(ts) {
       requestAnimationFrame(frame);
+      /* the stage can settle after the app starts with no resize event (an iPhone's bars): check it every frame */
+      if (fill) fitFill();
       if (!last) last = ts;
       acc += Math.min(0.1, (ts - last) / 1000); last = ts;
       var n = 0;
@@ -1070,6 +1192,7 @@ var LoGame = (function () {
   return {
     VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
     create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    fillLayout: fillLayout, containLayout: containLayout,
     clamp: clamp, lerp: lerp, approach: approach, t: t
   };
 })();
@@ -1179,7 +1302,7 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 */
-LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","「":"12:AAA8AgAgAgAgAgAgAgAAAAAAAAA=","」":"12:AAAAAAAACACACACACACACAeAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","七":"12:AACACACACODw+ACACACCCCB+AAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","丙":"12:AA/+BABA/+hCiikSoKgCgCgOAAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","丹":"12:AAP8IEJEIkIE/+IEIEQEQEgcAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","么":"12:AACACAEQEQIgQghACEEEIafiAAA=","乙":"12:AA/4AQAgBACAEAIAQAgCgCf+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","事":"12:AABA/+JIJIf8BE/+BEf8BAHAAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","井":"12:AAEQEQ/+EQEQEQ/+EQEQIQwQAAA=","亮":"12:AABA/+IIP4AA/+gCHwEQISweAAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","什":"12:AAEQEQIQIQb+oQIQIQIQIQIQAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","们":"12:AAKeJCQCSCyCSCSCSCSCSCSOAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","伤":"12:AAJAJ+SAUgwgT+QiQiRCRCSMAAA=","体":"12:AAIgIgX+QgxwSoSoUkb6QgQgAAA=","何":"12:AAL+IEQET0yUSUSUT0QEQEQcAAA=","作":"12:AAJAJAR+Sg0gQ+QgQgQ+QgQgAAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","佩":"12:AAP8MEX0VE30VUVUVUV0VGZCAAA=","信":"12:AAIgIQX+QAz8QAT8QAT8SET8AAA=","修":"12:AAJAJ8TIUw3OUQVkUYVkQYTgAAA=","倍":"12:AAIQL8QASExIX+QAT8SESET8AAA=","倒":"12:AAPyJKSKUq3aRKRKXyRCRyWOAAA=","傀":"12:AAJAP8UkX80kX8QoRURcSSUeAAA=","像":"12:AAJ4KIX+SSz+RwWaRsWaRqWYAAA=","儿":"12:AAEQEQEQEQEQEQEQIQISQSgeAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","光":"12:AABAREJIFQBA/+EQEQESISweAAA=","克":"12:AABA/+BAf8QEQEf8EQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","六":"12:AACABAAA/+AAAAIIIEQEQCgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","内":"12:AABABA/+hChCiikSoKgCgCgOAAA=","冷":"12:AAgQQoREGCAQAIT+QERIgwgMAAA=","凉":"12:AAgQX+QAD8CECET8QQSUkSgwAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","击":"12:AABABAf8BABA/+BAREREREf8AAA=","切":"12:AAT+QiQiciwiQiQiUiZCRCCMAAA=","利":"12:AADCcCESES/SESMSOSVCkCEOAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","制":"12:AAUCfqkKEK/qEK/qkqkiliEOAAA=","刻":"12:AAEC/qIKRK+KEKIqxKCCNCwuAAA=","前":"12:AAIIEQ/+AAfURUfURUfURETMAAA=","剑":"12:AAECKKRKgqfKAqoqVKVCDi8OAAA=","剥":"12:AAfCBKfKBK/qEKkqVKOCVCsuAAA=","剧":"12:AAfiQqQqfqSKfqSKfqYioivuAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","加":"12:AAIAIe/SJSJSJSJSJSRSRSmeAAA=","北":"12:AAEgEgEi8kE4EgEgMg0iEiEeAAA=","十":"12:AABABABABA/+BABABABABABAAAA=","升":"12:AADIcIEIEIEI/+EIEIEIIIwIAAA=","协":"12:AARARAX45IRITMVKRKSISIUwAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","南":"12:AABA/+BA/+kSiiv6hCv6hChOAAA=","印":"12:AAGA4+gigi+igigimi4uAgAgAAA=","原":"12:AAf+QgX8UEX8UEX8QgUkUipiAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","发":"12:AASQSIiA/+EAH4KIJQQgTYsGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","吗":"12:AAD84EpEpEpEp+oCoC76ACAcAAA=","否":"12:AA/+AgDANYxGBAAAf8QEQEf8AAA=","吧":"12:AAD+6SqSqSqSr+qAqA6CCCB+AAA=","听":"12:AAAM7wqAqAr+qIqIqI6ICIEIAAA=","吸":"12:AAD85EpEpIpOpCpipU6ICUFiAAA=","味":"12:AAAQ4Qr8oQoQv+oQo45UGSAQAAA=","呵":"12:AAH+4EoEr0qUqUqUr04EAEAcAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","咦":"12:AAAQ7+oQr+oSr+qQr+4SAoDGAAA=","品":"12:AAP4IIIIIIP4AA++iiiiii++AAA=","哎":"12:AABE7+pEoApEpEoooo4QAoDGAAA=","哥":"12:AA/+IkIkPkAE/+IkIkPkAEAcAAA=","哪":"12:AAHu6qqqvqqsqqvqqq6uEoJoAAA=","商":"12:AABA/+IIEQ/+kSoK32kSnygGAAA=","啦":"12:AACQ6Iv+qAqirSuSqS6UCEG+AAA=","嗯":"12:AAD+6Sr+qSqqrGr+og5UFKI6AAA=","器":"12:AAe8SkSke8BQ/+II++SkSke8AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","图":"12:AA/+iCjysSji8ejCgymChi/+AAA=","圈":"12:AA/+lSv6iC/+kSvq0mlikK/+AAA=","土":"12:AABABABABAf8BABABABABA/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","塔":"12:AAREX+RE44REW6QAb+yCCCD+AAA=","壁":"12:AAeIS+eUR+eIq+OIBAf8BA/+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","复":"12:AAQAf+oEP8IEP8CAH8cIDw8OAAA=","外":"12:AAIQIQOQSQSYqUESEQIQQQgQAAA=","夜":"12:AABA/+IgI8RESU1IQoQQRoWGAAA=","够":"12:AAIQPeRihUdIVwVeVidUBIGwAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","天":"12:AAf8BABABA/+BACgCgEQIIwGAAA=","夫":"12:AABABAf8BABA/+BACgEQIIwGAAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","如":"12:AAIAI++iSiSiiikiUiIiU+iAAAA=","妖":"12:AAIMJw8QUQUQX+kQUoIoVEiCAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","娃":"12:AAIQJ88QUQX+UAkQV8IQUQj+AAA=","婆":"12:AAQQL+iST8CkKYVk/+EIHw4OAAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","守":"12:AABA/+gCgSAQ/+AQIQEQAQBwAAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","宫":"12:AABA/+gCv6IIP4AAf8QEQEf8AAA=","害":"12:AABA/+hCv6BAf8BA/+QEQEf8AAA=","家":"12:AABA/+gCv6DAMkzoMwzoMmzAAAA=","寒":"12:AABA/+kSf8EQ/+EQLIw2HAAwAAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","封":"12:AAIE+EJ+IE+EAkIU+UIEOEwcAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","尸":"12:AAP+ICICICP+IAIAIAQAQAgAAAA=","层":"12:AAf+QCQCf+QAX8QAf+SAUEv6AAA=","屠":"12:AAf+QCf+RCX0RIf+SEX8aEj8AAA=","山":"12:AABABABAhChChChChChChC/+AAA=","岳":"12:AAAYPgIAP8IQIQ/+BAREREf8AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","师":"12:AAL+oQoQr+qSqSqSKSKWQQgQAAA=","常":"12:AAJI/+gCv6IIP4BAf8RERMBAAAA=","幅":"12:AAI+IA++qiq+qAq+qqu+IqI+AAA=","年":"12:AAIAP+QgggP8IgIg/+AgAgAgAAA=","幻":"12:AAJ+ICQCQCkC4CICSCSClC5MAAA=","序":"12:AAAgf+QAX8QIRQf+QiQkQgjgAAA=","底":"12:AAAgf+QEX4UQUQX+UQUIVKmmAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","弟":"12:AAIIEQf8BEf8RAf+DCNCxMBAAAA=","影":"12:AAfCREfIRAfCEE/oRAfCVEsoAAA=","往":"12:AAIgQQn+IQQQwQT8QQQQQQX+AAA=","待":"12:AAIQR8gQIQT+wET+REQkQEQcAAA=","很":"12:AAL8SEj8KESEz8SSSUSISkTCAAA=","得":"12:AAL8SEj8KET8wAX+QIX+SIRYAAA=","御":"12:AAKAXuhKJKXqxKVqVKVOVoWIAAA=","微":"12:AAKoaovuISXqwKXKVKVkVKYSAAA=","徵":"12:AAFIX+gKHyICXyxKX0RERKXyAAA=","心":"12:AACABAAgEgEAUEUCUCkKEID4AAA=","快":"12:AAIgIgr8skokokP+IgJQKIMGAAA=","态":"12:AABA/+CgEQKIxGAAVEUikKD4AAA=","怎":"12:AAIAP+SAj8CAD8CAVEUikKD4AAA=","怕":"12:AAIIIQp+tCpCpCJ+JCJCJCJ+AAA=","怪":"12:AAJ8JEoosQoorGIQJ8IQIQL+AAA=","您":"12:AAKAL+SC0QRUSSQwBAUkUKj6AAA=","情":"12:AAIQJ8oQt8oQr+JEJ8JEJ8JEAAA=","想":"12:AAI++iI+ciq+IiI+FAUkUKj6AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","我":"12:AAGU4SIQ/+IQIUOU4IIKIWYiAAA=","戴":"12:AAEUfSEQ/+VQfUVUfIKK/WSiAAA=","打":"12:AAJ+II8IIIIIMI4IIIIIII44AAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","抱":"12:AASAT88ET0SUaUz0SMSASCx+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挨":"12:AAQgRE76RAR8aQwQT+QoREyCAAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","掌":"12:AAJI/+gCP4IIf8BAf8BA/+BAAAA=","掩":"12:AAQgT85ISkX+akz8SkT8QiweAAA=","攻":"12:AAAg8gI+JEKkIkIoMowQAoDGAAA=","斗":"12:AAEQCQBQQQIQEQAeDw8QAQAQAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","早":"12:AAf8QEf8QEf8BABA/+BABABAAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","明":"12:AA9+lClCl+9ClCl+lC9CCCEOAAA=","星":"12:AAf8QEf8QEf8RAf8hAf8BA/+AAA=","春":"12:AABAf8CAf8EA/+IIYMv6IIP4AAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","暖":"12:AAAO7ypUr+og7+pAp8qk8YDmAAA=","曲":"12:AAEQEQ/+kSkSkS/+kSkSkS/+AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","木":"12:AABABA/+FQFQFQJIJIREhCBAAAA=","未":"12:AABABAf8BABA/+FQFQJIxGBAAAA=","术":"12:AABIBEBA/+FQFQJIJIREhCBAAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","松":"12:AAIoIo9EJEKCYgcgpEJEKaLiAAA=","枚":"12:AAIgIg8+JEKkYkcoooIQIoLGAAA=","枝":"12:AAIIII9+IIIIZ+dCpCIkIYLmAAA=","树":"12:AAIELk8+KkKkZUdMqkKkMEIMAAA=","样":"12:AAJEIo/+IQIQZ8cQoQL+IQIQAAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","桩":"12:AAIIJ+9AJIJIZ+dIpIJIJIK+AAA=","楼":"12:AAKSJU/+I4JUaScgr+IkI4LGAAA=","模":"12:AAIoL+8oJ8JEZ8dEr+IQIoLGAAA=","樵":"12:AAIoJ+9IL+JIZ+dIp+IAKqKqAAA=","歇":"12:AAfQRQfeRifKIIfIpIVUdUDiAAA=","此":"12:AAEQEQESUUXYUQUQUQUSXS4OAAA=","武":"12:AAfUAS/+AQEQUQXQUIUKXG4CAAA=","段":"12:AAGcYUQUeURmeAQ+Qi+UQIR2AAA=","气":"12:AAQAf8gAf4AA/4AIAIAKAKAEAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","浮":"12:AAgMXwCihUT8AIAQX+QQgQhwAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","涌":"12:AAT8IoAQj+SSD+CST+SSiSiWAAA=","涎":"12:AAnCRcCEkEXWBUFUVUSelAk+AAA=","深":"12:AAn+UCAohEWCAQH+QQQ4hUmSAAA=","混":"12:AAn8UEH8kEX8AAESXcUQlSmOAAA=","游":"12:AAkQSQPekgUcHEFIV+VIlIrYAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","潮":"12:AAhOXqBKnuUqHqEuXqRKnqhWAAA=","火":"12:AABABAJEJERIBACgCgEQIIwGAAA=","灵":"12:AAf8AEP8AEf8BAJERICgMYwGAAA=","烫":"12:AAT8IQj+RKKSwmAAJERICg8eAAA=","熟":"12:AAEQ/QS8eUE0/UEqNCAAUkiSAAA=","爪":"12:AAA8fIRIRIRIRIRIRIREREhCAAA=","父":"12:AAEQIIQEoKIIEQCgBACgMYwGAAA=","物":"12:AAJApA9+qqIqMq5KJSKSIiJMAAA=","状":"12:AAIUISoQb+IQIoIoYopEJEKCAAA=","狐":"12:AAoOT0SUqUKUKUaUqUKkKq12AAA=","玉":"12:AA/+BABABABAf8BABIBEBA/+AAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","理":"12:AAD+6SSST+SS6ST+QQb+wQH+AAA=","由":"12:AABABA/+hChChC/+hChChC/+AAA=","甲":"12:AA/+hChC/+hChC/+BABABABAAAA=","留":"12:AAG+4SgSii9GAAf8REf8REf8AAA=","疼":"12:AAAgf+RAx4WIRw+ORgQYTAg8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","直":"12:AABAf8BAP4IIP4IIP4IIII/+AAA=","相":"12:AAJ+JC/CJ+JCdCbCp+JCJCJ+AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","真":"12:AABAf8BAP4IIP4IIII/+IIwGAAA=","眼":"12:AA78qEr86EqEr86SqUqI6kDCAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","砚":"12:AA98JEJURUdU1UVUUQUqdKCOAAA=","碑":"12:AA8gJ+JSR+dS1+UoVIX+cIAIAAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","程":"12:AAF85EJEJ88AL+YQd8oQIQL+AAA=","空":"12:AABA/+gCEQIIwGf8BABABA/+AAA=","章":"12:AABAf8EQ/+IIP4IIP4BA/+BAAAA=","竭":"12:AAj8SE78CEr8pAr+USaqj6AGAAA=","符":"12:AAQge+lIIAIIT+wISIRIQIQ4AAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","箱":"12:AAQge+lIAAI++iI+cia+oiI+AAA=","级":"12:AAT8REhEpIxORChi5UCIKU1iAAA=","纹":"12:AAIgIQT+lE5EJEQo8oAQMozGAAA=","练":"12:AAQgX+hAnw6QT+gQ5UBSKSwwAAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","绕":"12:AAQgQmj4okwaTmgA7+AoJK2OAAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","缚":"12:AAQUT+gQr+yST+iS4ED+JEwsAAA=","缠":"12:AAQQT+iqqqy+Sqi+6IC+KI1+AAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","羽":"12:AA++CCiiSSKKCCGGKKyyCCMMAAA=","老":"12:AACEfoCQCg/+CAME0YHgECD+AAA=","者":"12:AACCf0CICQ/+EAP8YEv8IEP8AAA=","聚":"12:AA/+SCeiSkeYykDCJIJIVUhCAAA=","股":"12:AA54pIpI5IuOoA78qEpIowrOAAA=","胜":"12:AA6QqQr86QsQoQ78oQoQoQr+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","荡":"12:AAEQ/+EQT8IIgQT+AqJKSSgmAAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","藤":"12:AAEQ/+ES9Ul+8on+9Uk6nUsyAAA=","虚":"12:AAB8BAf+RCR4XCR+RQVUTYv+AAA=","蜃":"12:AAf+QAf+UUVIWmX8UkX8Qkv6AAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","要":"12:AA/+Cgf8Skf8CA/+EIMQDg8eAAA=","见":"12:AAf8QEQERERERERECgCiEi4+AAA=","角":"12:AAIAPwQQ/8REf8REf8REREhMAAA=","让":"12:AAQQIQAQAQ4eIQIQIQKQMQL+AAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","诀":"12:AAggQgD8AkwkQkX+QgRQaIUGAAA=","话":"12:AAgMTwAQAQz+QQQQR8VEZER8AAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","请":"12:AAgQT8AQD8wQX+SET8WEb8SEAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","谢":"12:AAhETkC+DkykT0SsXkRkakVsAAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","起":"12:AAE8eEEEEE+8EgUiWiUesAj+AAA=","越":"12:AAEKe+EoEq+qEkUsW2UqsAj+AAA=","跑":"12:AA9Al+mC96JKJKt6pGpAtCw+AAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","跳":"12:AA8okomq9sIoIotsqqootKyOAAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","较":"12:AAIQ9+QApEqC9EJEMo4QIoLGAAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","逃":"12:AAhQVUDYBQzYVURQSSUeoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","邪":"12:AA/eSSSSiU/UKSKSSSSciQGQAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","金":"12:AABACgMYwGP4BABAf8JIFQ/+AAA=","铁":"12:AASQaQj86QUQQQ7+QQQoZEWCAAA=","铜":"12:AAT+aCi66CS6Sq6qSqS6aCSGAAA=","银":"12:AAT8aEj86ESET86SSUSIakTCAAA=","锁":"12:AASSZUgQ7+SCSS6SSSQoZESCAAA=","镇":"12:AAQQb+gQ58RER85ERET+ZESCAAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","问":"12:AAn+QCACnykSkSkSnygCgCgOAAA=","防":"12:AA4goQv+pAxAp8pEpE6EiEkYAAA=","阿":"12:AA7+oEoEr0yUqUqUr04EgEgcAAA=","除":"12:AA44pEuCp8wQoQr+oQ6UkSgwAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","雨":"12:AA/+BABA/+hCpSlKhCpSlKhCAAA=","需":"12:AAf8BA/+hCtaAA/+CA/+kSkWAAA=","青":"12:AABAf8BAf8BA/+IIP4IIP4IIAAA=","静":"12:AAIQ+cIk++IK/+SKe+SIeISYAAA=","面":"12:AA/+BACA/+kSnykSkSnykS/+AAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","风":"12:AAf8QEQUUUSkRERESkUUQGgCAAA=","飞":"12:AA/wASAUAYAUASAQAQAKAKAEAAA=","验":"12:AA4QIopEqCp88AGiNU1UEIb+AAA=","骗":"12:AA4QJ+pCp+pA9+FqNq1+FqaqAAA=","魅":"12:AAQI+cqI++qI+cKqVIXIUCn+AAA=","魍":"12:AAQ++iq2++qq++KqVuXiUAn+AAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","↑":"12:AABADgFQBABABABABABABABAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","「":"12:AAA8AgAgAgAgAgAgAgAAAAAAAAA=","」":"12:AAAAAAAACACACACACACACAeAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","七":"12:AACACACACODw+ACACACCCCB+AAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","丙":"12:AA/+BABA/+hCiikSoKgCgCgOAAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","丹":"12:AAP8IEJEIkIE/+IEIEQEQEgcAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","么":"12:AACACAEQEQIgQghACEEEIafiAAA=","乙":"12:AA/4AQAgBACAEAIAQAgCgCf+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","事":"12:AABA/+JIJIf8BE/+BEf8BAHAAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","井":"12:AAEQEQ/+EQEQEQ/+EQEQIQwQAAA=","亮":"12:AABA/+IIP4AA/+gCHwEQISweAAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","什":"12:AAEQEQIQIQb+oQIQIQIQIQIQAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","们":"12:AAKeJCQCSCyCSCSCSCSCSCSOAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","伤":"12:AAJAJ+SAUgwgT+QiQiRCRCSMAAA=","体":"12:AAIgIgX+QgxwSoSoUkb6QgQgAAA=","何":"12:AAL+IEQET0yUSUSUT0QEQEQcAAA=","作":"12:AAJAJAR+Sg0gQ+QgQgQ+QgQgAAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","佩":"12:AAP8MEX0VE30VUVUVUV0VGZCAAA=","信":"12:AAIgIQX+QAz8QAT8QAT8SET8AAA=","修":"12:AAJAJ8TIUw3OUQVkUYVkQYTgAAA=","倍":"12:AAIQL8QASExIX+QAT8SESET8AAA=","倒":"12:AAPyJKSKUq3aRKRKXyRCRyWOAAA=","傀":"12:AAJAP8UkX80kX8QoRURcSSUeAAA=","像":"12:AAJ4KIX+SSz+RwWaRsWaRqWYAAA=","儿":"12:AAEQEQEQEQEQEQEQIQISQSgeAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","光":"12:AABAREJIFQBA/+EQEQESISweAAA=","克":"12:AABA/+BAf8QEQEf8EQESISweAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","六":"12:AACABAAA/+AAAAIIIEQEQCgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","内":"12:AABABA/+hChCiikSoKgCgCgOAAA=","冷":"12:AAgQQoREGCAQAIT+QERIgwgMAAA=","凉":"12:AAgQX+QAD8CECET8QQSUkSgwAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","击":"12:AABABAf8BABA/+BAREREREf8AAA=","切":"12:AAT+QiQiciwiQiQiUiZCRCCMAAA=","利":"12:AADCcCESES/SESMSOSVCkCEOAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","制":"12:AAUCfqkKEK/qEK/qkqkiliEOAAA=","刻":"12:AAEC/qIKRK+KEKIqxKCCNCwuAAA=","前":"12:AAIIEQ/+AAfURUfURUfURETMAAA=","剑":"12:AAECKKRKgqfKAqoqVKVCDi8OAAA=","剥":"12:AAfCBKfKBK/qEKkqVKOCVCsuAAA=","剧":"12:AAfiQqQqfqSKfqSKfqYioivuAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","加":"12:AAIAIe/SJSJSJSJSJSRSRSmeAAA=","北":"12:AAEgEgEi8kE4EgEgMg0iEiEeAAA=","十":"12:AABABABABA/+BABABABABABAAAA=","升":"12:AADIcIEIEIEI/+EIEIEIIIwIAAA=","协":"12:AARARAX45IRITMVKRKSISIUwAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","南":"12:AABA/+BA/+kSiiv6hCv6hChOAAA=","印":"12:AAGA4+gigi+igigimi4uAgAgAAA=","原":"12:AAf+QgX8UEX8UEX8QgUkUipiAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","发":"12:AASQSIiA/+EAH4KIJQQgTYsGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","吗":"12:AAD84EpEpEpEp+oCoC76ACAcAAA=","否":"12:AA/+AgDANYxGBAAAf8QEQEf8AAA=","吧":"12:AAD+6SqSqSqSr+qAqA6CCCB+AAA=","听":"12:AAAM7wqAqAr+qIqIqI6ICIEIAAA=","吸":"12:AAD85EpEpIpOpCpipU6ICUFiAAA=","味":"12:AAAQ4Qr8oQoQv+oQo45UGSAQAAA=","呵":"12:AAH+4EoEr0qUqUqUr04EAEAcAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","咦":"12:AAAQ7+oQr+oSr+qQr+4SAoDGAAA=","品":"12:AAP4IIIIIIP4AA++iiiiii++AAA=","哎":"12:AABE7+pEoApEpEoooo4QAoDGAAA=","哥":"12:AA/+IkIkPkAE/+IkIkPkAEAcAAA=","哪":"12:AAHu6qqqvqqsqqvqqq6uEoJoAAA=","商":"12:AABA/+IIEQ/+kSoK32kSnygGAAA=","啦":"12:AACQ6Iv+qAqirSuSqS6UCEG+AAA=","嗯":"12:AAD+6Sr+qSqqrGr+og5UFKI6AAA=","器":"12:AAe8SkSke8BQ/+II++SkSke8AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","图":"12:AA/+iCjysSji8ejCgymChi/+AAA=","圈":"12:AA/+lSv6iC/+kSvq0mlikK/+AAA=","土":"12:AABABABABAf8BABABABABA/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","塔":"12:AAREX+RE44REW6QAb+yCCCD+AAA=","壁":"12:AAeIS+eUR+eIq+OIBAf8BA/+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","复":"12:AAQAf+oEP8IEP8CAH8cIDw8OAAA=","外":"12:AAIQIQOQSQSYqUESEQIQQQgQAAA=","夜":"12:AABA/+IgI8RESU1IQoQQRoWGAAA=","够":"12:AAIQPeRihUdIVwVeVidUBIGwAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","天":"12:AAf8BABABA/+BACgCgEQIIwGAAA=","夫":"12:AABABAf8BABA/+BACgEQIIwGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","如":"12:AAIAI++iSiSiiikiUiIiU+iAAAA=","妖":"12:AAIMJw8QUQUQX+kQUoIoVEiCAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","娃":"12:AAIQJ88QUQX+UAkQV8IQUQj+AAA=","婆":"12:AAQQL+iST8CkKYVk/+EIHw4OAAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","守":"12:AABA/+gCgSAQ/+AQIQEQAQBwAAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","宫":"12:AABA/+gCv6IIP4AAf8QEQEf8AAA=","害":"12:AABA/+hCv6BAf8BA/+QEQEf8AAA=","家":"12:AABA/+gCv6DAMkzoMwzoMmzAAAA=","寒":"12:AABA/+kSf8EQ/+EQLIw2HAAwAAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","封":"12:AAIE+EJ+IE+EAkIU+UIEOEwcAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","尸":"12:AAP+ICICICP+IAIAIAQAQAgAAAA=","层":"12:AAf+QCQCf+QAX8QAf+SAUEv6AAA=","屠":"12:AAf+QCf+RCX0RIf+SEX8aEj8AAA=","山":"12:AABABABAhChChChChChChC/+AAA=","岳":"12:AAAYPgIAP8IQIQ/+BAREREf8AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","师":"12:AAL+oQoQr+qSqSqSKSKWQQgQAAA=","常":"12:AAJI/+gCv6IIP4BAf8RERMBAAAA=","幅":"12:AAI+IA++qiq+qAq+qqu+IqI+AAA=","年":"12:AAIAP+QgggP8IgIg/+AgAgAgAAA=","幻":"12:AAJ+ICQCQCkC4CICSCSClC5MAAA=","序":"12:AAAgf+QAX8QIRQf+QiQkQgjgAAA=","底":"12:AAAgf+QEX4UQUQX+UQUIVKmmAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","弟":"12:AAIIEQf8BEf8RAf+DCNCxMBAAAA=","影":"12:AAfCREfIRAfCEE/oRAfCVEsoAAA=","往":"12:AAIgQQn+IQQQwQT8QQQQQQX+AAA=","待":"12:AAIQR8gQIQT+wET+REQkQEQcAAA=","很":"12:AAL8SEj8KESEz8SSSUSISkTCAAA=","得":"12:AAL8SEj8KET8wAX+QIX+SIRYAAA=","御":"12:AAKAXuhKJKXqxKVqVKVOVoWIAAA=","微":"12:AAKoaovuISXqwKXKVKVkVKYSAAA=","徵":"12:AAFIX+gKHyICXyxKX0RERKXyAAA=","心":"12:AACABAAgEgEAUEUCUCkKEID4AAA=","快":"12:AAIgIgr8skokokP+IgJQKIMGAAA=","态":"12:AABA/+CgEQKIxGAAVEUikKD4AAA=","怎":"12:AAIAP+SAj8CAD8CAVEUikKD4AAA=","怕":"12:AAIIIQp+tCpCpCJ+JCJCJCJ+AAA=","怪":"12:AAJ8JEoosQoorGIQJ8IQIQL+AAA=","您":"12:AAKAL+SC0QRUSSQwBAUkUKj6AAA=","情":"12:AAIQJ8oQt8oQr+JEJ8JEJ8JEAAA=","想":"12:AAI++iI+ciq+IiI+FAUkUKj6AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","戏":"12:AAAo8kEgk+XgUkIoIQUSUqhGAAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","我":"12:AAGU4SIQ/+IQIUOU4IIKIWYiAAA=","戴":"12:AAEUfSEQ/+VQfUVUfIKK/WSiAAA=","打":"12:AAJ+II8IIIIIMI4IIIIIII44AAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","抱":"12:AASAT88ET0SUaUz0SMSASCx+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挨":"12:AAQgRE76RAR8aQwQT+QoREyCAAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","掌":"12:AAJI/+gCP4IIf8BAf8BA/+BAAAA=","掩":"12:AAQgT85ISkX+akz8SkT8QiweAAA=","攻":"12:AAAg8gI+JEKkIkIoMowQAoDGAAA=","斗":"12:AAEQCQBQQQIQEQAeDw8QAQAQAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","早":"12:AAf8QEf8QEf8BABA/+BABABAAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","明":"12:AA9+lClCl+9ClCl+lC9CCCEOAAA=","星":"12:AAf8QEf8QEf8RAf8hAf8BA/+AAA=","春":"12:AABAf8CAf8EA/+IIYMv6IIP4AAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","暖":"12:AAAO7ypUr+og7+pAp8qk8YDmAAA=","曲":"12:AAEQEQ/+kSkSkS/+kSkSkS/+AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","木":"12:AABABA/+FQFQFQJIJIREhCBAAAA=","未":"12:AABABAf8BABA/+FQFQJIxGBAAAA=","术":"12:AABIBEBA/+FQFQJIJIREhCBAAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","松":"12:AAIoIo9EJEKCYgcgpEJEKaLiAAA=","枚":"12:AAIgIg8+JEKkYkcoooIQIoLGAAA=","枝":"12:AAIIII9+IIIIZ+dCpCIkIYLmAAA=","树":"12:AAIELk8+KkKkZUdMqkKkMEIMAAA=","样":"12:AAJEIo/+IQIQZ8cQoQL+IQIQAAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","桩":"12:AAIIJ+9AJIJIZ+dIpIJIJIK+AAA=","楼":"12:AAKSJU/+I4JUaScgr+IkI4LGAAA=","模":"12:AAIoL+8oJ8JEZ8dEr+IQIoLGAAA=","樵":"12:AAIoJ+9IL+JIZ+dIp+IAKqKqAAA=","歇":"12:AAfQRQfeRifKIIfIpIVUdUDiAAA=","此":"12:AAEQEQESUUXYUQUQUQUSXS4OAAA=","武":"12:AAfUAS/+AQEQUQXQUIUKXG4CAAA=","段":"12:AAGcYUQUeURmeAQ+Qi+UQIR2AAA=","气":"12:AAQAf8gAf4AA/4AIAIAKAKAEAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","浮":"12:AAgMXwCihUT8AIAQX+QQgQhwAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","涌":"12:AAT8IoAQj+SSD+CST+SSiSiWAAA=","涎":"12:AAnCRcCEkEXWBUFUVUSelAk+AAA=","深":"12:AAn+UCAohEWCAQH+QQQ4hUmSAAA=","混":"12:AAn8UEH8kEX8AAESXcUQlSmOAAA=","游":"12:AAkQSQPekgUcHEFIV+VIlIrYAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","潮":"12:AAhOXqBKnuUqHqEuXqRKnqhWAAA=","火":"12:AABABAJEJERIBACgCgEQIIwGAAA=","灵":"12:AAf8AEP8AEf8BAJERICgMYwGAAA=","烫":"12:AAT8IQj+RKKSwmAAJERICg8eAAA=","熟":"12:AAEQ/QS8eUE0/UEqNCAAUkiSAAA=","爪":"12:AAA8fIRIRIRIRIRIRIREREhCAAA=","父":"12:AAEQIIQEoKIIEQCgBACgMYwGAAA=","物":"12:AAJApA9+qqIqMq5KJSKSIiJMAAA=","状":"12:AAIUISoQb+IQIoIoYopEJEKCAAA=","狐":"12:AAoOT0SUqUKUKUaUqUKkKq12AAA=","玉":"12:AA/+BABABABAf8BABIBEBA/+AAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","理":"12:AAD+6SSST+SS6ST+QQb+wQH+AAA=","由":"12:AABABA/+hChChC/+hChChC/+AAA=","甲":"12:AA/+hChC/+hChC/+BABABABAAAA=","留":"12:AAG+4SgSii9GAAf8REf8REf8AAA=","疼":"12:AAAgf+RAx4WIRw+ORgQYTAg8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","直":"12:AABAf8BAP4IIP4IIP4IIII/+AAA=","相":"12:AAJ+JC/CJ+JCdCbCp+JCJCJ+AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","真":"12:AABAf8BAP4IIP4IIII/+IIwGAAA=","眼":"12:AA78qEr86EqEr86SqUqI6kDCAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","砚":"12:AA98JEJURUdU1UVUUQUqdKCOAAA=","确":"12:AA8gI8JET+dS1+VSV+VSdSCWAAA=","碑":"12:AA8gJ+JSR+dS1+UoVIX+cIAIAAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","程":"12:AAF85EJEJ88AL+YQd8oQIQL+AAA=","空":"12:AABA/+gCEQIIwGf8BABABA/+AAA=","章":"12:AABAf8EQ/+IIP4IIP4BA/+BAAAA=","竭":"12:AAj8SE78CEr8pAr+USaqj6AGAAA=","符":"12:AAQge+lIIAIIT+wISIRIQIQ4AAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","箱":"12:AAQge+lIAAI++iI+cia+oiI+AAA=","级":"12:AAT8REhEpIxORChi5UCIKU1iAAA=","纹":"12:AAIgIQT+lE5EJEQo8oAQMozGAAA=","练":"12:AAQgX+hAnw6QT+gQ5UBSKSwwAAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","绕":"12:AAQgQmj4okwaTmgA7+AoJK2OAAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","缚":"12:AAQUT+gQr+yST+iS4ED+JEwsAAA=","缠":"12:AAQQT+iqqqy+Sqi+6IC+KI1+AAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","羽":"12:AA++CCiiSSKKCCGGKKyyCCMMAAA=","老":"12:AACEfoCQCg/+CAME0YHgECD+AAA=","者":"12:AACCf0CICQ/+EAP8YEv8IEP8AAA=","聚":"12:AA/+SCeiSkeYykDCJIJIVUhCAAA=","股":"12:AA54pIpI5IuOoA78qEpIowrOAAA=","胜":"12:AA6QqQr86QsQoQ78oQoQoQr+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","荡":"12:AAEQ/+EQT8IIgQT+AqJKSSgmAAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","藤":"12:AAEQ/+ES9Ul+8on+9Uk6nUsyAAA=","虚":"12:AAB8BAf+RCR4XCR+RQVUTYv+AAA=","蜃":"12:AAf+QAf+UUVIWmX8UkX8Qkv6AAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","要":"12:AA/+Cgf8Skf8CA/+EIMQDg8eAAA=","见":"12:AAf8QEQERERERERECgCiEi4+AAA=","角":"12:AAIAPwQQ/8REf8REf8REREhMAAA=","让":"12:AAQQIQAQAQ4eIQIQIQKQMQL+AAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","诀":"12:AAggQgD8AkwkQkX+QgRQaIUGAAA=","话":"12:AAgMTwAQAQz+QQQQR8VEZER8AAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","请":"12:AAgQT8AQD8wQX+SET8WEb8SEAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","谢":"12:AAhETkC+DkykT0SsXkRkakVsAAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","起":"12:AAE8eEEEEE+8EgUiWiUesAj+AAA=","越":"12:AAEKe+EoEq+qEkUsW2UqsAj+AAA=","跑":"12:AA9Al+mC96JKJKt6pGpAtCw+AAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","跳":"12:AA8okomq9sIoIotsqqootKyOAAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","较":"12:AAIQ9+QApEqC9EJEMo4QIoLGAAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","逃":"12:AAhQVUDYBQzYVURQSSUeoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","通":"12:AAj8QoAQD+yST+SST+SSoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","邪":"12:AA/eSSSSiU/UKSKSSSSciQGQAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","金":"12:AABACgMYwGP4BABAf8JIFQ/+AAA=","铁":"12:AASQaQj86QUQQQ7+QQQoZEWCAAA=","铜":"12:AAT+aCi66CS6Sq6qSqS6aCSGAAA=","银":"12:AAT8aEj86ESET86SSUSIakTCAAA=","锁":"12:AASSZUgQ7+SCSS6SSSQoZESCAAA=","镇":"12:AAQQb+gQ58RER85ERET+ZESCAAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","问":"12:AAn+QCACnykSkSkSnygCgCgOAAA=","防":"12:AA4goQv+pAxAp8pEpE6EiEkYAAA=","阿":"12:AA7+oEoEr0yUqUqUr04EgEgcAAA=","除":"12:AA44pEuCp8wQoQr+oQ6UkSgwAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","雨":"12:AA/+BABA/+hCpSlKhCpSlKhCAAA=","需":"12:AAf8BA/+hCtaAA/+CA/+kSkWAAA=","青":"12:AABAf8BAf8BA/+IIP4IIP4IIAAA=","静":"12:AAIQ+cIk++IK/+SKe+SIeISYAAA=","面":"12:AA/+BACA/+kSnykSkSnykS/+AAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","风":"12:AAf8QEQUUUSkRERESkUUQGgCAAA=","飞":"12:AA/wASAUAYAUASAQAQAKAKAEAAA=","验":"12:AA4QIopEqCp88AGiNU1UEIb+AAA=","骗":"12:AA4QJ+pCp+pA9+FqNq1+FqaqAAA=","魅":"12:AAQI+cqI++qI+cKqVIXIUCn+AAA=","魍":"12:AAQ++iq2++qq++KqVuXiUAn+AAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
 </script>
 <script data-src="src/art.js">
 /* Sprites: rows of "0123." (ink, dark, mid, paper, clear). Characters are 16 pixels tall:
@@ -5069,13 +5192,557 @@ var ANIM = (function () {
   return { intro: intro, bossIntro: bossIntro, weak: weak, down: down, hero: hero, enemy: enemy, victory: victory, defeat: defeat, SPELL: SPELL };
 })();
 </script>
+<script data-src="src/frame.js">
+/* The shrine around the 160 x 144 3D window.
+   The game keeps its own canvas and its own whole-pixel contain layout; this file paints a full-stage
+   background canvas behind it, so the window sits in a carved cabinet instead of on bare paper. Every
+   frame pixel is scenery on the same four tones; the frame canvas takes no pointer events, so a tap on
+   the wood or the stone never reaches the game and the game's own taps stay world-relative.
+
+   The piece is an architecture, not a border: a tiled roof and a gold plaque over the window, a dark
+   lacquer wall with a lattice transom and hanging lanterns on the tall top panels, pillars with ofuda on
+   the sides, and a stone terrace with steps, a censer and stone lanterns below. A tall stage grows the
+   top and bottom panels; a short or wide one grows the pillars and keeps a compact name board. When a
+   margin is too thin for the detail, it keeps only its beams. */
+var ZTFrame = (function () {
+  "use strict";
+
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  /* the view wrapper is inset from the stage on every side, so even a wide stage keeps its side posts.
+     The wrapper is what lo-game measures; the canvas centres in it as it always has. */
+  var INSET = 4;
+  /* the title screen has its own 镇妖塔·序章 window: the frame's board turns blank there, so the two
+     names never read as one doubled title. Every other scene keeps the shrine's name. */
+  var titleMode = true, repaint = null;
+
+  /* the 12 x 12 lopix blocks of 镇妖塔, copied from the app's font (first row is the font's blank top).
+     The plaque is the one piece of text on the frame: the title of the shrine. */
+  var GLYPHS = {
+    "镇": [".#.....#....", ".##.#######.", "#......#....", "###..#####..", ".#...#...#..", ".#...#####..",
+      "###..#...#..", ".#...#...#..", ".#..#######.", ".##..#...#..", ".#..#.....#."],
+    "妖": ["..#.....##..", "..#..###....", "####...#....", ".#.#...#....", ".#.#...#....", ".#.########.",
+      "#..#...#....", ".#.#..#.#...", "..#...#.#...", ".#.#.#...#..", "#...#.....#."],
+    "塔": [".#...#...#..", ".#.########.", ".#...#...#..", "###...###...", ".#...#...#..", ".#.##.###.#.",
+      ".#..........", ".##.#######.", "##..#.....#.", "....#.....#.", "....#######."]
+  };
+
+  /* ---------------- pixels ---------------- */
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function put(buf, w, h, x, y, c) {
+    x = Math.round(x); y = Math.round(y);
+    if (x >= 0 && y >= 0 && x < w && y < h) buf[y * w + x] = c;
+  }
+  function rect(buf, w, h, x, y, ww, hh, c) {
+    var x0 = Math.max(0, Math.round(x)), y0 = Math.max(0, Math.round(y));
+    var x1 = Math.min(w, Math.round(x + ww)), y1 = Math.min(h, Math.round(y + hh));
+    for (var yy = y0; yy < y1; yy++) buf.fill(c, yy * w + x0, yy * w + Math.max(x0, x1));
+  }
+  function disc(buf, w, h, cx, cy, r, c, filled) {
+    for (var y = -r; y <= r; y++) {
+      var span = Math.round(Math.sqrt(r * r + r - y * y));
+      if (filled) rect(buf, w, h, cx - span, cy + y, span * 2 + 1, 1, c);
+      else { put(buf, w, h, cx - span, cy + y, c); put(buf, w, h, cx + span, cy + y, c); }
+    }
+    if (!filled) for (var x = -r; x <= r; x++) {
+      var s2 = Math.round(Math.sqrt(r * r + r - x * x));
+      put(buf, w, h, cx + x, cy - s2, c); put(buf, w, h, cx + x, cy + s2, c);
+    }
+  }
+  /* a deterministic grain: the same stage size always paints the same wood and stone */
+  function rng(seed) {
+    var s = (seed >>> 0) || 0x9e3779b9;
+    return function () {
+      s ^= s << 13; s >>>= 0; s ^= s >>> 17; s ^= s << 5; s >>>= 0;
+      return s / 4294967296;
+    };
+  }
+  /* a fleck of grain, one art pixel: never enough to read as a colour of its own */
+  function grain(buf, w, h, x0, y0, x1, y1, u, rand, c, n) {
+    for (var i = 0; i < n; i++) {
+      var x = x0 + Math.floor(rand() * Math.max(1, (x1 - x0) / u)) * u;
+      var y = y0 + Math.floor(rand() * Math.max(1, (y1 - y0) / u)) * u;
+      rect(buf, w, h, x, y, Math.max(1, Math.round(u / 2)), Math.max(1, Math.round(u / 2)), c);
+    }
+  }
+
+  /* ---------------- the view ---------------- */
+  /* The same rectangle lo-game's contain fit gives its canvas inside the inset wrapper, for a pure test
+     and for the first paint. The live painter measures the canvas instead. */
+  function viewRect(stageW, stageH, dpr) {
+    var wW = Math.max(1, stageW - INSET * 2), wH = Math.max(1, stageH - INSET * 2);
+    var c = typeof LoGame !== "undefined" ? LoGame.containLayout(wW, wH, 160, 144, dpr || 1)
+      : (function () {
+        var k = Math.floor(Math.min(wW / 160, wH / 144) * (dpr || 1)) / (dpr || 1);
+        if (k < Math.min(wW / 160, wH / 144) * 0.9) k = Math.min(wW / 160, wH / 144);
+        k = Math.max(0.5, k);
+        return { w: Math.round(160 * k), h: Math.round(144 * k), k: k };
+      })();
+    return { x: INSET + (wW - c.w) / 2, y: INSET + (wH - c.h) / 2, w: c.w, h: c.h, k: c.k, inset: INSET };
+  }
+
+  /* ---------------- the pieces ---------------- */
+  /* a tiled roof band, its ridge at the stage's edge and its eave above the wall */
+  function roof(buf, w, h, bottom, u, rand) {
+    var ridge = Math.max(1, Math.round(u / 2)), rowH = Math.max(2, u), lip = Math.max(2, u);
+    rect(buf, w, h, 0, 0, w, ridge, PAPER);
+    rect(buf, w, h, 0, ridge, w, Math.max(1, u), DARK);
+    rect(buf, w, h, 0, ridge + Math.max(1, u), w, Math.max(1, Math.round(u / 2)), INK);
+    var y0 = ridge + Math.max(1, u) + Math.max(1, Math.round(u / 2));
+    var rows = Math.max(0, Math.min(4, Math.floor((bottom - lip - y0) / rowH)));
+    for (var r = 0; r < rows; r++) {
+      var y = y0 + r * rowH, off = r % 2 ? Math.round(u * 1.5) : 0;
+      for (var x = -off; x < w; x += Math.round(u * 3)) {
+        rect(buf, w, h, x, y, Math.round(u * 1.5), rowH, DARK);
+        rect(buf, w, h, x + Math.round(u * 1.5), y, Math.round(u * 1.5), rowH, INK);
+        var g = y + Math.max(1, Math.round(u / 2));
+        if (g < y + rowH) rect(buf, w, h, x + u, g, Math.max(1, Math.round(u / 2)), Math.max(1, Math.round(u / 2)), MID);
+      }
+    }
+    /* the eave lip: a dark board with lit rafter ends, and a bracket turned up at each end */
+    var ey = bottom - lip;
+    rect(buf, w, h, 0, ey, w, lip, DARK);
+    rect(buf, w, h, 0, ey, w, Math.max(1, Math.round(u / 2)), INK);
+    for (var x2 = Math.round(u); x2 < w - u; x2 += Math.round(u * 3)) {
+      rect(buf, w, h, x2, ey + Math.max(1, Math.round(u / 2)), Math.max(1, Math.round(u / 2)), Math.max(1, Math.round(lip / 2)), MID);
+    }
+    rect(buf, w, h, 0, ey - Math.max(1, Math.round(u / 2)), Math.round(u * 2), Math.max(1, Math.round(u / 2)), MID);
+    rect(buf, w, h, w - Math.round(u * 2), ey - Math.max(1, Math.round(u / 2)), Math.round(u * 2), Math.max(1, Math.round(u / 2)), MID);
+    rect(buf, w, h, 0, ey - Math.round(u * 1.5), Math.max(1, Math.round(u / 2)), Math.round(u * 1.5), DARK);
+    rect(buf, w, h, w - Math.max(1, Math.round(u / 2)), ey - Math.round(u * 1.5), Math.max(1, Math.round(u / 2)), Math.round(u * 1.5), DARK);
+    grain(buf, w, h, 0, 0, w, bottom, u, rand, DARK, Math.round(w / (u * 14)));
+  }
+
+  /* the shrine's name board: a gold rim, an ink lacquer field and the old characters; with `plain`,
+     the title screen's board carries a brass coin instead of the name */
+  function plaque(buf, w, h, cx, bottom, u, scale, tight, plain) {
+    var glyphW = 12 * scale, gap = tight ? 0 : scale, pad = tight ? 1 : 3 * scale;
+    var rim = tight ? 1 : Math.max(1, Math.round(u * 0.8));
+    var pw = glyphW * 3 + gap * 2 + pad * 2, ph = glyphW + pad * 2;
+    var x = Math.round(cx - pw / 2), y = Math.round(bottom - ph);
+    if (x < 1 || x + pw > w - 1 || y < 1) return null;
+    rect(buf, w, h, x, y, pw, ph, PAPER);
+    rect(buf, w, h, x + rim, y + rim, pw - rim * 2, ph - rim * 2, INK);
+    rect(buf, w, h, x + rim * 2, y + rim * 2, pw - rim * 4, Math.max(1, Math.round(rim / 2)), MID);
+    if (plain) {
+      var r = Math.max(2, Math.min(Math.round(ph / 2) - 2, Math.round(4.5 * scale)));
+      var cy = y + Math.round(ph / 2), hole = Math.max(2, Math.round(r * 0.9));
+      disc(buf, w, h, cx, cy, r, MID, true);
+      disc(buf, w, h, cx, cy, r, DARK, false);
+      rect(buf, w, h, cx - hole / 2, cy - hole / 2, hole, hole, INK);
+      put(buf, w, h, cx, cy - r, PAPER); put(buf, w, h, cx, cy + r, PAPER);
+      put(buf, w, h, cx - r, cy, PAPER); put(buf, w, h, cx + r, cy, PAPER);
+    } else {
+      for (var k = 0; k < 3; k++) {
+        var gx = x + pad + k * (glyphW + gap), gy = y + pad;
+        var rows = GLYPHS[["镇", "妖", "塔"][k]];
+        for (var r2 = 0; r2 < rows.length; r2++) for (var c = 0; c < rows[r2].length; c++) {
+          if (rows[r2][c] === "#") rect(buf, w, h, gx + c * scale, gy + r2 * scale, scale, scale, PAPER);
+        }
+      }
+    }
+    return { x0: x, y0: y, x1: x + pw, y1: y + ph };
+  }
+
+  /* a paper ofuda strip: ink hooks and a seal, never a blank piece of paper */
+  function ofuda(buf, w, h, cx, top, u, len) {
+    var ww = Math.max(2, u * 2), hh = Math.max(u * 4, len);
+    var x = Math.round(cx - ww / 2), y = Math.round(top);
+    rect(buf, w, h, x, y, ww, hh, PAPER);
+    rect(buf, w, h, x, y, ww, Math.max(1, Math.round(u / 2)), INK);
+    for (var k = 1; k * u < hh - u; k += 2) {
+      var ww2 = Math.max(1, Math.round(u * (k % 4 === 1 ? 1.1 : 0.6)));
+      rect(buf, w, h, x + Math.max(1, Math.round((ww - ww2) / 2)), y + k * u, ww2, Math.max(1, Math.round(u / 2)), INK);
+    }
+    rect(buf, w, h, x + Math.max(1, Math.round((ww - u) / 2)), y + hh - u * 2, Math.max(1, u), Math.max(1, u), DARK);
+  }
+
+  /* a hanging lantern: a cord from the eave, a dark cap, a lit paper body, a tassel and a halo */
+  function lantern(buf, w, h, cx, top, bottom, u) {
+    var bh = Math.max(u * 4, Math.round(u * 6)), bw = Math.max(u * 2, Math.round(u * 3));
+    var y = Math.round(bottom - bh);
+    if (y <= top + u) return;
+    rect(buf, w, h, cx - Math.max(1, Math.round(u / 2)), top, Math.max(1, Math.round(u / 2)), y - top, DARK);
+    /* a thin halo down each side, in the checker of the dither rather than a fifth colour */
+    for (var yy = y - u; yy <= y + bh; yy += Math.max(1, Math.round(u / 2))) {
+      put(buf, w, h, cx - Math.round(bw / 2) - u, yy, MID);
+      put(buf, w, h, cx + Math.round(bw / 2) + u, yy, MID);
+    }
+    rect(buf, w, h, cx - Math.round(bw / 2), y, bw, bh, PAPER);
+    rect(buf, w, h, cx - Math.round(bw / 2), y, Math.max(1, Math.round(bw / 3)), bh, MID);
+    for (var k = 1; k < 4; k++) {
+      var lx = cx - Math.round(bw / 2) + Math.round(bw * k / 4);
+      rect(buf, w, h, lx, y + Math.max(1, Math.round(u / 2)), Math.max(1, Math.round(u / 2)), bh - u, INK);
+    }
+    rect(buf, w, h, cx - Math.round(bw / 2) - u / 2, y - Math.max(1, Math.round(u / 2)), bw + u, Math.max(1, Math.round(u / 2)), INK);
+    rect(buf, w, h, cx - Math.round(bw / 2) - u / 2, y + bh, bw + u, Math.max(1, Math.round(u / 2)), INK);
+    rect(buf, w, h, cx - Math.max(1, Math.round(u / 2)), y + bh + Math.round(u / 2), Math.max(1, u), u, DARK);
+    for (var t = 0; t < 3; t++) rect(buf, w, h, cx - u / 2 - t * u / 2, y + bh + u * 1.5 + t * u, u + t * u, Math.max(1, Math.round(u / 2)), INK);
+  }
+
+  /* a stone lantern on the terrace: base, shaft, a lit box, a roof cap and a finial */
+  function stoneLamp(buf, w, h, cx, baseY, u, s) {
+    s = s || 1;
+    var x = Math.round(cx), bw = Math.max(3, u * 3 * s), bh = Math.max(2, u * 2 * s), top = baseY - u * 8 * s;
+    rect(buf, w, h, x - bw / 2, baseY - u * s, bw, u * s, DARK);
+    rect(buf, w, h, x - Math.max(1, u / 2), top + u * 4 * s, Math.max(1, u * s), baseY - top - u * 4 * s, DARK);
+    rect(buf, w, h, x - Math.max(1, u / 2), top + u * 4 * s, Math.max(1, Math.round(u / 2)), baseY - top - u * 4 * s, MID);
+    rect(buf, w, h, x - bw / 2, top + u * 2 * s, bw, bh, DARK);
+    rect(buf, w, h, x - bw / 2 + Math.max(1, u / 2), top + u * 2 * s + Math.max(1, u / 2), bw - u, bh - u, PAPER);
+    rect(buf, w, h, x - Math.max(1, u / 2), top + u * 2 * s + Math.max(1, u / 2), Math.max(1, u / 2), bh - u, MID);
+    rect(buf, w, h, x - bw, top + u * 2 * s, bw * 2, Math.max(1, Math.round(u / 2)), INK);
+    rect(buf, w, h, x - bw, top + u * 2 * s - Math.max(1, Math.round(u / 2)), bw * 2, Math.max(1, Math.round(u / 2)), DARK);
+    rect(buf, w, h, x - Math.max(1, Math.round(u / 2)), top, Math.max(1, u * s), Math.max(1, Math.round(u / 2)), MID);
+  }
+
+  /* a framed lattice panel: small windows, not a graph over the whole wall */
+  function latticePanel(buf, w, h, x0, y0, x1, y1, u, rand) {
+    if (x1 - x0 < u * 3 || y1 - y0 < u * 3) return;
+    rect(buf, w, h, x0, y0, x1 - x0, y1 - y0, INK);
+    rect(buf, w, h, x0 + u, y0 + u, x1 - x0 - u * 2, y1 - y0 - u * 2, DARK);
+    var cols = Math.max(2, Math.round((x1 - x0) / (u * 5))), rows = Math.max(2, Math.round((y1 - y0) / (u * 5)));
+    var cw = (x1 - x0) / cols, rh = (y1 - y0) / rows;
+    for (var c = 1; c < cols; c++) rect(buf, w, h, x0 + c * cw, y0, Math.max(1, Math.round(u / 2)), y1 - y0, MID);
+    for (var r = 1; r < rows; r++) rect(buf, w, h, x0, y0 + r * rh, x1 - x0, Math.max(1, Math.round(u / 2)), MID);
+    for (var rr = 0; rr < rows; rr++) for (var cc = 0; cc < cols; cc++) {
+      if ((rr + cc) % 3 === 0) {
+        var cx = x0 + (cc + 0.5) * cw, cy = y0 + (rr + 0.5) * rh;
+        rect(buf, w, h, cx - u, cy, u * 2, Math.max(1, Math.round(u / 2)), INK);
+      }
+    }
+    grain(buf, w, h, x0, y0, x1, y1, u, rand, MID, 2);
+  }
+
+  function topPanel(buf, w, h, x0, y0, x1, u, rand, plain) {
+    var t = y0;
+    if (t < 3) return;
+    /* a short stage keeps a compact name board: the lintel and the shrine's title, no more */
+    var compact = t < Math.round(u * 12);
+    var beam = compact ? clamp(Math.round(u / 2), 1, Math.max(1, Math.floor(t * 0.2)))
+      : clamp(Math.round(u * 2), 1, Math.max(1, Math.floor(t * 0.25)));
+    var lintel = y0 - beam;
+    /* the lintel over the window, with a lit edge and rafter blocks */
+    rect(buf, w, h, 0, lintel, w, beam, DARK);
+    rect(buf, w, h, 0, lintel, w, Math.max(1, Math.round(u / 2)), PAPER);
+    rect(buf, w, h, 0, lintel + Math.max(1, Math.round(u / 2)), w, Math.max(1, Math.round(u / 2)), INK);
+    for (var bx = Math.round(u * 2); bx < w - u; bx += Math.round(u * 6)) {
+      rect(buf, w, h, bx, lintel + u, Math.max(1, u), Math.max(1, Math.round(u / 2)), MID);
+    }
+
+    if (compact) {
+      rect(buf, w, h, 0, 0, w, Math.max(1, Math.round(u / 2)), PAPER);
+      if (lintel - 14 >= 1) plaque(buf, w, h, (x0 + x1) / 2, lintel, u, 1, true, plain);
+      rect(buf, w, h, 0, 0, Math.max(1, u), Math.max(1, u), MID);
+      rect(buf, w, h, w - Math.max(1, u), 0, Math.max(1, u), Math.max(1, u), MID);
+      return;
+    }
+
+    var roofH = clamp(Math.round(t * 0.28), Math.round(u * 3), Math.round(u * 10));
+    roof(buf, w, h, roofH, u, rand);
+    var wallTop = roofH, wallBot = lintel;
+    if (wallBot - wallTop < u * 4) return;
+    rect(buf, w, h, 0, wallTop, w, wallBot - wallTop, DARK);
+    /* broad wall boards, not a grid: a shadow groove every few art pixels */
+    for (var gx = x0 + u * 7; gx < x1 - u * 4; gx += u * 13) {
+      rect(buf, w, h, gx, wallTop, Math.max(1, Math.round(u / 2)), wallBot - wallTop, INK);
+      rect(buf, w, h, gx + Math.max(1, Math.round(u / 2)), wallTop, Math.max(1, Math.round(u / 2)), wallBot - wallTop, MID);
+    }
+    grain(buf, w, h, 0, wallTop, w, wallBot, u, rand, INK, Math.round(w / (u * 10)));
+
+    /* the plaque sits just above the lintel */
+    var s = clamp(Math.floor((wallBot - wallTop - u * 4) / 18), 1, 3), mark = null;
+    while (s >= 1) {
+      if (wallBot - u * 2 - 18 * s >= wallTop + u * 2) {
+        mark = plaque(buf, w, h, (x0 + x1) / 2, wallBot - u * 2, u, s, false, plain);
+        if (mark) break;
+      }
+      s--;
+    }
+    /* a wall too shallow for the padded board still carries the tight one */
+    if (!mark && wallBot - u - 14 >= wallTop) mark = plaque(buf, w, h, (x0 + x1) / 2, wallBot - u, u, 1, true, plain);
+    if (!mark) mark = plaque(buf, w, h, (x0 + x1) / 2, lintel, u, 1, true, plain);
+    var pw = mark ? mark.x1 - mark.x0 : Math.round((x1 - x0) * 0.5);
+    var leftPost = (x0 + x1) / 2 - pw / 2 - u * 3;
+    var rightPost = (x0 + x1) / 2 + pw / 2 + u * 3;
+    /* two dark posts frame the name board */
+    [leftPost, rightPost].forEach(function (px) {
+      if (px < x0 + u * 2 || px > x1 - u * 2) return;
+      rect(buf, w, h, px - Math.max(1, Math.round(u / 2)), wallTop, Math.max(1, Math.round(u / 2)), wallBot - wallTop, INK);
+      rect(buf, w, h, px, wallTop, Math.max(1, u), wallBot - wallTop, DARK);
+      rect(buf, w, h, px + Math.max(1, u), wallTop, Math.max(1, Math.round(u / 2)), wallBot - wallTop, MID);
+      rect(buf, w, h, px - u, wallTop, u * 3, Math.max(1, Math.round(u / 2)), INK);
+      rect(buf, w, h, px - u, wallBot - Math.max(1, Math.round(u / 2)), u * 3, Math.max(1, Math.round(u / 2)), INK);
+    });
+
+    /* the transom: one row of small windows under the eaves, only where a storey has room for it */
+    var th = wallBot - wallTop > u * 12 ? Math.min(u * 3, wallBot - wallTop - u * 4) : 0;
+    if (th >= u * 2) latticePanel(buf, w, h, leftPost + u * 2, wallTop + u, Math.max(leftPost + u * 3, rightPost - u * 2), wallTop + u + th, u, rand);
+
+    /* one tall lattice window over the plaque when the wall is deep enough to have a storey */
+    if (mark && mark.y0 - (wallTop + th + u * 2) > u * 5) {
+      var lw = Math.min(pw, (rightPost - leftPost) - u * 4);
+      latticePanel(buf, w, h, (x0 + x1) / 2 - lw / 2, wallTop + th + u * 2, (x0 + x1) / 2 + lw / 2, mark.y0 - u * 2, u, rand);
+    }
+
+    /* lanterns hang in the outer bays, their cords from the transom */
+    var hangTop = wallTop + th + u * 2;
+    var bodyBottom = wallBot - u;
+    if (bodyBottom - hangTop > u * 5) {
+      var lx = leftPost - u * 6, rx = rightPost + u * 6;
+      if (lx > x0 + u * 2) lantern(buf, w, h, lx, hangTop, bodyBottom, u);
+      if (rx < x1 - u * 2) lantern(buf, w, h, rx, hangTop, bodyBottom, u);
+      /* ofuda on the outer wall, outside the lanterns */
+      if (lx - u * 4 > x0 + u * 2) ofuda(buf, w, h, x0 + u * 4, hangTop, u, Math.min(u * 10, bodyBottom - hangTop - u));
+      if (rx + u * 4 < x1 - u * 2) ofuda(buf, w, h, x1 - u * 4, hangTop, u, Math.min(u * 10, bodyBottom - hangTop - u));
+    } else if (mark) {
+      /* on a short wall, the talismans flank the board instead */
+      if (mark.x0 - u * 4 > x0 + u * 2) ofuda(buf, w, h, mark.x0 - u * 3, wallTop + u, u, Math.min(u * 7, wallBot - wallTop - u * 2));
+      if (mark.x1 + u * 4 < x1 - u * 2) ofuda(buf, w, h, mark.x1 + u * 3, wallTop + u, u, Math.min(u * 7, wallBot - wallTop - u * 2));
+    }
+  }
+
+  function bottomPanel(buf, w, h, y1, u, rand) {
+    var b = h - y1;
+    if (b < 1) return;
+    /* the sill: a bright edge, a dark course, then the stone */
+    rect(buf, w, h, 0, y1, w, Math.max(1, Math.round(u / 2)), PAPER);
+    rect(buf, w, h, 0, y1 + Math.max(1, Math.round(u / 2)), w, Math.max(1, u), DARK);
+    rect(buf, w, h, 0, y1 + Math.max(1, Math.round(u * 1.5)), w, Math.max(1, Math.round(u / 2)), INK);
+
+    var top = y1 + Math.round(u * 2);
+    if (top >= h) return;
+    var depth = h - top;
+    rect(buf, w, h, 0, top, w, depth, DARK);
+    /* large stones: fewer courses as the terrace deepens, so it reads as masonry and not as stripes */
+    var course = clamp(Math.round(b * 0.14), Math.round(u * 3), Math.round(u * 8));
+    var block = clamp(Math.round(w * 0.1), Math.round(u * 10), Math.round(u * 22));
+    for (var y = top, r = 0; y < h; y += course, r++) {
+      rect(buf, w, h, 0, y, w, Math.max(1, Math.round(u / 2)), MID);
+      rect(buf, w, h, 0, y + Math.max(1, Math.round(u / 2)), w, Math.max(1, Math.round(u / 2)), INK);
+      var off = r % 2 ? Math.round(block / 2) : 0;
+      for (var x = -off; x < w; x += block) {
+        rect(buf, w, h, x, y, Math.max(1, Math.round(u / 2)), course, INK);
+        if (rand() < 0.5) rect(buf, w, h, x + Math.round(u * 2), y + Math.round(course / 2), Math.max(1, u), Math.max(1, Math.round(u / 2)), MID);
+      }
+    }
+    grain(buf, w, h, 0, top, w, h, u, rand, PAPER, Math.round(w / (u * 22)));
+
+    var deep = depth >= u * 6;
+    var steps = deep ? clamp(Math.floor(depth / (u * 5)), 2, 6) : 0;
+    var stepH = steps ? Math.max(2, Math.floor(depth * 0.42 / steps)) : 0;
+    /* the stair: wide at the bottom, rising to the window, its treads lit against the dark stone */
+    if (deep) {
+      var sw = Math.min(Math.round(w * 0.5), u * 28);
+      for (var s = 0; s < steps; s++) {
+        var yy = h - (s + 1) * stepH, bw = sw - s * u * 2;
+        if (bw < u * 4) break;
+        var sx = Math.round((w - bw) / 2);
+        rect(buf, w, h, sx, yy, bw, stepH, INK);
+        rect(buf, w, h, sx, yy, bw, Math.max(1, Math.round(u / 2)), MID);
+        rect(buf, w, h, sx, yy, Math.max(1, Math.round(u / 2)), stepH, DARK);
+        rect(buf, w, h, sx + bw - Math.max(1, Math.round(u / 2)), yy, Math.max(1, Math.round(u / 2)), stepH, DARK);
+        /* a pale nosing, a step's wear */
+        if (rand() < 0.45) rect(buf, w, h, sx + u * 2, yy + Math.max(1, Math.round(u / 2)), Math.max(1, u), Math.max(1, Math.round(u / 2)), PAPER);
+      }
+    }
+    /* the censer on the terrace, clear under the window and over the stair */
+    if (depth >= u * 6) {
+      var cw = clamp(Math.round(depth * 0.2), u * 8, u * 20), chh = Math.max(u * 4, Math.round(cw * 0.55));
+      var cy = clamp(y1 + depth * 0.22, top + u, Math.max(top + u, h - steps * stepH - chh - u * 2));
+      if (cy + chh + u * 2 <= h) {
+        /* a bowl with two ears, three feet and a live ember */
+        rect(buf, w, h, w / 2 - cw / 2, cy, cw, chh, MID);
+        rect(buf, w, h, w / 2 - cw / 2, cy, cw, Math.max(1, Math.round(u / 2)), INK);
+        /* the belly falls dark, with a lit rim and three studs so it is not a blank pale box */
+        rect(buf, w, h, w / 2 - cw / 2, cy + Math.round(chh * 0.55), cw, chh - Math.round(chh * 0.55), DARK);
+        rect(buf, w, h, w / 2 + cw / 2 - Math.max(2, u * 2), cy + u, Math.max(2, u * 2), chh - u, INK);
+        rect(buf, w, h, w / 2 - cw / 2 + Math.max(1, u / 2), cy + u, Math.max(1, u), chh - u * 2, MID);
+        rect(buf, w, h, w / 2 - cw / 2, cy + Math.round(chh * 0.5), cw, Math.max(1, Math.round(u / 2)), INK);
+        for (var k2 = -1; k2 <= 1; k2++) {
+          rect(buf, w, h, w / 2 + k2 * u * 3, cy + u, Math.max(1, u), Math.max(1, u), INK);
+          rect(buf, w, h, w / 2 + k2 * u * 3, cy + u + Math.max(1, u), Math.max(1, u), Math.max(1, Math.round(u / 2)), DARK);
+        }
+        rect(buf, w, h, w / 2 - cw / 2, cy + chh - u, cw, u, DARK);
+        rect(buf, w, h, w / 2 - cw / 2 - u, cy + u, u * 2, Math.max(1, Math.round(u / 2)), MID);
+        rect(buf, w, h, w / 2 + cw / 2 - u, cy + u, u * 2, Math.max(1, Math.round(u / 2)), MID);
+        rect(buf, w, h, w / 2 - cw / 4, cy + chh, Math.max(1, u), u * 2, DARK);
+        rect(buf, w, h, w / 2 + cw / 4 - u, cy + chh, Math.max(1, u), u * 2, DARK);
+        rect(buf, w, h, w / 2 - u, cy + u, u * 2, Math.max(1, Math.round(u / 2)), PAPER);
+        for (var k = 0; k < 5; k++) put(buf, w, h, w / 2 + (k % 2 ? -1 : 1) * u * (1 + k), cy + u * 2 - k * u, MID);
+        for (var m = 0; m < 4; m++) put(buf, w, h, w / 2 + (m % 2 ? -1 : 1) * u * (1 + m % 2), cy - u * (2 + m), MID);
+      }
+    }
+    /* two stone lanterns stand on the terrace when there is room */
+    if (depth >= u * 14) {
+      var ls = clamp(Math.round(depth / (u * 14)), 1, 3);
+      stoneLamp(buf, w, h, w * 0.24, h - u, u, ls);
+      stoneLamp(buf, w, h, w * 0.76, h - u, u, ls);
+    }
+  }
+
+  function sidePanel(buf, w, h, x0, x1, y0, y1, u, rand, left) {
+    var sw = x1 - x0;
+    if (sw < 1) return;
+    rect(buf, w, h, x0, 0, sw, h, INK);
+    var inset = Math.max(1, Math.round(u / 2));
+    rect(buf, w, h, x0 + inset, 0, Math.max(1, sw - inset * 2), h, DARK);
+    if (sw >= u * 2) rect(buf, w, h, left ? x1 - inset : x0, 0, inset, h, MID);
+    if (sw >= u * 3) {
+      var cx = x0 + Math.round(sw / 2);
+      rect(buf, w, h, cx - Math.max(1, Math.round(u / 2)), 0, Math.max(1, u), h, INK);
+      rect(buf, w, h, cx, 0, Math.max(1, Math.round(u / 2)), h, MID);
+      /* carved diamonds down the post */
+      for (var y = y0 + u * 4; y < y1 - u * 4; y += u * 12) {
+        var r = Math.max(1, Math.round(u * 1.2));
+        for (var k = 0; k <= r; k++) {
+          put(buf, w, h, cx - k, y, MID); put(buf, w, h, cx + k, y, MID);
+          put(buf, w, h, cx, y - k, MID); put(buf, w, h, cx, y + k, MID);
+        }
+        rect(buf, w, h, cx - Math.max(1, Math.round(u / 2)), y - Math.max(1, Math.round(u / 2)), Math.max(1, u), Math.max(1, u), PAPER);
+      }
+    }
+    if (sw >= u * 4 && y1 - y0 > u * 18) {
+      ofuda(buf, w, h, (x0 + x1) / 2, y0 + u * 4, u, Math.min(u * 9, (y1 - y0) / 3));
+      if (y1 - y0 > u * 36) ofuda(buf, w, h, (x0 + x1) / 2, y1 - u * 13, u, u * 9);
+    }
+    /* a capital at each end, where the post meets the roof and the terrace */
+    var cap = Math.max(1, Math.round(u * 1.5));
+    rect(buf, w, h, x0, 0, sw, cap, DARK);
+    rect(buf, w, h, x0, cap, sw, Math.max(1, Math.round(u / 2)), INK);
+    rect(buf, w, h, x0, h - cap, sw, cap, DARK);
+    rect(buf, w, h, x0, h - cap - Math.max(1, Math.round(u / 2)), sw, Math.max(1, Math.round(u / 2)), INK);
+    rect(buf, w, h, left ? x0 : x1 - Math.max(1, u), cap, Math.max(1, u), Math.max(1, u), PAPER);
+    rect(buf, w, h, left ? x0 : x1 - Math.max(1, u), h - cap - u, Math.max(1, u), Math.max(1, u), PAPER);
+    grain(buf, w, h, x0, 0, x1, h, u, rand, DARK, Math.round(h / (u * 18)));
+  }
+
+  /* the carved inner frame of the window: ink at the glass, a gold bead, a dark rebate */
+  function windowTrim(buf, w, h, x0, y0, x1, y1, u) {
+    var bead = Math.max(1, Math.round(u / 2)), reb = Math.max(1, Math.round(u / 2));
+    rect(buf, w, h, x0 - bead, y0 - bead, (x1 - x0) + bead * 2, bead, PAPER);
+    rect(buf, w, h, x0 - bead, y1, (x1 - x0) + bead * 2, bead, PAPER);
+    rect(buf, w, h, x0 - bead, y0 - bead, bead, (y1 - y0) + bead * 2, PAPER);
+    rect(buf, w, h, x1, y0 - bead, bead, (y1 - y0) + bead * 2, PAPER);
+    rect(buf, w, h, x0 - bead * 2 - reb, y0 - bead * 2 - reb, (x1 - x0) + (bead + reb) * 2, reb, INK);
+    rect(buf, w, h, x0 - bead * 2 - reb, y1 + bead, (x1 - x0) + (bead + reb) * 2, reb, INK);
+    rect(buf, w, h, x0 - bead * 2 - reb, y0 - bead * 2 - reb, reb, (y1 - y0) + (bead + reb) * 2, INK);
+    rect(buf, w, h, x1 + bead, y0 - bead * 2 - reb, reb, (y1 - y0) + (bead + reb) * 2, INK);
+  }
+
+  /* the stage's own edge: a dark lacquer band with a brass pin at each corner */
+  function outerBand(buf, w, h, u) {
+    var a = Math.max(1, Math.round(u / 2)), b = Math.max(1, u);
+    rect(buf, w, h, 0, 0, w, a, INK);
+    rect(buf, w, h, 0, h - a, w, a, INK);
+    rect(buf, w, h, 0, 0, a, h, INK);
+    rect(buf, w, h, w - a, 0, a, h, INK);
+    rect(buf, w, h, a, a, w - a * 2, b, DARK);
+    rect(buf, w, h, a, h - a - b, w - a * 2, b, DARK);
+    rect(buf, w, h, a, a, b, h - a * 2, DARK);
+    rect(buf, w, h, w - a - b, a, b, h - a * 2, DARK);
+    var p = Math.max(1, Math.round(u / 2));
+    [[a + b, a + b], [w - a - b - p, a + b], [a + b, h - a - b - p], [w - a - b - p, h - a - b - p]].forEach(function (q) {
+      rect(buf, w, h, q[0], q[1], p, p, MID);
+      rect(buf, w, h, q[0] + p, q[1] + p, p, p, PAPER);
+    });
+  }
+
+  /* paint the whole stage: the view is left alone (the game canvas covers it), everything else is scenery */
+  function paint(W, H, view, onTitle) {
+    W = Math.max(1, Math.round(W)); H = Math.max(1, Math.round(H));
+    if (onTitle == null) onTitle = titleMode;
+    var buf = new Uint8Array(W * H);
+    buf.fill(INK);
+    var u = Math.max(1, Math.round(view.k || 1));
+    var x0 = clamp(Math.round(view.x), 0, W), y0 = clamp(Math.round(view.y), 0, H);
+    var x1 = clamp(Math.round(view.x + view.w), 0, W), y1 = clamp(Math.round(view.y + view.h), 0, H);
+    var rand = rng(W * 73856093 ^ H * 19349663 ^ x0 * 83492791 ^ y0 * 2654435761);
+    if (x1 > x0 && y1 > y0) {
+      topPanel(buf, W, H, x0, y0, x1, u, rand, onTitle);
+      bottomPanel(buf, W, H, y1, u, rand);
+      sidePanel(buf, W, H, 0, x0, y0, y1, u, rand, true);
+      sidePanel(buf, W, H, x1, W, y0, y1, u, rand, false);
+      windowTrim(buf, W, H, x0, y0, x1, y1, u);
+    }
+    outerBand(buf, W, H, u);
+    return buf;
+  }
+
+  /* ---------------- the page ---------------- */
+  /* the background canvas is resized to the stage's CSS pixels, painted once per layout, and never
+     listens for a pointer: a touch outside the game canvas is scenery and goes nowhere. */
+  function attach(stage, art, view) {
+    var canvas = view && view.querySelector ? view.querySelector("canvas") : null;
+    if (!canvas) return null;
+    var last = "", raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+    function draw() {
+      var sr = stage.getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+      var W = Math.max(1, Math.round(sr.width)), H = Math.max(1, Math.round(sr.height));
+      var v = { x: cr.left - sr.left, y: cr.top - sr.top, w: cr.width, h: cr.height, k: cr.width / 160 };
+      var key = [W, H, Math.round(v.x * 4), Math.round(v.y * 4), Math.round(v.w * 4), Math.round(v.h * 4)].join(",");
+      if (key === last) return;
+      last = key;
+      var buf = paint(W, H, v, titleMode), img;
+      if (art.width !== W) art.width = W;
+      if (art.height !== H) art.height = H;
+      var ctx = art.getContext("2d");
+      if (!ctx) return;
+      img = ctx.createImageData(W, H);
+      var d = img.data, rgb = TONES.map(function (hex) {
+        return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+      });
+      for (var i = 0; i < W * H; i++) {
+        var c = rgb[buf[i]], o = i * 4;
+        d[o] = c[0]; d[o + 1] = c[1]; d[o + 2] = c[2]; d[o + 3] = 255;
+      }
+      ctx.putImageData(img, 0, 0);
+      art.__paint = W + "x" + H;
+      art.__title = titleMode ? "1" : "0";
+    }
+    repaint = function () { last = ""; draw(); };
+    function sync() { repaint(); }
+    /* lo-game fits once when it starts; paint after the first layout and again after the font settles */
+    raf(function () { draw(); raf(draw); });
+    window.addEventListener("resize", sync);
+    /* the wrapper and the canvas can settle without a window resize on a phone's bars */
+    if (typeof ResizeObserver !== "undefined") {
+      var ro = new ResizeObserver(sync);
+      ro.observe(stage); ro.observe(canvas);
+    }
+    return { draw: sync };
+  }
+
+  function setTitle(on) {
+    var next = !!on;
+    if (next === titleMode) return;
+    titleMode = next;
+    if (repaint) repaint();
+  }
+
+  return { paint: paint, viewRect: viewRect, attach: attach, setTitle: setTitle, TONES: TONES, INSET: INSET };
+})();
+</script>
 <script data-src="src/main.js">
 /* Scenes: the title (camera circling the tower) and the map, where the hero walks tile by tile through the town
    and the maps of src/story.js. SELECT shows how long the last frame took to draw, in every scene, for checking
    speed on a phone. Progress is saved at the save stones; what the player has already seen is saved with it.
    The cutscenes (the boss's entrance, the pendant, the ending) and the credits are at the end of the map scene.
    Sound (src/sound.js): each scene says which song and ambience it wants; the wrapper below sends them once a frame. */
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+/* The stage is the whole screen; the 3D view is a window in it. A full-stage background canvas paints the
+   shrine (src/frame.js) behind lo-game's own 160 x 144 canvas, which keeps its familiar contain fit inside
+   an inset wrapper. The frame canvas takes no pointers, so only the window is a touch target. */
+var stage = document.createElement("div");
+stage.id = "frame-stage";
+var frameArt = document.createElement("canvas");
+frameArt.id = "frame-art";
+if (frameArt.setAttribute) frameArt.setAttribute("aria-hidden", "true");
+var frameView = document.createElement("div");
+frameView.id = "frame-view";
+stage.appendChild(frameArt);
+stage.appendChild(frameView);
+document.body.appendChild(stage);
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", parent: frameView });
+ZTFrame.attach(stage, frameArt, frameView);
 Snd.attach(game);
 var R = Lo3D.create({ width: 160, height: 144 });
 var town = World.build(TOWN);
@@ -5105,6 +5772,11 @@ function scene(name, def) {
    flags: what has happened. master: the first talk is done (the road is open); entered, opened, beat: by map,
    by "map:chest index", by "map:enemy digit". lastSave is a copy of the last "progress" written. */
 var me = null, flags = null, lastSave = null;
+/* savesReady: both documents ("seen" and "progress") have been read or have failed. The title's menu waits for it,
+   so it never opens on half a save (the item list and the floor come from them). */
+var savesReady = false, saveLoads = 0;
+function saveLoaded() { if (++saveLoads >= 2) savesReady = true; }
+function saveFailed(e) { lockSaves(e); saveLoaded(); }
 /* runSave: the last stone of THIS run (null in a new game until the first one), the only place a loss goes back to.
    lastSave is the one on disk, which 继续 on the title loads; an older run's save must not catch a new game's loss */
 var runSave = null;
@@ -5120,38 +5792,156 @@ function writeSeen() { if (saveLocked) return; game.save("seen", Object.assign({
 Cut.onDone = writeSeen;
 game.load("seen").then(function (s) {
   if (s && typeof s === "object") { Object.assign(Battle.seen(), s); Object.assign(Cut.seen, s); }
-}, lockSaves);
+  saveLoaded();
+}, saveFailed);
 game.load("progress").then(function (p) {
   if (p && p.v === 1 && p.map && p.hero && p.flags) lastSave = p;
   else if (p && typeof p.v === "number" && p.v > 1) saveLocked = "newer";
-}, lockSaves);
+  saveLoaded();
+}, saveFailed);
 
-/* ---------- title ---------- */
+/* ---------- title ----------
+   The 3D tower is the cover; the menu is drawn on this page, in a window under it, not as a lo-game overlay. A or
+   START opens it, Up/Down moves (wrapping, like the field menu), A/START picks, B closes it, a tap picks a row.
+   The rows carry their own state: 继续 the saved floor, 听曲 its lock until the game is cleared. The list is only
+   built once both save documents are in (savesReady), so it can never show half a save. */
+var titleMenu = false, titleSel = 0;
+/* every title string, in both languages: the app is Chinese, but PAD.lang is honoured here as elsewhere */
+function titleText(zh, en, vars) { return game.t({ zh: zh, en: en }, vars); }
+function titleLockedText() {
+  return saveLocked === "newer" ? titleText("存档较新，请更新", "Save is newer")
+    : saveLocked ? titleText("存档读不出来", "Save unreadable") : "";
+}
+function titleFloor(id) {
+  /* the roof is the map's own place name, not a numbered floor */
+  if (id === "top") return titleText("塔顶", "Summit");
+  var n = { floor1: 1, floor2: 2 }[id];
+  if (n) return titleText("第 {n} 层", "Floor {n}", { n: n });
+  if (id === "town") return titleText("小镇", "Town");
+  if (id === "road") return titleText("山道", "Mountain road");
+  return titleText("存档", "Save");
+}
+/* 2 to 4 rows, read every frame so a save that arrives late (or is cleared) shows at once.
+   Over a save that cannot be read there is no new game, as before: 演武 is the safe thing to play. */
+function titleItems() {
+  var items = [], locked = !Cut.seen.cleared;
+  var gallery = { id: "gallery", label: { zh: "演武", en: "Practice" }, status: { zh: "木人", en: "Dummies" } };
+  /* over an unreadable save 演武 is the only way to play, so it is the whole list */
+  if (saveLocked) items.push(gallery);
+  else {
+    if (lastSave) items.push({ id: "continue", label: { zh: "继续", en: "Continue" }, status: titleFloor(lastSave.map) });
+    items.push({ id: "new", label: { zh: "新游戏", en: "New game" },
+      status: lastSave ? { zh: "从头开始", en: "Start over" } : null });
+    items.push(gallery);
+  }
+  items.push({ id: "music", label: { zh: "听曲", en: "Music" }, locked: locked,
+    status: locked ? { zh: "通关后", en: "Clear first" } : null });
+  return items;
+}
+/* the menu's window and rows: bottom-anchored above the hint bar; fewer rows get taller targets.
+   An unreadable save adds one line at the top of the window (the reason there is no 新游戏). */
+var TITLE_ROW_BOTTOM = 124;
+function titleLayout(n) {
+  var rowH = n <= 2 ? 22 : n === 3 ? 18 : 16;
+  var note = saveLocked ? 18 : 0;
+  var h = n * rowH + 8 + note, y = TITLE_ROW_BOTTOM - h;
+  return { x: 8, y: y, w: 144, h: h, rowH: rowH, note: note,
+    ty: function (i) { return y + 4 + note + i * rowH + Math.floor((rowH - 14) / 2); } };
+}
+/* a tap on a row (the row's whole strip, so a finger does not have to hit the letters):
+   the row index, -1 outside the panel (that closes it), -2 inside the panel but in its padding (that does nothing) */
+function titleTap(n) {
+  var L = titleLayout(n), p = game.pointer;
+  if (p.x < L.x || p.x >= L.x + L.w || p.y < L.y || p.y >= L.y + L.h) return -1;
+  var i = Math.floor((p.y - (L.y + 4 + L.note)) / L.rowH);
+  return i >= 0 && i < n ? i : -2;
+}
+/* a locked label: dark text with the app's dotted strike (the field menu's offText, in the menu's colours) */
+function titleStruck(g, text, x, y, color) {
+  g.text(text, x, y, { color: color });
+  var w = g.measure(text);
+  for (var k = 0; k < w; k += 2) g.rect(x + k, y + 6, 1, 1, color);
+}
+function titleOpen(it) {
+  busy = true;
+  if (it.id === "continue") game.go("map", { id: lastSave.map, resume: clone(lastSave) }, { to: LoGame.INK });
+  else if (it.id === "new") game.go("map", { id: "town", intro: true, fresh: true }, { to: LoGame.INK });
+  else if (it.id === "gallery") game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
+  else if (it.id === "music") game.push(musicRoom()).then(function () { busy = false; Snd.music("title"); });
+  else busy = false;
+}
+function titleDrawPlaque(g) {
+  var title = titleText("镇妖塔·序章", "Pagoda: Prologue"), tw = g.measure(title) + 16;
+  g.window(Math.round(80 - tw / 2), 3, tw, 18);
+  g.text(title, 80, 5, { align: "center" });
+}
+function titleDrawPrompt(g) {
+  var err = titleLockedText();
+  var sub = err || titleText("内置 LX-3D 协处理器", "Built-in LX-3D chip");
+  var prompt = !savesReady ? titleText("读取存档…", "Loading save…") : titleText("按 A 开始", "Press A");
+  var w = Math.max(g.measure(sub), g.measure(prompt)) + 18;
+  g.window(Math.round(80 - w / 2), 88, w, 44);
+  g.text(sub, 80, 94, { align: "center", color: err ? g.INK : g.DARK });
+  g.text(prompt, 80, 112, { align: "center" });
+}
+function titleDrawMenu(g) {
+  var items = titleItems(), L = titleLayout(items.length);
+  g.window(L.x, L.y, L.w, L.h);
+  if (saveLocked) g.text(titleLockedText(), 80, L.y + 5, { align: "center", color: g.DARK });
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i], ty = L.ty(i), on = i === titleSel, locked = !!it.locked;
+    var color = on ? g.PAPER : g.INK;
+    if (on) {
+      var bh = Math.min(L.rowH, 16), by = ty - Math.floor((bh - 13) / 2);
+      g.rect(L.x + 2, by, L.w - 4, bh, g.INK);
+      g.arrow(L.x + 5, ty + 3, "right", g.PAPER);
+    }
+    if (locked) titleStruck(g, game.t(it.label), L.x + 16, ty, on ? g.MID : g.DARK);
+    else g.text(game.t(it.label), L.x + 16, ty, { color: color });
+    if (it.status) g.text(game.t(it.status), L.x + L.w - 8, ty, { align: "right", color: on ? g.MID : g.DARK });
+  }
+  /* compact separators: the full " · " spacing of both keys would be wider than the screen's 160 px */
+  var hint = titleText("↑↓ 选·A 确定·B 返回", "↑↓ select·A ok·B back");
+  var hw = Math.max(156, g.measure(hint) + 6);
+  g.window(Math.round(80 - hw / 2), 126, hw, 18);
+  g.text(hint, 80, 130, { align: "center" });
+}
 var TITLE = scene("title", {
-  enter: function () { busy = false; Snd.music("title"); Snd.amb(null); },
+  enter: function () { busy = false; titleMenu = false; titleSel = 0; ZTFrame.setTitle(true); Snd.music("title"); Snd.amb(null); },
+  exit: function () { ZTFrame.setTitle(false); },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);
-    g.window(14, 82, 132, 52);
-    g.text("镇妖塔·序章", 80, 88, { align: "center" });
-    g.text(saveLocked === "newer" ? "存档较新，请先更新" : saveLocked ? "存档读不出来" : "内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
-    /* the menu is an overlay of its own: the prompt would blink through it */
-    if (game.top() === TITLE && Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
+    titleDrawPlaque(g);
+    /* the menu and the prompt belong to this page: while an overlay (the music room) is on top, neither is drawn */
+    if (game.top() === TITLE) {
+      if (titleMenu) titleDrawMenu(g);
+      else titleDrawPrompt(g);
+    }
   },
   update: function () {
-    if (busy || !game.ok()) return;
+    if (busy || !savesReady || game.top() !== TITLE) return;
+    var items = titleItems();
+    if (titleSel >= items.length) titleSel = items.length - 1;
+    if (!titleMenu) {
+      if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) { game.sfx("tap"); titleMenu = true; titleSel = 0; }
+      return;
+    }
+    var d = game.dir(), pick = -1;
+    if (d.y) { titleSel = (titleSel + d.y + items.length) % items.length; game.sfx("move"); }
+    if (game.pressed("a") || game.pressed("start")) pick = titleSel;
+    else if (game.pressed("b")) { titleMenu = false; game.sfx("miss"); return; }
+    else if (game.pointer.pressed) {
+      var tap = titleTap(items.length);
+      /* only a tap outside the panel closes it; one in its padding is ignored */
+      if (tap === -1) { titleMenu = false; game.sfx("miss"); return; }
+      if (tap >= 0) { titleSel = tap; pick = tap; }
+    }
+    if (pick < 0) return;
+    var it = items[pick];
+    if (it.locked) { game.sfx("err"); return; }
     game.sfx("ok");
-    busy = true;
-    /* 听曲 (the music room) once the game has been cleared */
-    var items = (saveLocked ? ["演武"] : lastSave ? ["继续", "进入小镇", "演武"] : ["进入小镇", "演武"]).concat(Cut.seen.cleared ? ["听曲"] : []);
-    game.choose(items, { y: 108 - 14 * items.length }).then(function (i) {
-      busy = false;
-      var pick = items[i];
-      if (pick === "继续") game.go("map", { id: lastSave.map, resume: clone(lastSave) }, { to: LoGame.INK });
-      if (pick === "进入小镇") game.go("map", { id: "town", intro: true, fresh: true }, { to: LoGame.INK });
-      if (pick === "演武") game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
-      if (pick === "听曲") { busy = true; game.push(musicRoom()).then(function () { busy = false; Snd.music("title"); }); }
-    });
+    titleOpen(it);
   }
 });
 

@@ -40,6 +40,13 @@ function prepConfirm() {
   game.go("morning");
 }
 
+/* one more portion, if the pantry can spare it: the → key and a tap on the row */
+function prepAdd(id) {
+  var room = prepRoom(id);
+  if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
+  else game.sfx("err");
+}
+
 game.scene("prep", {
   enter: function () {
     if (S.flags.prepared) { game.go("morning"); return; }
@@ -61,11 +68,20 @@ game.scene("prep", {
       game.sfx("tick");
     }
     if (game.repeat("right")) {
-      var room = prepRoom(id);
-      if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
-      else game.sfx("err");
+      prepAdd(id);
     }
-    if (game.pressed("a")) prepConfirm();
+    /* Touch: a tap on another row selects it; a second tap on the selected row
+       (or a tap on its 定 column) adds a portion, like →.  A is 「备好」 for the
+       whole menu, so the confirm sits on the footer's A hint. */
+    var tapped = tapRow(8, 82, 200, 75, 15, list.length, PREP_SCROLL);
+    if (tapped >= 0) {
+      var t = list[tapped], px = tapX();
+      var add = tapped === PREP_SEL || (px >= 136 && px < 166);
+      PREP_SEL = tapped;
+      if (add) prepAdd(t); else game.sfx("move");
+      return;
+    }
+    if (game.pressed("a") || tapInside(0, 216, 216, 24)) prepConfirm();
     if (game.pressed("b")) { game.sfx("tap"); game.go("morning"); }
     if (game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },

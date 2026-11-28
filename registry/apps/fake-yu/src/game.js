@@ -9,8 +9,10 @@
  * MIT License. Copyright (c) 2026 Haowei Wu.
  */
 
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
+/* what the bands around the world show: the court, the venue's sky, or a flat held frame */
+var bandView = { mode: "quiet", venue: "hall", status: null };
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 var INK = 0, DARK = 1, MID = 2, PAPER = 3;
 var SAVE_KEY = "save";
@@ -144,6 +146,48 @@ function keycap(g, label, x, y, s) {
   return w;
 }
 function inBox(p, b) { return p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h; }
+/* a tap on the world, not on the scenery lo-game's fill canvas adds around it.
+   game.pointer.x/y clamp a band tap to the near edge; stageX/stageY keep the truth. */
+function stageTap(p) {
+  var s = game.stage;
+  return p.stageX >= s.x && p.stageX < s.x + game.width && p.stageY >= s.y && p.stageY < s.y + game.height;
+}
+
+/* ---------- the court around the world ----------
+   lo-game 1.5.0's fill canvas grows past the 160 x 144 world on a phone. bands paints the
+   palace around it, so nothing outside the world reads as paper. The world keeps its drawing,
+   its hit tests and every key; game.pointer stays world-relative. */
+var BAND_NAME = { zh: "滥竽充数", en: "FAKE YU" };
+function paintBands(s, i) {
+  ART.bands(s, i, { mode: bandView.mode, venue: bandView.venue, t: game.time });
+  if (bandView.mode === "quiet") return;
+  var botH = i.h - (i.y + i.worldH);
+  /* the name board hung high over the court, when the roof is tall enough for one */
+  if (i.y >= 40 && (bandView.mode === "hall" || bandView.mode === "stage")) {
+    var word = T(BAND_NAME), pw = s.measure(word) + 14, ph = 20;
+    var px = Math.round((i.w - pw) / 2), py = 8;
+    s.rect(px + 6, 0, 1, py, MID);
+    s.rect(px + pw - 7, 0, 1, py, MID);
+    s.rect(px, py, pw, ph, PAPER);
+    s.frame(px, py, pw, ph, INK);
+    s.text(word, px + 7, py + 4, { color: INK });
+  }
+  /* one quiet line on the boards: where the performance is */
+  if (botH >= 36 && bandView.status) s.text(bandView.status(), i.w >> 1, i.h - 15, { align: "center", color: PAPER });
+}
+/* the venue's own room, carried out past the world */
+function bandVenue(venue) {
+  bandView.venue = venue || "hall";
+  bandView.mode = venue === "garden" ? "garden" : venue === "dawn" ? "dawn" : venue === "hall" || !venue ? "hall" : "night";
+  bandView.status = null;
+}
+function bandEnding(key) {
+  bandView.status = null;
+  bandView.venue = "dawn";
+  if (key === "horses") { bandView.mode = "quiet"; bandView.venue = "night"; }
+  else if (key === "chief") bandView.mode = "hall";
+  else bandView.mode = "dawn";
+}
 
 /* ---------- save ---------- */
 function loadProfile() {
@@ -178,6 +222,7 @@ function venueOf(i) { return SONGS[i].venue || "hall"; }
 /* ---------- boot ---------- */
 game.scene("boot", {
   enter: function () {
+    bandView.mode = "quiet"; bandView.status = null;
     if (loaded) { game.go("title", null, { fade: false }); return; }
     loadProfile().then(function () { game.go("title", null, { fade: false }); });
   },
@@ -201,6 +246,7 @@ game.scene("title", {
     titleLock = game.time + 0.12;
     game.musicStop();
     game.ambience(null);
+    bandVenue("hall");
   },
   update: function () {
     var items = titleItems(), n = items.length;
@@ -209,7 +255,7 @@ game.scene("title", {
     var canGo = game.time >= titleLock;
     var go = canGo && (game.pressed("a") || game.pressed("start"));
     var rowH = n === 4 ? 14 : 16, startY = n === 4 ? 89 : 92, boxY = n === 4 ? 84 : 86, boxH = n === 4 ? 59 : 57;
-    if (canGo && game.pointer.pressed && game.pointer.y >= boxY && game.pointer.y < boxY + boxH) {
+    if (canGo && game.pointer.pressed && stageTap(game.pointer) && game.pointer.y >= boxY && game.pointer.y < boxY + boxH) {
       var i = Math.floor((game.pointer.y - startY) / rowH);
       if (i >= 0) { titleSel = Math.min(n - 1, i); go = true; }
     }
@@ -298,9 +344,11 @@ async function tell(lines) {
 }
 async function actCard(n) {
   storyView.card = true; storyView.cardAct = n; storyView.cardAt = game.time;
+  bandView.mode = "quiet";
   game.sfx("win");
   await game.wait(2.1);
   storyView.card = false;
+  bandVenue(storyView.venue);
 }
 function chapterPre(i) {
   if (i === 8 || i === 9) {
@@ -322,7 +370,9 @@ async function runStory(a) {
   if (ch.postlude) await tell(ch.postlude);
   if (ch.choice) {
     await tell([{ who: "narr", text: { zh: "（说实话，还是继续装？最后一曲演成什么样，会把你带向不同的结局。）", en: "(Truth or lie? How the last tune goes will decide which ending you reach.)" } }]);
+    bandView.mode = "quiet";
     var pick = await game.choose([T(TX.choice0), T(TX.choice1)], { title: T(TX.choiceTitle), cancel: false });
+    bandVenue(storyView.venue);
     profile.truth = pick === 0;
     saveProfile();
   }
@@ -341,6 +391,7 @@ game.scene("story", {
     storyView.mood = "calm";
     storyView.venue = venueOf(a.i);
     storyView.card = false;
+    bandVenue(storyView.venue);
     game.musicStop();
     game.ambience(venueOf(a.i) === "throne" ? "wind" : venueOf(a.i) === "moon" || venueOf(a.i) === "night" ? "wind" : null, 0.18);
     runStory(a);
@@ -404,6 +455,7 @@ game.scene("select", {
     selectLock = game.time + 0.18;
     game.musicStop();
     game.ambience(null);
+    bandVenue("hall");
   },
   update: function () {
     var canGo = game.time >= selectLock;
@@ -416,7 +468,7 @@ game.scene("select", {
     if (selectSel >= selectTop + VIEW_ROWS) selectTop = selectSel - VIEW_ROWS + 1;
     selectTop = Math.max(0, Math.min(SONGS.length - VIEW_ROWS, selectTop));
     var go = canGo && (game.pressed("a") || game.pressed("start"));
-    if (canGo && game.pointer.pressed) {
+    if (canGo && game.pointer.pressed && stageTap(game.pointer)) {
       var row = Math.floor((game.pointer.y - LIST_Y) / ROW_H);
       if (row >= 0 && row < VIEW_ROWS && game.pointer.y >= LIST_Y && game.pointer.y < LIST_Y + VIEW_ROWS * ROW_H) {
         selectSel = selectTop + row; go = true;
@@ -474,11 +526,11 @@ game.scene("select", {
 /* ---------- how to play ---------- */
 var howPage = 0, howLock = 0;
 game.scene("howto", {
-  enter: function () { howPage = 0; howLock = game.time + 0.2; game.musicStop(); },
+  enter: function () { howPage = 0; howLock = game.time + 0.2; game.musicStop(); bandVenue("hall"); },
   update: function () {
     var canGo = game.time >= howLock;
     if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
-    if (canGo && (game.pressed("a") || game.pressed("start") || game.pointer.pressed)) {
+    if (canGo && (game.pressed("a") || game.pressed("start") || (game.pointer.pressed && stageTap(game.pointer)))) {
       game.sfx("tap");
       if (howPage < 3) howPage++;
       else game.go("title");
@@ -868,6 +920,9 @@ game.scene("play", {
   enter: function (a) {
     P = buildPlay(a.i, a.story, a.encore);
     P.caughtCool = 0;
+    bandView.mode = a.retry ? "quiet" : "stage";
+    bandView.venue = "hall";
+    bandView.status = function () { return T(TX.actProgress, { a: P.i + 1, b: SONGS.length }); };
     game.ambience(P.song.venue === "throne" ? "wind" : P.song.venue === "night" || P.song.venue === "moon" ? "wind" : null, 0.14);
     if (a.retry) {
       P.pause = { kind: "talk", sel: 0, action: "retry", resumeBeat: 0, countAt: 0 };
@@ -882,6 +937,7 @@ game.scene("play", {
   },
   update: function () {
     if (!P) return;
+    bandView.mode = P.pause ? "quiet" : "stage";
     if (P.pause) { updatePause(P); return; }
     if (!P.ended && game.pressed("start")) { openPause(P); return; }
     var dt = 1 / 60;
@@ -941,17 +997,18 @@ game.scene("play", {
         }
       }
 
-      /* touch: the screen is A, except the chime button */
-      var p = game.pointer;
+      /* touch: the world is A, except the chime button; a tap on the scenery around
+         the world (the fill canvas) is not a press, so a mistimed thumb can't blow it */
+      var p = game.pointer, onStage = stageTap(p);
       var tB = false;
       var touchUp = p.released && P.touchA;
-      if (p.pressed) {
+      if (p.pressed && onStage) {
         if (P.hasB && inBox(p, touchBHit())) tB = true;
         else P.touchA = true;
       }
       if (p.released) P.touchA = false;
 
-      var down = game.pressed("a") || (p.pressed && !inBox(p, touchBHit()));
+      var down = game.pressed("a") || (p.pressed && onStage && !inBox(p, touchBHit()));
       var bdown = game.pressed("b") || tB;
       var up = game.released("a") || touchUp;
 
@@ -1265,6 +1322,7 @@ game.scene("result", {
     resultSel = 0;
     resultLock = game.time + 0.2;
     game.musicStop();
+    bandVenue(venueOf(a.i));
   },
   update: function () {
     var canGo = game.time >= resultLock;
@@ -1336,6 +1394,7 @@ game.scene("ending", {
   enter: function (a) {
     game.musicStop();
     endingKey = STORY.endingFor(profile.truth, a && a.stats);
+    bandEnding(endingKey);
     var e = STORY.ENDINGS[endingKey];
     /* record the ending before the dialogue so quitting mid-scene still counts it */
     profile.endings[endingKey] = true;

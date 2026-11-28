@@ -392,3 +392,239 @@ PT.ART = (function () {
   });
   return A;
 })();
+
+/* The title cover for sdk/lo-title.js: 208 x 156 tone indices (0 paper, 1 mid, 2 dark, 3 ink), row by row.
+   The dark page sky holds a paper moon and a few blown sheets; the seven-strip tower stands under its lamp
+   on a ledge, and everything from the ledge down is flat dark ground, the calm lower third the fog and the
+   menu stand on (LO-TITLE.md). Drawn once, no clock: the shared title screen animates the fog and the menu. */
+PT.titleCover = (function () {
+  "use strict";
+  var W = 208, H = 156, GROUND = 92;
+  function put(px, x, y, t) {
+    x = Math.round(x); y = Math.round(y);
+    if (x >= 0 && y >= 0 && x < W && y < H) px[y * W + x] = t;
+  }
+  function rect(px, x, y, w, h, t) {
+    x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+    for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) put(px, x + i, y + j, t);
+  }
+  function disc(px, cx, cy, r, t) {
+    for (var y = -r; y <= r; y++) for (var x = -r; x <= r; x++)
+      if (x * x + y * y <= r * r) put(px, cx + x, cy + y, t);
+  }
+  function line(px, x0, y0, x1, y1, t) {
+    var n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)), i;
+    for (i = 0; i <= n; i++) put(px, x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, t);
+  }
+
+  function draw() {
+    var px = new Uint8Array(W * H), seed = 0x70617065, i, x, y;
+    px.fill(3);   /* ink: the page's night */
+    /* stars, fixed so every start and every screenshot is the same */
+    for (i = 0; i < 44; i++) {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      x = seed % W;
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      y = 3 + (seed >> 5) % 86;
+      put(px, x, y, i % 9 === 0 ? 0 : i % 4 === 0 ? 1 : 2);
+    }
+    /* the moon, low on the right: a paper disc with darker seas */
+    disc(px, 166, 48, 13, 1);
+    disc(px, 166, 48, 11, 0);
+    disc(px, 162, 45, 2, 1);
+    disc(px, 170, 53, 3, 1);
+    put(px, 171, 52, 0);
+    put(px, 161, 44, 0);
+    /* blown sheets: five little pages tumbling in the draught */
+    var sheets = [[22, 66], [48, 37], [140, 84], [178, 70], [34, 88]];
+    for (i = 0; i < sheets.length; i++) {
+      x = sheets[i][0]; y = sheets[i][1];
+      rect(px, x, y, 7, 5, 0);
+      rect(px, x, y + 4, 7, 1, 1);
+      line(px, x + 1, y + 3, x + 5, y + 1, 2);
+    }
+    /* the lamp on the tower's top: an ink frame around a paper pane and a small flame */
+    rect(px, 99, 30, 10, 11, 3);
+    rect(px, 100, 31, 8, 8, 0);
+    rect(px, 101, 33, 6, 4, 1);
+    rect(px, 102, 32, 4, 2, 0);
+    rect(px, 103, 36, 2, 2, 0);
+    rect(px, 102, 41, 4, 2, 2);
+    rect(px, 103, 43, 2, 3, 2);   /* the stem onto the tower's top strip */
+    put(px, 104, 27, 0); put(px, 103, 28, 1); put(px, 105, 28, 1);
+    /* seven folded strips, widest at the foot, each with its paper edge, ink seams and windows */
+    var widths = [22, 28, 34, 40, 46, 52, 58];
+    y = 46;
+    for (i = 0; i < widths.length; i++) {
+      var w = widths[i], sx = Math.round(104 - w / 2), fill = i % 2 ? 1 : 0, k, n, step;
+      rect(px, sx, y, w, 6, fill);
+      rect(px, sx, y, w, 1, 0);
+      rect(px, sx, y + 5, w, 1, 3);
+      rect(px, sx, y, 1, 6, 3);
+      rect(px, sx + w - 1, y, 1, 6, 3);
+      n = w >= 40 ? 3 : 2; step = Math.floor(w / (n + 1));
+      for (k = 1; k <= n; k++) rect(px, sx + step * k - 1, y + 2, 2, 2, 3);
+      y += 6;
+    }
+    /* the ledge, its two folded supports, and the calm floor */
+    rect(px, 70, 88, 68, 2, 0);
+    rect(px, 70, 90, 68, 1, 2);
+    rect(px, 70, 91, 68, 1, 3);
+    line(px, 73, 92, 66, 99, 1);
+    line(px, 135, 92, 142, 99, 1);
+    rect(px, 0, GROUND, W, 1, 0);
+    rect(px, 0, GROUND + 1, W, 1, 2);
+    rect(px, 0, GROUND + 2, W, H - GROUND - 2, 2);
+    return px;
+  }
+  return { W: W, H: H, draw: draw };
+})();
+
+/* The page frame around the 160 x 144 world (sdk/UI.md 13). The stage's extra room is a picture
+   frame, not scenery: the picture's own frame (sewn rules and the twelve page tabs) is capped at
+   20 canvas pixels, about 43-48 CSS px on a tall phone, and the rest of the leaf is a patterned
+   paper mat -- a woven grid of small diamonds, folded corners, stacked page edges and a printer's
+   ornament. No brick wall, no floor, no giant running head; the two rows above the status bar stay
+   paper. Calm (a menu, a dialogue, a fade) keeps the leaf and its ornament but flattens the tabs. */
+PT.FRAME = (function () {
+  "use strict";
+  var INK = 0, MID = 2, PAPER = 3;
+  var FRAME = 20;   /* canvas pixels: the picture's own frame, about 48 CSS px at 386 wide */
+  function hline(s, x0, x1, y, c) { if (x1 > x0) s.rect(x0, y, x1 - x0, 1, c); }
+  function vline(s, x, y0, y1, c) { if (y1 > y0) s.rect(x, y0, 1, y1 - y0, c); }
+  /* dashes along a line, so the mat reads as sewn or perforated paper */
+  function dashesH(s, x0, x1, y, c) { for (var x = x0; x < x1; x += 4) hline(s, x, Math.min(x + 2, x1), y, c); }
+  function dashesV(s, x, y0, y1, c) { for (var y = y0; y < y1; y += 4) vline(s, x, y, Math.min(y + 2, y1), c); }
+
+  /* a folded page corner: the reverse of the leaf turned over, its crease inked */
+  function dogear(s, cx, cy, n, sx, sy) {
+    for (var i = 0; i < n; i++) {
+      var len = n - i, yy = cy + sy * i;
+      s.rect(sx > 0 ? cx : cx - len + 1, yy, len, 1, MID);
+    }
+    var x0 = sx > 0 ? cx + n - 1 : cx - n + 1, y1 = cy + sy * (n - 1);
+    s.line(x0, cy, cx, y1, INK);
+  }
+
+  /* the mat beyond the picture's frame: a woven grid of small paper diamonds, with one stitch
+     dot in each cell between them so the weave is not just sparse dots */
+  function mat(s, w, h) {
+    var step = 12, row, x, y;
+    for (y = 12, row = 0; y < h - 12; y += step, row++) {
+      for (x = 6 + ((row & 1) ? 6 : 0); x < w - 5; x += step) {
+        s.pixel(x, y - 1, MID); s.pixel(x - 1, y, MID);
+        s.pixel(x + 1, y, MID); s.pixel(x, y + 1, MID);
+        s.pixel(x, y, ((row + Math.floor(x / step)) & 1) ? INK : PAPER);
+        s.pixel(x + 6, y + 6, MID);
+      }
+    }
+  }
+
+  /* the small printer's ornament at the head of the picture's frame; no title, no folio */
+  function ornament(s, cx, cy, w) {
+    var r = 3, i, len;
+    hline(s, 10, cx - r - 5, cy, INK);
+    hline(s, cx + r + 5, w - 10, cy, INK);
+    for (i = -r; i <= r; i++) {
+      len = r - (i < 0 ? -i : i);
+      s.rect(cx - len, cy + i, len * 2 + 1, 1, MID);
+    }
+    s.line(cx, cy - r, cx + r, cy, INK);
+    s.line(cx + r, cy, cx, cy + r, INK);
+    s.line(cx, cy + r, cx - r, cy, INK);
+    s.line(cx - r, cy, cx, cy - r, INK);
+    s.pixel(cx, cy, PAPER);
+  }
+
+  /* the twelve page tabs at the foot: pages read are solid, the open page is inked, the rest wait */
+  function tabs(s, w, ty, floor, pages, calm) {
+    var n = pages, tw = 5, gap = 2, total = n * tw + (n - 1) * gap, i, x;
+    var tx = Math.round((w - total) / 2);
+    for (i = 0; i < n; i++) {
+      x = tx + i * (tw + gap);
+      if (calm) { s.rect(x, ty, tw, 4, MID); continue; }
+      if (i < floor - 1) { s.rect(x, ty, tw, 6, MID); s.rect(x, ty + 5, tw, 1, INK); }
+      else if (i === floor - 1) { s.rect(x, ty, tw, 6, INK); s.rect(x + 1, ty + 2, tw - 2, 2, PAPER); }
+      else {
+        s.rect(x, ty, tw, 6, PAPER);
+        s.rect(x, ty, 1, 6, MID); s.rect(x + tw - 1, ty, 1, 6, MID); s.rect(x, ty + 5, tw, 1, MID);
+      }
+    }
+  }
+
+  function draw(s, box, o) {
+    o = o || {};
+    var w = box.w, h = box.h, x = box.x, y = box.y;
+    var ww = box.worldW, wh = box.worldH, x1 = x + ww, y1 = y + wh;
+    var top = y, bot = h - y1, left = x, right = w - x1;
+    var calm = !!o.calm, floor = o.floor || 0, pages = o.pages || 12;
+    s.clear(PAPER);
+    if (w < 16 || h < 16) return;
+
+    /* the frame is 20 canvas pixels; beyond it is the patterned mat. A tall phone gets it above and
+       below; a landscape stage gets the same frame and weave in its side gutters. */
+    var matMode = Math.max(top, bot, left, right) >= 28;
+    var tT = Math.min(FRAME, top), tB = Math.min(FRAME, bot);
+    var tL = Math.min(FRAME, left), tR = Math.min(FRAME, right);
+    if (matMode) {
+      mat(s, w, h);
+      s.rect(x, y, ww, wh, PAPER);
+      if (tT > 0) s.rect(0, y - tT, w, tT, PAPER);
+      if (tB > 0) s.rect(0, y1, w, tB, PAPER);
+      if (tL > 0) s.rect(x - tL, y, tL, wh, PAPER);
+      if (tR > 0) s.rect(x1, y, tR, wh, PAPER);
+    }
+
+    /* the leaf's edge: two rules, the outer inked and the inner a lighter page edge */
+    s.frame(2, 2, w - 4, h - 4, INK);
+    s.frame(4, 4, w - 8, h - 8, MID);
+    /* the stacked page edges inside the leaf's edge, on whichever sides have room */
+    if (matMode) {
+      if (top >= 10) { hline(s, 6, w - 6, 6, MID); hline(s, 6, w - 6, 8, MID); }
+      if (bot >= 10) { hline(s, 6, w - 6, h - 8, MID); hline(s, 6, w - 6, h - 6, MID); }
+      if (left >= 10) { vline(s, 6, 0, h, MID); vline(s, 8, 0, h, MID); }
+      if (right >= 10) { vline(s, w - 8, 0, h, MID); vline(s, w - 6, 0, h, MID); }
+    } else if (bot >= 30) { hline(s, 14, w - 14, h - 10, MID); hline(s, 14, w - 14, h - 8, MID); }
+
+    /* the four corners fold over, so the frame reads as a page and not a border drawn on a wall.
+       With a mat, a corner needs a gutter on either of its sides; landscape folds the side corners too. */
+    if (matMode) {
+      var nTL = Math.min(10, Math.max(top, left)), nTR = Math.min(10, Math.max(top, right));
+      var nBL = Math.min(10, Math.max(bot, left)), nBR = Math.min(10, Math.max(bot, right));
+      if (nTL >= 5) dogear(s, 0, 0, nTL, 1, 1);
+      if (nTR >= 5) dogear(s, w - 1, 0, nTR, -1, 1);
+      if (nBL >= 5) dogear(s, 0, h - 1, nBL, 1, -1);
+      if (nBR >= 5) dogear(s, w - 1, h - 1, nBR, -1, -1);
+    } else {
+      if (top >= 12) { var nt = Math.max(5, Math.min(10, Math.floor(top / 2))); dogear(s, 0, 0, nt, 1, 1); dogear(s, w - 1, 0, nt, -1, 1); }
+      if (bot >= 12) { var nb = Math.max(5, Math.min(10, Math.floor(bot / 2))); dogear(s, 0, h - 1, nb, 1, -1); dogear(s, w - 1, h - 1, nb, -1, -1); }
+    }
+
+    /* the opening's frame: a dark rule close to the picture, a sewn line in the mat outside it.
+       A stage with only a row or two to spare (Safari's bars) still gets the cut edge itself. */
+    if (top >= 6) { hline(s, 0, w, y - 3, INK); }
+    else if (top >= 1) hline(s, 0, w, y - 1, INK);
+    if (bot >= 6) { hline(s, 0, w, y1 + 3, INK); }
+    else if (bot >= 1) hline(s, 0, w, y1, INK);
+    if (left >= 6) { vline(s, x - 3, top >= 6 ? 0 : y, h, INK); }
+    else if (left >= 1) vline(s, x - 1, 0, h, INK);
+    if (right >= 6) { vline(s, x1 + 3, top >= 6 ? 0 : y, h, INK); }
+    else if (right >= 1) vline(s, x1, 0, h, INK);
+    if (top >= 9) dashesH(s, 0, w, y - 6, INK);
+    if (bot >= 9) dashesH(s, 0, w, y1 + 6, INK);
+    if (left >= 9) dashesV(s, x - 6, top >= 9 ? 0 : y, top >= 9 ? h : y1, INK);
+    if (right >= 9) { var rx = x1 + 6; dashesV(s, rx, top >= 9 ? 0 : y, top >= 9 ? h : y1, INK); }
+
+    if (matMode) {
+      /* the picture's frame closes with a bold double rule, the same on every side */
+      if (tT >= 12) { hline(s, 0, w, y - tT + 3, INK); hline(s, 0, w, y - tT + 1, MID); }
+      if (tB >= 12) { hline(s, 0, w, y1 + tB - 3, INK); hline(s, 0, w, y1 + tB - 1, MID); }
+      if (tL >= 12) { vline(s, x - tL + 3, 0, h, INK); vline(s, x - tL + 1, 0, h, MID); }
+      if (tR >= 12) { vline(s, x1 + tR - 3, 0, h, INK); vline(s, x1 + tR - 1, 0, h, MID); }
+      if (top >= 16) ornament(s, Math.round(w / 2), y - 12, w);
+      if (bot >= 14) tabs(s, w, y1 + 8, floor, pages, calm);
+    }
+  }
+
+  return { draw: draw };
+})();

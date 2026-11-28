@@ -73,6 +73,17 @@ game.scene("codex", {
       CODEX_SCROLL = 0;
       game.sfx("move");
     }
+    /* the tab strip (10 + 50 each) switches category, like ← → */
+    var tab = tapCell(CODEX_TABS.length, 10, 32, 200, 20);
+    if (tab >= 0) {
+      if (tab !== CODEX_TAB) {
+        CODEX_TAB = tab;
+        CODEX_SEL = 0;
+        CODEX_SCROLL = 0;
+        game.sfx("move");
+      }
+      return;
+    }
     if (game.repeat("up")) {
       CODEX_SEL = (CODEX_SEL + list.length - 1) % list.length;
       game.sfx("move");
@@ -81,6 +92,9 @@ game.scene("codex", {
       CODEX_SEL = (CODEX_SEL + 1) % list.length;
       game.sfx("move");
     }
+    /* the list window: a tap moves the cursor to that row */
+    var row = tapRow(8, 58, 200, 90, 15, list.length, CODEX_SCROLL);
+    if (row >= 0) { CODEX_SEL = row; game.sfx("move"); }
     if (game.pressed("b") || game.pressed("start")) {
       game.sfx("tap");
       if (CODEX_FROM) game.pop();

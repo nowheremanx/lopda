@@ -117,7 +117,7 @@ const SLIDE_FRAME = 57;                    /* release -> the first frame the sto
 
 test("the climb still takes the same frames of holding A", async () => {
   const { pad } = makePad();
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S");
   await climbWithA(app, pad, S);
   let frames = 0;
@@ -129,7 +129,7 @@ test("the climb still takes the same frames of holding A", async () => {
 
 test("survey marks show progress on the climb, and the summit tally appears after a summit", async () => {
   const { pad } = makePad();
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S"), WORLD = app.ctx.get("WORLD"), game = app.ctx.get("game");
 
   const marks = [];
@@ -172,7 +172,7 @@ test("survey marks show progress on the climb, and the summit tally appears afte
 
 test("the stone warns for the last 0.4 s before it slides, and slides on the same frame as before", async () => {
   const { pad } = makePad();
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S");
   await climbWithA(app, pad, S);
   await run(app, 900);
@@ -203,7 +203,7 @@ test("the stone warns for the last 0.4 s before it slides, and slides on the sam
 
 test("About is its own dialogue, with the pause menu closed; B puts the menu back", async () => {
   const { pad } = makePad();
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S"), game = app.ctx.get("game");
   const texts = [];
   const text = game.g.text;
@@ -236,7 +236,7 @@ test("About is its own dialogue, with the pause menu closed; B puts the menu bac
 
 test("the lines menu counts collected lines toward the sixteen", async () => {
   const { pad } = makePad({ sisyphus: { summits: 1, seen: ["16"], deck: ["3"], lastQuote: "16" } });
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const game = app.ctx.get("game"), S = app.ctx.get("S");
   await run(app, 5);
   assert.deepEqual(S.seen, ["16"], "the old save loads");
@@ -251,16 +251,19 @@ test("the lines menu counts collected lines toward the sixteen", async () => {
 
 /* ---------------- touch, the summit tally, and the handbook's dates (DeepSeek review #430 #431 #433) ---------------- */
 
+/* a tap at a world pixel, mapped into the fitted stage (the app fills the phone now: sdk/UI.md 13) */
 async function tap(app, x, y) {
-  app.pointer("pointerdown", x, y, 160, 178); await run(app, 2);
-  app.pointer("pointerup", x, y, 160, 178); await run(app, 1);
+  const st = app.ctx.get("game").stage;
+  const cx = (st.x + x) * st.k, cy = (st.y + y) * st.k;
+  app.pointerRaw("pointerdown", cx, cy); await run(app, 2);
+  app.pointerRaw("pointerup", cx, cy); await run(app, 1);
 }
 
 test("touch works on the pause menu, the lines and the summit card (#430)", async () => {
   const { pad } = makePad({ sisyphus: { summits: 2, seen: ["16", "3"], deck: ["5"], lastQuote: "3" } });
   const notes = [];
   pad.notes = { append(title, text) { notes.push(text); return Promise.resolve("saved"); } };
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S"), game = app.ctx.get("game");
   await climbWithA(app, pad, S);
   up(pad, "a");
@@ -305,7 +308,7 @@ test("touch works on the pause menu, the lines and the summit card (#430)", asyn
 
 test("the summit tally sits on a tag that contrasts all the way up (#431)", async () => {
   const { pad } = makePad({ sisyphus: { summits: 4, seen: ["16"], deck: [], lastQuote: "16" } });
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S"), game = app.ctx.get("game"), ART = app.ctx.get("ART");
   await run(app, 5);
   const g = game.g, calls = [];
@@ -338,7 +341,7 @@ test("the handbook writes a line with the summit and the day it was given, not t
   const { pad } = makePad(store);
   const notes = [];
   pad.notes = { append(title, text) { notes.push(text); return Promise.resolve("saved"); } };
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   const S = app.ctx.get("S"), game = app.ctx.get("game");
   await run(app, 5);
   game.push("gallery");
@@ -376,7 +379,7 @@ test("in English the note's frame, its title and its date are English; the line 
 test("the gallery's corner is where the card sits, and its hint names the paging keys (#434)", async () => {
   const { pad } = makePad();
   pad.lang = "en";
-  const app = boot(APP, { pad, seed: 1 });
+  const app = boot(APP, { pad, seed: 1, stage: { w: 331, h: 359 } });
   await run(app, 10);
   const S = app.ctx.get("S"), game = app.ctx.get("game");
   S.seen = ["16", "3", "7"];

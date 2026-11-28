@@ -4,18 +4,25 @@
 <meta charset="utf-8">
 <title>矢量梦</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
-  body { display: flex; align-items: center; justify-content: center; touch-action: none; }
-  canvas { width: 100vw; max-width: calc(100vh * 160 / 144); aspect-ratio: 160 / 144; image-rendering: pixelated; image-rendering: crisp-edges; display: block; }
-  #hud { position: absolute; left: 6px; top: 6px; font-size: 11px; line-height: 1.3; background: #1f2a14; color: #a3ad7e; padding: 3px 5px; white-space: pre; display: none; }
+  /* the stage is the toy's dark room; no paper shows even for the instant before the first fit */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1f2a14; color: #1f2a14; font-family: monospace; }
+  body { position: relative; touch-action: none; }
+  canvas { position: absolute; left: 0; top: 0; display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  /* 13 px on the smallest stage and 15 px from 360 px across (set with the stage's layout); paper on ink */
+  #hud, #legend, #card { position: absolute; background: #1f2a14; color: #a3ad7e; border: 1px solid #7d8a58; padding: 3px 5px; white-space: pre; line-height: 1.3; pointer-events: none; }
+  /* the HUD and legend stay at the stage's corners, over the picture on a large stage, on purpose: they are the device's readout, not part of the room */
+  #hud { left: 6px; top: 6px; font-size: 13px; display: none; }
   /* bottom-left, so it never covers the HUD; no pointer events, a drag over it still turns the view */
-  #legend { position: absolute; left: 6px; bottom: 6px; font-size: 11px; line-height: 1.3; background: #1f2a14; color: #a3ad7e; padding: 3px 5px; white-space: pre; pointer-events: none; }
+  #legend { left: 6px; bottom: 6px; font-size: 13px; }
+  /* the scene's name for 1.2 s after A, over the top of the picture */
+  #card { left: 50%; transform: translateX(-50%); font-size: 13px; display: none; }
 </style>
 </head>
 <body>
 <canvas id="c" width="160" height="144"></canvas>
 <div id="hud"></div>
 <div id="legend"></div>
+<div id="card"></div>
 <script data-lo-3d="1.2.0">
 /*
  * lo-3d.js 1.2.0, a small software 3D renderer for Lo-PDA apps.
@@ -519,6 +526,7 @@ var Lo3D = (function () {
   R.clip = false;   /* the original renderer skipped triangles at the near plane; keep its look */
   R.band = 0.5;     /* flat tone bands, dithered only at their edges: the full ramp read as heavy grain on a phone (owner, 2026-11-26); the sky keeps it */
   var hud = document.getElementById("hud");
+  var card = document.getElementById("card");
   var en = (typeof PAD !== "undefined" && PAD.lang === "en");
   var T = en ? { scene: "SCENE", mode: "MODE", solid: "SOLID", wire: "WIRE", fps: "FPS", tri: "TRIS",
                  names: ["KNOT", "FLYOVER", "CRYSTAL"] }
@@ -553,6 +561,105 @@ var Lo3D = (function () {
   }
   /* a test harness may have no setTimeout; the first key or drag still hides it */
   if (typeof setTimeout === "function") legendTimer = setTimeout(hideLegend, 6000);
+
+  /* ---------- the scene card ----------
+     A used to change the picture with only a tick; the card names the scene it moved to for 1.2 s, then goes.
+     The clock is the animation frame's, so a test's manual clock drives it too. */
+  var cardShown = false, cardAt = 0;
+  function showCard() {
+    card.textContent = T.scene + " " + (scene + 1) + "/3  " + T.names[scene];
+    card.style.display = "block";
+    cardShown = true;
+    cardAt = clock;
+  }
+
+  /* ---------- the stage ----------
+     The 3D buffer stays 160 x 144. The toy shows it at the largest whole-pixel scale that fits, centred; the
+     rest of the stage is its dark room: a faint grid, a bezel and the stand. The canvas is one canvas pixel
+     per CSS pixel and covers the stage edge to edge (its last row or column may be cut off by the stage), so
+     dpr 1 and dpr 3 both land every 3D pixel on whole device pixels. */
+  var TONE32 = [0xff142a1f, 0xff325a4a, 0xff588a7d, 0xff7eada3];   /* ink, dark, mid, paper, RGBA */
+  var CVW = 0, CVH = 0, K = 1, VW = W, VH = H, X0 = 0, Y0 = 0, UIPX = 0;
+  var viewImg = null, bandImg = null, rowBuf = null, lastStageW = -1, lastStageH = -1;
+
+  /* the room's numbers for a stage; pure, so the layout test can check them without a canvas */
+  function frameLayout(w, h) {
+    var cw = Math.max(1, Math.ceil(w)), ch = Math.max(1, Math.ceil(h));
+    var k = Math.floor(w / W), kh = Math.floor(h / H);
+    if (kh < k) k = kh;
+    if (!(k >= 1)) k = 1;                     /* a stage smaller than the toy keeps it at 1x and cuts it */
+    var vw = W * k, vh = H * k;
+    return { cw: cw, ch: ch, k: k, vw: vw, vh: vh,
+             x: Math.max(0, Math.floor((cw - vw) / 2)), y: Math.max(0, Math.floor((ch - vh) / 2)),
+             ui: cw >= 360 ? 15 : 13 };
+  }
+
+  function roomRect(u32, cw, ch, x, y, w, h, tone) {
+    var x0 = Math.max(0, Math.round(x)), x1 = Math.min(cw, Math.round(x + w));
+    var y0 = Math.max(0, Math.round(y)), y1 = Math.min(ch, Math.round(y + h)), yy, xx;
+    for (yy = y0; yy < y1; yy++) for (xx = x0; xx < x1; xx++) u32[yy * cw + xx] = TONE32[tone];
+  }
+  /* the room behind the toy: ink, a faint 24 px grid, a raised bezel and a small stand */
+  function paintRoom(L) {
+    var cw = L.cw, ch = L.ch, img = ctx.createImageData(cw, ch), u32 = new Uint32Array(img.data.buffer), i;
+    u32.fill(TONE32[0]);
+    for (i = 24; i < cw; i += 24) roomRect(u32, cw, ch, i, 0, 1, ch, 1);
+    for (i = 24; i < ch; i += 24) roomRect(u32, cw, ch, 0, i, cw, 1, 1);
+    var b = 4, bx0 = L.x - b, by0 = L.y - b, bx1 = L.x + L.vw + b, by1 = L.y + L.vh + b;
+    /* its stand first: it belongs to the toy even when the stage is too tight for the bezel (or one of its sides) */
+    var cx = L.x + L.vw / 2, top = by1 + 6, half = Math.min(60, Math.round(L.vw * 0.19));
+    if (top + 9 <= ch) {
+      roomRect(u32, cw, ch, cx - 14, by1 + 1, 28, top - by1 - 1, 1);
+      for (i = 0; i < 9; i++) roomRect(u32, cw, ch, cx - half - i * 1.5, top + i, (half + i * 1.5) * 2, 1, i === 0 ? 2 : 1);
+    }
+    if (bx0 < 0 || by0 < 0 || bx1 >= cw || by1 >= ch) return img;
+    /* the bezel: ink around the toy so the grid stops at it, lit on the top and left */
+    roomRect(u32, cw, ch, bx0, by0, bx1 - bx0 + 1, by1 - by0 + 1, 0);
+    roomRect(u32, cw, ch, bx0, by0, bx1 - bx0 + 1, 1, 2);
+    roomRect(u32, cw, ch, bx0, by0, 1, by1 - by0 + 1, 2);
+    roomRect(u32, cw, ch, bx0, by1, bx1 - bx0 + 1, 1, 1);
+    roomRect(u32, cw, ch, bx1, by0, 1, by1 - by0 + 1, 1);
+    return img;
+  }
+
+  function applyLayout(w, h) {
+    var L = frameLayout(w, h);
+    CVW = L.cw; CVH = L.ch; K = L.k; VW = L.vw; VH = L.vh; X0 = L.x; Y0 = L.y;
+    cv.width = CVW; cv.height = CVH;
+    cv.style.width = CVW + "px"; cv.style.height = CVH + "px";
+    viewImg = K > 1 ? ctx.createImageData(VW, VH) : null;
+    rowBuf = K > 1 ? new Uint32Array(VW) : null;
+    if (L.cw !== L.vw || L.ch !== L.vh || X0 || Y0) {
+      bandImg = paintRoom(L);
+      ctx.putImageData(bandImg, 0, 0);
+    } else bandImg = null;
+    if (UIPX !== L.ui) {
+      UIPX = L.ui;
+      hud.style.fontSize = legend.style.fontSize = card.style.fontSize = UIPX + "px";
+    }
+    card.style.top = (Y0 + Math.round(VH * 0.2)) + "px";
+  }
+  /* the page can be sized after the app starts, with no resize event afterwards: compare every frame */
+  function fitStage() {
+    var r = document.body.getBoundingClientRect();
+    if (!r || !(r.width > 0) || !(r.height > 0)) return;
+    if (r.width === lastStageW && r.height === lastStageH) return;
+    lastStageW = r.width; lastStageH = r.height;
+    applyLayout(r.width, r.height);
+  }
+  /* the 3D buffer at whole pixels: each source pixel becomes K x K canvas pixels */
+  function upscale() {
+    if (K === 1) return img;
+    var src = new Uint32Array(img.data.buffer), dst = new Uint32Array(viewImg.data.buffer), row = rowBuf, y, x, i;
+    for (y = 0; y < H; y++) {
+      for (x = 0; x < W; x++) {
+        var v = src[y * W + x];
+        for (i = 0; i < K; i++) row[x * K + i] = v;
+      }
+      for (i = 0; i < K; i++) dst.set(row, (y * K + i) * VW);
+    }
+    return viewImg;
+  }
 
   /* ---------- meshes ---------- */
   function knot() {
@@ -734,7 +841,8 @@ var Lo3D = (function () {
         R.streak([g[0] + 0.12, LAKE_Y + 0.02, g[1] + 0.07], [g[0] + 0.12 + g[2] * 0.7, LAKE_Y + 0.02, g[1] + 0.07], 2);
       }
     }
-    ctx.putImageData(R.paint(img), 0, 0);
+    R.paint(img);
+    ctx.putImageData(upscale(), X0, Y0);
   }
 
   /* ---------- input ---------- */
@@ -751,7 +859,7 @@ var Lo3D = (function () {
     PAD.on("press", function (b) {
       inputFlag = true;
       hideLegend();   /* any key: the player has found the pad */
-      if (b === "a") { scene = (scene + 1) % 3; PAD.sfx("tick"); }
+      if (b === "a") { scene = (scene + 1) % 3; showCard(); PAD.sfx("tick"); }
       else if (b === "b") { wire = !wire; PAD.sfx("tick"); }
       else if (b === "start") { setInfo(!info); }
       else if (b === "select") { dist = dist > 5 ? 3.2 : dist + 0.8; }
@@ -778,9 +886,11 @@ var Lo3D = (function () {
   /* ---------- loop ---------- */
   var last = 0, frames = 0, fpsT = 0, fps = 0, start = 0;
   function frame(now) {
+    fitStage();   /* the stage may be sized after the app's first frame */
     if (!start) { start = now; last = now; }
     var dt = Math.min(0.05, (now - last) / 1000); last = now;
     clock = now;
+    if (cardShown && now - cardAt >= 1200) { cardShown = false; card.style.display = "none"; }
     if (lastInput == null) lastInput = now;
     /* the tour starts after the idle time, moves on every TOUR_SCENE, and any input puts it to sleep again */
     var acting = held("left") || held("right") || held("up") || held("down");
@@ -801,10 +911,12 @@ var Lo3D = (function () {
     requestAnimationFrame(frame);
   }
   /* the tests' window on the app; the demo itself never reads it */
-  window.VECDREAM = { state: function () {
+  window.VECDREAM = { fit: frameLayout, state: function () {
     return { scene: scene, wire: wire, info: info, tour: tour,
       hud: hud.style.display !== "none", legend: legend ? legend.style.display !== "none" : false,
-      hudText: hud.textContent, idle: lastInput == null ? 0 : clock - lastInput };
+      hudText: hud.textContent, card: cardShown, cardText: card.textContent,
+      idle: lastInput == null ? 0 : clock - lastInput,
+      layout: { k: K, vw: VW, vh: VH, x: X0, y: Y0, cw: CVW, ch: CVH, ui: UIPX } };
   } };
   requestAnimationFrame(frame);
 })();

@@ -16,26 +16,41 @@ export function boot(file, opt = {}) {
   const raf = [], listeners = {}, hashes = [];
   const ctx2d = {
     createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
-    putImageData: (img) => { hashes.push(createHash("sha256").update(img.data).digest("hex").slice(0, 16)); if (opt.onPut) opt.onPut(img); },
+    putImageData: (img, x, y) => { hashes.push(createHash("sha256").update(img.data).digest("hex").slice(0, 16)); if (opt.onPut) opt.onPut(img, x, y); },
     getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }),
     measureText: () => ({ width: 12 }), fillText() {}, clearRect() {}
   };
-  /* every element's listeners by event type: the canvas's pointer listeners are how pointer() taps the screen */
+  /* every element's listeners by event type: the canvas's pointer listeners are how pointer() taps the screen.
+     opt.stage ({w, h}) gives the page a phone-sized stage: lo-game's fill mode reads it from getBoundingClientRect.
+     querySelector("canvas") finds the first canvas made, so an app's own pointer tracker (klotski) listens too. */
   const elListeners = {};
-  const el = () => ({
-    style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
-    addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); }, appendChild() {}, setPointerCapture() {},
-    getContext: () => ctx2d, getBoundingClientRect: () => ({ left: 0, top: 0, width: 160, height: 144 })
-  });
+  const created = [];
+  const rect = opt.stage
+    ? { left: 0, top: 0, width: opt.stage.w, height: opt.stage.h }
+    : { left: 0, top: 0, width: 160, height: 144 };
+  const el = (tag) => {
+    const node = {
+      tag: tag, style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
+      addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); },
+      removeEventListener(type, f) { const a = elListeners[type] || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); },
+      appendChild() {}, setPointerCapture() {},
+      getContext: () => ctx2d, getBoundingClientRect: () => rect
+    };
+    created.push(node);
+    return node;
+  };
   class KeyboardEvent { constructor(type, o = {}) { this.type = type; this.key = o.key; this.repeat = false; } preventDefault() {} }
   /* the page's globals. The scripts run as one function in this realm rather than in a vm context, whose
      global lookups (Math, every top-level var) are many times slower */
   const g = {
     console, performance, KeyboardEvent, atob, btoa,
-    document: { createElement: el, body: el(), head: el(), documentElement: el(), getElementById: () => el(), addEventListener() {} },
+    document: { createElement: el, body: el(), head: el(), documentElement: el(), getElementById: () => el(),
+      querySelector: (sel) => (sel === "canvas" ? created.find((n) => n.tag === "canvas") || null : null),
+      addEventListener() {} },
     innerWidth: 160, innerHeight: 144, devicePixelRatio: 1,
     requestAnimationFrame: (f) => { raf.push(f); return raf.length; },
     addEventListener: (type, f) => { (listeners[type] = listeners[type] || []).push(f); },
+    removeEventListener: (type, f) => { const a = listeners[type] || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); },
     dispatchEvent: (e) => { (listeners[e.type] || []).forEach((f) => f(e)); },
     __yield: () => new Promise((r) => setImmediate(r)),
     __frame: () => { const q = raf.splice(0); ts += 1000 / 60 + 1e-4; q.forEach((f) => f(ts)); },
@@ -50,13 +65,23 @@ export function boot(file, opt = {}) {
   const names = Object.keys(g);
   const run = new Function(...names, body + "\n;return { get: function (name) { return eval(name); } };");
   const ctx = run(...names.map((n) => g[n]));
-  /* pointer(type, x, y, w, h): a "pointerdown" / "pointerup" at screen pixel x, y of a w x h game screen
-     (the fake canvas is 160 x 144 css px, so the point is scaled to it) */
-  const pointer = (type, x, y, w = 160, h = 144) => {
-    const e = { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
+  /* pointer(type, x, y, w, h, view): a "pointerdown" / "pointerup" at screen pixel x, y of a w x h game screen
+     (the fake canvas is 160 x 144 css px, so the point is scaled to it). `view` ({k}) is a fill stage's
+     CSS pixels per canvas pixel: x, y are then canvas pixels, so the app's real fit-and-offset mapping
+     is what turns them into world pixels. */
+  const pointer = (type, x, y, w = 160, h = 144, view = null) => {
+    const e = view
+      ? { pointerId: 1, clientX: (x + 0.5) * (view.k || 1), clientY: (y + 0.5) * (view.k || 1), preventDefault() {} }
+      : { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
     (elListeners[type] || []).forEach((f) => f(e));
   };
-  return { ctx, frame: g.__frame, hashes, pointer };
+  /* pointerRaw(type, clientX, clientY): at page CSS pixels (the fake rect starts at 0, 0), for fill apps whose
+     stage is not the world's size */
+  const pointerRaw = (type, clientX, clientY) => {
+    const e = { pointerId: 1, clientX, clientY, preventDefault() {} };
+    (elListeners[type] || []).forEach((f) => f(e));
+  };
+  return { ctx, frame: g.__frame, hashes, pointer, pointerRaw };
 }
 
 export function mulberry32(seed) {

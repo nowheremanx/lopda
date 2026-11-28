@@ -31,11 +31,15 @@ test("every line fits the screen: about 13 characters", () => {
   for (const l of lines) assert.ok(Array.from(l).length <= 13, l);
 });
 
-test("the title menu is 继续 (only with a save), 进入小镇 and 演武; the route fights stay off screen", () => {
+test("the title menu is a window on the page: 继续 (only with a save), 新游戏, 演武 and 听曲; no overlay", () => {
   const main = read("registry/apps/zhenyao-tower/src/main.js");
-  const menus = [...main.matchAll(/\[(?:"[^"]*",? ?)+\]/g)].map((m) => JSON.parse(m[0])).filter((a) => a.includes("演武"));
-  /* the first is the title over a save it cannot read or a newer one (#458): no new game over it */
-  assert.deepEqual(menus, [["演武"], ["继续", "进入小镇", "演武"], ["进入小镇", "演武"]]);
+  /* the menu is drawn and read by the title scene itself; a lo-game choose overlay would cover the 3D cover */
+  assert.doesNotMatch(main, /game\.choose/);
+  assert.match(main, /function titleItems\(\)/);
+  for (const label of ["继续", "新游戏", "演武", "听曲"]) assert.match(main, new RegExp(label));
+  /* over a save it cannot read or a newer one (#458) there is no new game over it */
+  assert.match(main, /if \(saveLocked\) items\.push\(gallery\)/);
+  assert.match(main, /if \(!saveLocked\)/);
   assert.doesNotMatch(main, /game\.scene\("trial"/);
 });
 

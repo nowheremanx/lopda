@@ -57,6 +57,35 @@ footer button{flex:1}
 #a4{display:flex;align-items:center;gap:8px;margin-top:4px}
 #a4 span{flex:1;font-size:15px}
 #a4 button{min-width:44px;font-size:20px;font-weight:bold}
+/* a short stage (Safari's bars, or the phone's own 331 x 359): the fixed rows tighten so the meter, the reading and the
+   strings all fit; the message is only a 44 px target while it is the refused-mic button */
+@media (max-height: 430px) {
+  header{padding:4px 8px 0}
+  main{padding:6px 8px 8px}
+  #mwrap{min-height:0}
+  #read{min-height:52px}
+  #note{font-size:40px}
+  #note sub{font-size:17px}
+  #cents{font-size:18px}
+  #msg{min-height:30px}
+  #msg.tap{min-height:44px}
+  #strings button{min-height:44px;font-size:16px}
+  footer{padding:0 8px 6px}
+}
+/* a tall stage has room for a bigger reading and bigger string buttons; the meter takes what is left */
+@media (min-height: 560px) {
+  #read{min-height:72px}
+  #note{font-size:56px}
+  #note sub{font-size:22px}
+  #strings button{min-height:60px;font-size:18px}
+}
+@media (min-height: 700px) {
+  #read{min-height:80px}
+  #note{font-size:64px}
+  #note sub{font-size:24px}
+  #msg{min-height:52px}
+  #strings button{min-height:64px;font-size:19px}
+}
 /* the start screen: the box art, and one tap that opens the mic (the runtime asks for it on every start anyway) */
 #splash{position:fixed;inset:0;background:#a3ad7e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
   cursor:pointer;-webkit-tap-highlight-color:transparent}
@@ -183,8 +212,24 @@ var Tuner = (function () {
     return { i: i, midi: tuning.notes[i], target: targets[i], cents: cents(g, targets[i]) };
   }
   function inGroup(g) { return TUNINGS.filter(function (t) { return t.group === g; }); }
+
+  /* ---- the screen's measurements, free of the DOM so tests/string-tuner.test.mjs can check them ---- */
+  var ART = 160;                       /* the box art is a 160 x 160 picture */
+  /* the art's whole-pixel scale on a stage w x h, above the prompt (44 px, or its measured height): 4 px of air each side,
+     12 px above and below the prompt */
+  function artScale(w, h, prompt) {
+    return Math.max(1, Math.floor(Math.min((w - 8) / ART, (h - 12 - prompt - 12) / ART)));
+  }
+  /* the meter's 160-wide picture is 40-220 rows: as tall as a w x h box allows, minus the 3 px border */
+  function meterRows(w, h) {
+    if (w <= 6 || h <= 6) return 64;
+    return Math.max(40, Math.min(220, Math.round(ART * (h - 6) / (w - 6))));
+  }
+  /* its css height: those rows at the drawing's width, plus the border on both sides */
+  function meterHeight(rows, w) { return rows * (w - 6) / ART + 6; }
+
   return { TUNINGS: TUNINGS, GROUPS: GROUPS, inGroup: inGroup, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, ATTACK_MS: ATTACK_MS, byId: byId, hz: hz, cents: cents, name: name,
-    nearest: nearest, fold: fold, pick: pick, smoother: smoother, read: read };
+    nearest: nearest, fold: fold, pick: pick, smoother: smoother, read: read, artScale: artScale, meterRows: meterRows, meterHeight: meterHeight };
 })();
 </script>
 
@@ -256,15 +301,22 @@ var Tuner = (function () {
   /* ---- drawing the meter: a 160 x 64 tone buffer, written with putImageData ---- */
   var cv = $("meter"), cx = cv.getContext("2d"), W = 160, H = 64, buf, img;
   var PX = 80, PY = 74, R = 62;                         /* the needle's pivot sits below the window, like a VU meter */
-  /* the picture is 160 px wide and as tall as the space allows (56-104 px): a longer needle on a taller phone */
+  /* the picture is 160 px wide and as tall as the space allows (40-220 px): the whole meter box, a longer needle on a
+     taller phone. Its css height is written from the same numbers, so the picture fills the box instead of floating. */
+  var meterCss = 0;
   function fit() {
-    var box = $("mwrap"), w = box.clientWidth - 6, h = box.clientHeight - 6;
-    var nh = Math.max(56, Math.min(104, Math.round(160 * h / Math.max(1, w))));
+    var box = $("mwrap"), w = box.clientWidth, h = box.clientHeight;
+    var nh = Tuner.meterRows(w, h);
+    var css = Tuner.meterHeight(nh, w);
+    if (css !== meterCss) { meterCss = css; cv.style.height = css + "px"; }
     if (nh === H && buf) return;
-    H = nh; PY = H + 10; R = H - 2;
+    H = nh; PY = H + 10; R = H - 2; setSpan();
     cv.height = H; buf = new Uint8Array(W * H); img = cx.createImageData(W, H); dirty = true;
   }
-  var SPAN = 50 * Math.PI / 180;                        /* +-50 cents is +-50 degrees */
+  /* +-50 cents is +-50 degrees while the picture is short; a longer needle is a longer arc, so the sweep narrows as the
+     meter grows and the scale's ends stay inside the 160 px width */
+  var SPAN = 50 * Math.PI / 180;
+  function setSpan() { SPAN = Math.min(50 * Math.PI / 180, R > 74 ? Math.asin(74 / R) : Math.PI / 2); }
   function px(x, y, t) { x = Math.round(x); y = Math.round(y); if (x >= 0 && x < W && y >= 0 && y < H) buf[y * W + x] = t; }
   function line(a, r0, r1, t, thick) {
     var s = Math.sin(a), c = Math.cos(a);
@@ -337,7 +389,7 @@ var Tuner = (function () {
     au.className = lock >= 0 ? "" : "on";
     au.style.visibility = tuning.notes.length ? "visible" : "hidden";
   }
-  function frame() { fit(); render(); requestAnimationFrame(frame); }
+  function frame() { fit(); if (splash) fitArt(); render(); requestAnimationFrame(frame); }
 
   /* ---- the tuning ---- */
   /* "吉他 · Drop D"; an instrument with one tuning is just its name; chromatic is just "半音模式" */
@@ -401,9 +453,17 @@ var Tuner = (function () {
       d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255;
     }
     ctx.putImageData(im, 0, 0);
-    /* whole-pixel scale, so the pixels stay square and sharp */
-    var box = canvas.parentNode, k = Math.max(1, Math.floor(Math.min(box.clientWidth - 24, box.clientHeight - 80, 480) / 160));
-    canvas.style.width = canvas.style.height = (160 * k) + "px";
+  }
+  /* the largest whole-pixel scale that fits the stage above the prompt, so the pixels stay square and sharp. It is measured
+     again on every frame until the splash goes: a stage that is sized after the app starts has no resize event of its own. */
+  var artK = 0;
+  function fitArt() {
+    var box = $("splash"), go = $("go"), a = $("art");
+    if (!box.clientWidth || !box.clientHeight) return;
+    var k = Tuner.artScale(box.clientWidth, box.clientHeight, Math.max(44, go.offsetHeight));
+    if (k === artK) return;
+    artK = k;
+    a.style.width = a.style.height = (160 * k) + "px";
   }
 
   /* ---- the tuning list ---- */
@@ -506,6 +566,7 @@ var Tuner = (function () {
   $("splash").addEventListener("click", go);
   $("go").textContent = T.go;
   drawArt($("art"));
+  fitArt();
 
   function begin(saved) {
     if (saved && saved.v === 1) {

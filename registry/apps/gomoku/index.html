@@ -7,45 +7,26 @@
 <!-- Lo-PDA example app (lopda/1): touch only, sounds through PAD.sfx, zh/en text through PAD.lang. MIT License. -->
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:monospace;color:#1f2a14;touch-action:none;user-select:none;-webkit-user-select:none}
-#app{display:flex;flex-direction:column;height:100%;box-sizing:border-box;padding:10px;gap:8px;align-items:center}
-#top{display:flex;justify-content:space-between;align-items:center;width:100%;max-width:560px;font-size:16px;font-weight:bold}
-#top .box{border:2px solid #1f2a14;background:#7d8a58;padding:4px 10px}
-#wrap{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
-canvas{background:#a3ad7e;border:3px solid #1f2a14;touch-action:none;display:block}
-#bot{width:100%;max-width:560px;display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
-/* the tip may wrap; the buttons keep one row whatever the tip says */
-#tip{flex:1;min-width:0}
-#bot>div:last-child{flex-shrink:0;white-space:nowrap}
-#bot>div:last-child button{margin-left:8px}
-#bot>div:last-child button:first-child{margin-left:0}
-button{font-family:monospace;font-size:15px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 14px;cursor:pointer;box-shadow:3px 3px 0 #4a5a32}
+/* one canvas over the whole stage: board, status bar and button bar are painted into it (UI.md section 13) */
+#stage{position:fixed;inset:0;overflow:hidden;background:#7d8a58}
+#c{display:block;position:absolute;left:0;top:0;touch-action:none}
+button{font-family:monospace;font-size:15px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 14px;cursor:pointer;touch-action:manipulation;box-shadow:3px 3px 0 #4a5a32}
 button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
-/* the result is a compact dock in the bottom bar's place, so the board and the winning line stay visible */
-#res{width:100%;max-width:560px;display:flex;align-items:center;gap:10px;box-sizing:border-box;background:#7d8a58;border:2px solid #1f2a14;padding:8px 10px}
-#resTxt{flex:1;min-width:0}
-#rt{display:block;font-size:17px;font-weight:bold}
-#rn{display:block;font-size:14px;line-height:1.35;margin-top:2px;overflow-wrap:anywhere}
-#res button{flex:none;margin:0}
-/* the title screen: the picture (the gallery's cover too), one line, two buttons in a row; flat paper, no frame */
-#ov{position:fixed;left:0;top:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;background:#a3ad7e;overflow:hidden}
-#panel{display:flex;flex-direction:column;align-items:center;gap:12px;padding:6px 4px}
+/* the title screen covers the stage: picture, one line, full-width rows (44 px) */
+#ov{position:fixed;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#a3ad7e;overflow:hidden;padding:8px;box-sizing:border-box}
+#panel{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;min-height:0}
 #art{display:block}
 #ot{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);margin:0}
 #op{margin:0;font-size:14px;line-height:1.5;text-align:center;box-sizing:border-box;padding:0 6px}
-#btns{display:flex;gap:10px;box-sizing:border-box;padding:0 4px}
-#btns button{flex:1;padding:8px 6px}
+#btns{display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box}
+#btns button{width:100%;min-height:44px;padding:8px 6px}
 /* the radio match is the second choice: an outline, never the solid primary button */
 #panel #lk{background:#a3ad7e;color:#1f2a14;border:2px solid #1f2a14;box-shadow:none}
 .hide{display:none!important}
 </style>
 </head>
 <body>
-<div id="app">
-<div id="top"><div class="box" id="turn">黑棋落子</div><div class="box" id="rec">胜 0</div></div>
-<div id="wrap"><canvas id="c"></canvas></div>
-<div id="bot"><div id="tip">点交叉点落子</div><div><button id="ud">悔棋</button> <button id="rs">重新开始</button> <button id="rc" class="hide">重新连接</button> <button id="ln" class="hide">离开</button></div></div>
-<div id="res" class="hide"><div id="resTxt"><span id="rt"></span><span id="rn"></span></div><button id="again">再来一局</button></div>
-</div>
+<div id="stage"><canvas id="c"></canvas></div>
 <div id="ov"><div id="panel"><canvas id="art" aria-hidden="true"></canvas><h1 id="ot">五子棋</h1><p id="op">你执黑先手，横竖斜连成五子即胜。</p><div id="btns"><button id="st">开始</button><button id="lk" class="hide">对战（电波）</button></div></div></div>
 <script>
 /* the title picture: a 156 x 156 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
@@ -92,10 +73,8 @@ var ART = (function () {
 </script>
 <script>
 (function(){
-var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d');
-var turnEl=document.getElementById('turn'),tipEl=document.getElementById('tip'),recEl=document.getElementById('rec');
+var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d'),stage=document.getElementById('stage');
 var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op');
-var botEl=document.getElementById('bot'),resEl=document.getElementById('res'),rtEl=document.getElementById('rt'),rnEl=document.getElementById('rn'),againEl=document.getElementById('again');
 /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
 var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
 var TXT={
@@ -118,13 +97,57 @@ var TXT={
 }[LANG];
 document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
 ot.textContent=TXT.title;op.textContent=TXT.intro;document.getElementById('st').textContent=TXT.start;
-document.getElementById('ud').textContent=TXT.undo;document.getElementById('rs').textContent=TXT.restart;recEl.textContent=TXT.wins+0;
 document.getElementById('lk').textContent=TXT.match;
-document.getElementById('rc').textContent=TXT.reconnect;
-document.getElementById('ln').textContent=TXT.leave;
 var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
-var b,over,busy,last,winLine,hover,pick,pickT,pickAt,WAIT=1000,wins=0,size=300,cell=20,pad=14,hist=[];
-var resultT;                             // the 0.9 s wait before the result dock appears, so a restart can cancel it
+/* the canvas font: lopix12 glyphs for every string this app paints (sdk/fonts/lopix12.json, OFL).
+   The subset is generated from this file's own text; __gomoku.missingGlyphs() names any that are left out. */
+var UIFONT = /*FONT-START*/{"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","交":"12:AABA/+AAEQII0WCgBACgMYwGAAA=","亮":"12:AABA/+IIP4AA/+gCHwEQISweAAA=","价":"12:AAIQIoREWCxERERERERERESEAAA=","估":"12:AAIQIQX+QQwQQQT8SESESET8AAA=","位":"12:AAIgIQX+QAyESERERIRIQQX+AAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","保":"12:AAL8KESET8wQQQX+Q4RUWSQQAAA=","信":"12:AAIgIQX+QAz8QAT8QAT8SET8AAA=","值":"12:AAIQL+QQT8yET8SET8SESEX+AAA=","允":"12:AABACAEQIIf8EUEQEQESISweAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","即":"12:AA++iiii+iiiii+ikikiquygAAA=","叉":"12:AAf8QESEJIIIEQCgBACgMYwGAAA=","发":"12:AASQSIiA/+EAH4KIJQQgTYsGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","可":"12:AA/+AEAEPkIkIkIkPkAEAEAcAAA=","台":"12:AACAEAIIQE/6ACf8QEQEQEf8AAA=","号":"12:AAP4IIIIP4AA/+EAH4AIAIBwAAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","太":"12:AABABABA/+BACgCgEQEQKIxGAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","平":"12:AAf8BAREJIBA/+BABABABABAAAA=","序":"12:AAAgf+QAX8QIRQf+QiQkQgjgAAA=","度":"12:AAAgf+SIf+SIT4QAX8SIRwuOAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","强":"12:AA58JEJ84Qj+iS6SL+IQIUz6AAA=","思":"12:AAf8REf8REREf8AAVEUikKD4AAA=","息":"12:AACAP4IIP4IIP4IIP4VEUqj6AAA=","悔":"12:AAJAJ+qAt8pUpML+JUJMJ+IEAAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","战":"12:AAIUISOQIeJwIS+UiIiKiW+iAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","执":"12:AAIgIg98IkIkJkM04kJEJCaCAAA=","扰":"12:AAQoQk4gX+QgZQxQRQSSSS0eAAA=","找":"12:AAQoQk4gQ+XgYkwoQQQSRq2GAAA=","持":"12:AAQQR84QQQT+YEz+REQkQEwcAAA=","换":"12:AAQgQ45IT8SUaUyUX+QoRE2CAAA=","掌":"12:AAJI/+gCP4IIf8BAf8BA/+BAAAA=","接":"12:AAQQT+5EQoT+YQz+QkRIQ4zGAAA=","斜":"12:AAMESkgU8EJEIk8GIcrkoEIEAAA=","断":"12:AAkG14ugkg/+kkuk1kkkgk/EAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","某":"12:AAII/+IIP4IIP4BA/+FQJIxGAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","横":"12:AAIoJ88oL+IQZ8dUp8JUJ8LGAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","波":"12:AAQQL+CSiQT+DCCiSUSIiUliAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","漂":"12:AAT+IoD+iqT+AAB8QAT+hUiyAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","电":"12:AACA/4iIiI/4iIiI/4CCCCB+AAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","盘":"12:AABAP8JEIk/+JEQsAAf8Sk/+AAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","程":"12:AAF85EJEJ88AL+YQd8oQIQL+AAA=","竖":"12:AAF+lCkkkYlmEABAf8IIEQ/+AAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","线":"12:AAIUISQelw4QIeRw8SAMMazmAAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","考":"12:AACEfoCQ/+BAH8MA38AEAEA4AAA=","胜":"12:AA6QqQr86QsQoQ78oQoQoQr+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","脑":"12:AA4Qr+oA6CrGqq6SqqrGqCr+AAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","许":"12:AAiAT8EQAQwQX+QQQQQQYQQQAAA=","评":"12:AAj+QQCSBUwQT+QQQQUQYQQQAAA=","赢":"12:AABA/+QAf8II/+qq6qqu5KqqAAA=","输":"12:AAIQ8oREq6oA/qKqPq6qLiKmAAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","送":"12:AAhEQoD+AQwQT+QQQoTGoAn+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","错":"12:AARIb8hI5IX+QA78SET8aET8AAA=","长":"12:AAIIIQIgLAIA/+JAIgIQKIMGAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","（":"12:AAAEAIAIAQAQAQAQAQAIAIAEAAA=","）":"12:AAQAIAIAEAEAEAEAEAIAIAQAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA="}}/*FONT-END*/;
+var GLYPHS={};
+function glyphOf(ch){
+  var g=GLYPHS[ch];if(g)return g;
+  var src=UIFONT.glyphs[ch]||UIFONT.glyphs['?']||'6:AAAAAAAAAAAAAA==';
+  var cut=src.indexOf(':'),w=+src.slice(0,cut),raw=atob(src.slice(cut+1)),m=new Uint8Array(14*w),i;
+  for(i=0;i<m.length;i++)m[i]=(raw.charCodeAt(i>>3)>>(7-(i&7)))&1;
+  return (GLYPHS[ch]={w:w,m:m});
+}
+function textWidth(s,scale){
+  var a=Array.from(String(s)),w=0,i;
+  for(i=0;i<a.length;i++)w+=glyphOf(a[i]).w*scale;
+  return w;
+}
+/* text at (x, y), y its top; one fillRect a font pixel, so every pixel stays one of the four tones */
+function textAt(s,x,y,scale,c){
+  ctx.fillStyle=c;
+  var a=Array.from(String(s)),cx=x,xx,yy,gl,i;
+  for(i=0;i<a.length;i++){
+    gl=glyphOf(a[i]);
+    for(yy=0;yy<14;yy++)for(xx=0;xx<gl.w;xx++)if(gl.m[yy*gl.w+xx])
+      ctx.fillRect(cx+xx*scale,y+yy*scale,scale,scale);
+    cx+=gl.w*scale;
+  }
+}
+function fitEllipsis(s,maxW,scale){
+  if(textWidth(s,scale)<=maxW)return s;
+  var a=Array.from(String(s)),ell='…';
+  while(a.length&&textWidth(a.join('')+ell,scale)>maxW)a.pop();
+  return a.join('')+ell;
+}
+/* a tip that is too long wraps; the last line it is allowed gets an ellipsis instead of running on */
+function wrapText(s,maxW,scale,maxLines){
+  if(!s)return [''];
+  var chars=Array.from(String(s)),lines=[],line='',i,ch;
+  for(i=0;i<chars.length;i++){
+    ch=chars[i];
+    if(line&&textWidth(line+ch,scale)>maxW){
+      if(lines.length>=maxLines-1)return lines.concat([fitEllipsis(line+chars.slice(i).join(''),maxW,scale)]);
+      lines.push(line);line=ch;
+    }else line+=ch;
+  }
+  if(line||!lines.length)lines.push(line);
+  return lines.slice(0,maxLines);
+}
+var b,over,busy,last,winLine,hover,pick,pickT,pickAt,WAIT=1000,wins=0,hist=[];
+var resultT;                             // the 0.9 s wait before the result appears, so a restart can cancel it
 var aiT;                                 // the computer's 0.45 s think, so a restart can cancel it too
 /* the link match: see the long comment over the link functions below */
 var LINK=(typeof PAD!=='undefined'&&PAD.link)?PAD.link:null;
@@ -134,65 +157,173 @@ var peerColour=0;                        // the peer's colour as its "c,<colour>
 var moves=[];                            // a match's moves in order, [x,y] (the board can be rebuilt from it)
 var linkOpen=false,openingLink=false,sendingMove=false,linkWhy='',syncs=0;
 var sendQ=[],sendBusy=false,syncAsked=false,allBuf=[];
+/* the painted screen's state: what the status bar, the tip and the result bar say */
+var turnTxt=TXT.yours,tipTxt=TXT.tip,recTxt=TXT.wins+'0';
+var resultOn=false,resultTitle='',resultNote='',resultLabel='';
+var L=null,BTNS={},btnDown=null;          // the layout, the painted buttons' boxes, the button held down
+var lastDpr=0;                            // so a move between displays (same stage, other dpr) refits too
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+/* One canvas over the stage (UI.md 13): the board is the largest whole-cell square that fits the width,
+   the status bar and the button bar take the height above and below it, and on a short stage the columns
+   beside the board carry the same table. W/H are the stage's own CSS pixels; no paper is left anywhere. */
+function layoutFor(w,h){
+  if(!(w>0))w=331;
+  if(!(h>0))h=359;
+  var top=clamp(Math.round(h*0.11),38,64),bot=clamp(Math.round(h*0.18),76,124);
+  var zone=h-top-bot;
+  if(zone<160){top=Math.min(top,36);bot=Math.min(bot,72);zone=h-top-bot;}
+  var minPad=6,wcell=Math.floor((w-16)/14),hcell=Math.floor((zone-2*minPad)/14);
+  var cell=Math.min(wcell,hcell);if(cell<4)cell=4;
+  var pad,S;
+  if(cell===wcell){
+    pad=Math.max(6,Math.floor((w-14*cell)/2));S=14*cell+2*pad;
+    if(S>zone){pad=Math.max(4,pad-Math.ceil((S-zone)/2));S=14*cell+2*pad;}
+  }else{
+    pad=Math.min(Math.max(5,Math.round(cell*0.55)),Math.max(4,Math.floor((zone-14*cell)/2)));
+    S=14*cell+2*pad;
+  }
+  var bx=Math.max(0,Math.round((w-S)/2));
+  var by=top+Math.max(0,Math.floor((zone-S)/2));
+  if(by+S>h-bot)by=Math.max(top,h-bot-S);
+  return {W:w,H:h,topH:top,botH:bot,botY:h-bot,zone:zone,bx:bx,by:by,S:S,cell:cell,pad:pad};
+}
+/* fit the canvas to the stage's exact CSS box, rows rounded up, as many device pixels as the screen has */
+function fit(){
+  var r=stage.getBoundingClientRect(),w=r.width,h=r.height;
+  if(!(w>0&&h>0))return false;
+  var d=window.devicePixelRatio||1;
+  /* a move between displays changes the dpr without changing the stage: the backing store must follow */
+  if(L&&Math.abs(L.W-w)<0.01&&Math.abs(L.H-h)<0.01&&d===lastDpr)return false;
+  L=layoutFor(w,h);lastDpr=d;
+  cv.style.width=w+'px';cv.style.height=h+'px';
+  cv.width=Math.max(1,Math.ceil(w*d));cv.height=Math.max(1,Math.ceil(h*d));
+  ctx.setTransform(d,0,0,d,0,0);ctx.imageSmoothingEnabled=false;
+  return true;
+}
 function emptyBoard(){var nb=[];for(var i=0;i<N;i++)nb.push(new Array(N).fill(0));return nb;}
 function reset(){
   b=emptyBoard();
   unpick();clearTimeout(aiT);over=false;busy=false;last=null;winLine=null;hover=null;hist=[];
-  turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;hideResult();draw();
+  hideResult();
+  turnTxt=TXT.yours;tipTxt=TXT.tip;draw();
 }
-function resize(){
-  var w=document.getElementById('wrap');
-  var s=Math.floor(Math.min(w.clientWidth,w.clientHeight,560))-6;
-  if(s<200)s=200;
-  var d=window.devicePixelRatio||1;
-  size=s;cv.style.width=s+'px';cv.style.height=s+'px';
-  cv.width=s*d;cv.height=s*d;ctx.setTransform(d,0,0,d,0,0);
-  pad=Math.round(s/30);cell=(s-pad*2)/(N-1);
-  if(b)draw();
+function drawTable(){
+  ctx.fillStyle=C1;ctx.fillRect(0,L.topH,L.W,L.botY-L.topH);
+  ctx.fillStyle=C2;
+  for(var y=L.topH+3;y<L.botY;y+=8){
+    var off=(Math.floor((y-L.topH)/8)%2)?4:0;
+    for(var x=off;x<L.W;x+=16){
+      if(x>L.bx-4&&x<L.bx+L.S+4&&y>L.by-4&&y<L.by+L.S+4)continue;
+      ctx.fillRect(x,y,1,1);
+    }
+  }
 }
-function draw(){
-  ctx.fillStyle=C0;ctx.fillRect(0,0,size,size);
+function drawTop(){
+  var W=L.W,h=L.topH;
+  ctx.fillStyle=C0;ctx.fillRect(0,0,W,h);
+  ctx.fillStyle=C3;ctx.fillRect(0,h-2,W,2);
+  /* the stone whose turn it is, so the bar says the same thing twice: in colour and in words */
+  var ir=Math.max(6,Math.min(10,Math.round(h*0.2))),ix=10+ir,iy=Math.round(h/2);
+  var v;
+  if(over)v=(last&&b[last[1]][last[0]])||1;            // the stone that decided it: black for a win, white for a loss
+  else if(mode==='link')v=linkOpen?colourToMove():1;
+  else v=busy?2:1;
+  ctx.beginPath();ctx.arc(ix,iy,ir,0,7);
+  ctx.fillStyle=v===1?C3:C0;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
+  /* the wins (or the link's own state) sit in an ink box on the right */
+  var rs=2,rw=textWidth(recTxt,rs),boxW=rw+16,boxH=14*rs+8,boxX=W-8-boxW,boxY=Math.round((h-boxH)/2);
+  if(recTxt){
+    ctx.fillStyle=C3;ctx.fillRect(boxX,boxY,boxW,boxH);
+    textAt(recTxt,boxX+8,boxY+4,rs,C0);
+  }
+  var tx=ix+ir+8,ty=Math.round((h-28)/2),tw=Math.max(0,boxX-8-tx),sc=2;
+  if(textWidth(turnTxt,sc)>tw){
+    sc=1;ty=Math.round((h-14)/2);
+  }
+  ctx.save();ctx.beginPath();ctx.rect(tx,0,tw,h);ctx.clip();
+  textAt(turnTxt,tx,ty,sc,C3);
+  ctx.restore();
+}
+function barButtons(){
+  if(resultOn)return [{id:'again',label:resultLabel}];
+  if(mode==='link'){
+    var a=[];
+    if(!linkOpen&&!openingLink&&!over)a.push({id:'rc',label:TXT.reconnect});
+    a.push({id:'ln',label:TXT.leave});
+    return a;
+  }
+  return [{id:'ud',label:TXT.undo},{id:'rs',label:TXT.restart}];
+}
+function drawBottom(){
+  var W=L.W,y=L.botY,h=L.botH;
+  ctx.fillStyle=C0;ctx.fillRect(0,y,W,h);
+  ctx.fillStyle=C3;ctx.fillRect(0,y,W,2);
+  var list=barButtons(),n=list.length,padX=10,gap=8;
+  var btnH=Math.min(56,Math.max(44,h-32)),btnY=y+h-6-btnH;
+  var tipY=y+6,tipH=Math.max(14,btnY-4-tipY);
+  var lines=wrapText(tipTxt,W-2*padX,1,Math.max(1,Math.floor(tipH/15)));
+  for(var i=0;i<lines.length;i++)textAt(lines[i],padX,tipY+i*15,1,C2);
+  var bw=Math.floor((W-2*padX-gap*(n-1))/n);
+  BTNS={};
+  for(i=0;i<n;i++){
+    var x=padX+i*(bw+gap),down=btnDown===list[i].id,off=down?1:3;
+    ctx.fillStyle=C2;ctx.fillRect(x+off,btnY+off,bw,btnH);
+    ctx.fillStyle=down?C2:C3;ctx.fillRect(x,btnY,bw,btnH);
+    var sc=2,label=list[i].label;
+    if(textWidth(label,sc)>bw-10)sc=1;
+    var lw=textWidth(label,sc);
+    textAt(label,Math.round(x+(bw-lw)/2),Math.round(btnY+(btnH-14*sc)/2),sc,C0);
+    BTNS[list[i].id]={x:x,y:btnY,w:bw,h:btnH};
+  }
+}
+function drawBoard(){
+  var S=L.S,pad=L.pad,cell=L.cell,gx=L.bx+pad,gy=L.by+pad,gx1=gx+(N-1)*cell,gy1=gy+(N-1)*cell;
+  ctx.fillStyle=C2;ctx.fillRect(L.bx+4,L.by+4,S,S);
+  ctx.fillStyle=C0;ctx.fillRect(L.bx,L.by,S,S);
+  ctx.strokeStyle=C3;ctx.lineWidth=2;ctx.strokeRect(L.bx+1,L.by+1,S-2,S-2);
   ctx.strokeStyle=C2;ctx.lineWidth=1;
   ctx.beginPath();
   for(var i=0;i<N;i++){
-    var p=Math.round(pad+i*cell)+.5;
-    ctx.moveTo(pad,p);ctx.lineTo(size-pad,p);
-    ctx.moveTo(p,pad);ctx.lineTo(p,size-pad);
+    var p=Math.round(gy+i*cell)+.5;
+    ctx.moveTo(gx,p);ctx.lineTo(gx1,p);
+    var q=Math.round(gx+i*cell)+.5;
+    ctx.moveTo(q,gy);ctx.lineTo(q,gy1);
   }
   ctx.stroke();
   ctx.fillStyle=C3;
   [3,7,11].forEach(function(a){[3,7,11].forEach(function(c){
     if((a==7&&c!=7)||(c==7&&a!=7))return;
-    ctx.beginPath();ctx.arc(pad+a*cell,pad+c*cell,2.5,0,7);ctx.fill();
+    ctx.beginPath();ctx.arc(gx+a*cell,gy+c*cell,2.5,0,7);ctx.fill();
   });});
   var r=cell*0.43;
   for(var y=0;y<N;y++)for(var x=0;x<N;x++){
     var v=b[y][x];if(!v)continue;
-    var cx=pad+x*cell,cy=pad+y*cell;
+    var cx=gx+x*cell,cy=gy+y*cell;
     ctx.beginPath();ctx.arc(cx,cy,r,0,7);
     ctx.fillStyle=v==1?C3:C0;ctx.fill();
     ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
     if(v==2){ctx.beginPath();ctx.arc(cx,cy,r*0.6,0,7);ctx.lineWidth=1;ctx.strokeStyle=C1;ctx.stroke();}
   }
   if(last){
-    var lx=pad+last[0]*cell,ly=pad+last[1]*cell,m=b[last[1]][last[0]];
+    var lx=gx+last[0]*cell,ly=gy+last[1]*cell,m=b[last[1]][last[0]];
     ctx.fillStyle=m==1?C0:C3;
     ctx.fillRect(lx-3,ly-3,6,6);
   }
   if(hover&&canMoveNow()&&b[hover[1]][hover[0]]==0){
-    var hx=pad+hover[0]*cell,hy=pad+hover[1]*cell;
+    var hx=gx+hover[0]*cell,hy=gy+hover[1]*cell;
     ctx.strokeStyle=C3;ctx.lineWidth=2;
-    var q=cell*0.5;
+    var q2=cell*0.5;
     ctx.beginPath();
-    ctx.moveTo(hx-q,hy-q+5);ctx.lineTo(hx-q,hy-q);ctx.lineTo(hx-q+5,hy-q);
-    ctx.moveTo(hx+q,hy-q+5);ctx.lineTo(hx+q,hy-q);ctx.lineTo(hx+q-5,hy-q);
-    ctx.moveTo(hx-q,hy+q-5);ctx.lineTo(hx-q,hy+q);ctx.lineTo(hx-q+5,hy+q);
-    ctx.moveTo(hx+q,hy+q-5);ctx.lineTo(hx+q,hy+q);ctx.lineTo(hx+q-5,hy+q);
+    ctx.moveTo(hx-q2,hy-q2+5);ctx.lineTo(hx-q2,hy-q2);ctx.lineTo(hx-q2+5,hy-q2);
+    ctx.moveTo(hx+q2,hy-q2+5);ctx.lineTo(hx+q2,hy-q2);ctx.lineTo(hx+q2-5,hy-q2);
+    ctx.moveTo(hx-q2,hy+q2-5);ctx.lineTo(hx-q2,hy+q2);ctx.lineTo(hx-q2+5,hy+q2);
+    ctx.moveTo(hx+q2,hy+q2-5);ctx.lineTo(hx+q2,hy+q2);ctx.lineTo(hx+q2-5,hy+q2);
     ctx.stroke();
   }
   // the picked point: a dark stone, and a ring around it that closes when the stone goes down
   if(pick&&canMoveNow()&&b[pick[1]][pick[0]]==0){
-    var kx=pad+pick[0]*cell,ky=pad+pick[1]*cell,f=Math.min(1,(Date.now()-pickAt)/WAIT);
+    var kx=gx+pick[0]*cell,ky=gy+pick[1]*cell,f=Math.min(1,(Date.now()-pickAt)/WAIT);
     ctx.beginPath();ctx.arc(kx,ky,r,0,7);ctx.fillStyle=C2;ctx.fill();
     ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
     ctx.beginPath();ctx.arc(kx,ky,r*0.45,0,7);ctx.fillStyle=C1;ctx.fill();
@@ -208,15 +339,21 @@ function draw(){
     }
     ctx.strokeStyle=C3;ctx.lineWidth=Math.max(5,cell*0.3);ctx.lineCap='round';
     ctx.beginPath();
-    ctx.moveTo(pad+wl[0]*cell,pad+wl[1]*cell);
-    ctx.lineTo(pad+wl[2]*cell,pad+wl[3]*cell);ctx.stroke();ctx.lineCap='butt';
+    ctx.moveTo(gx+wl[0]*cell,gy+wl[1]*cell);
+    ctx.lineTo(gx+wl[2]*cell,gy+wl[3]*cell);ctx.stroke();ctx.lineCap='butt';
     /* a ring inside each of the five marks it against the thick line: paper on a black stone, ink on a white one */
     for(var wi=from;wi<from+Math.min(n,5);wi++){
-      var wx=pad+(wl[0]+dx*wi)*cell,wy=pad+(wl[1]+dy*wi)*cell;
+      var wx=gx+(wl[0]+dx*wi)*cell,wy=gy+(wl[1]+dy*wi)*cell;
       ctx.beginPath();ctx.arc(wx,wy,r*0.58,0,7);
       ctx.lineWidth=2;ctx.strokeStyle=b[wl[1]+dy*wi][wl[0]+dx*wi]==1?C0:C3;ctx.stroke();
     }
   }
+}
+function draw(){
+  if(!L){fit();if(!L)return;}
+  if(!b)return;
+  ctx.fillStyle=C1;ctx.fillRect(0,0,L.W,L.H);
+  drawTable();drawBoard();drawTop();drawBottom();
 }
 var D=[[1,0],[0,1],[1,1],[1,-1]];
 function checkWin(x,y,v){
@@ -266,22 +403,22 @@ function aiMove(){
   }
   return list[0]||[7,7];
 }
-// the result dock: the board stays uncovered, the winning line is on it
+// the result: the board stays uncovered, the bar says what happened and offers the next game
 function hideResult(){
   clearTimeout(resultT);
-  resEl.classList.add('hide');botEl.classList.remove('hide');
+  resultOn=false;resultTitle='';resultNote='';resultLabel='';
 }
 function showResult(title,note,label,panel){
   panelMode=panel;
-  rtEl.textContent=title;rnEl.textContent=note;againEl.textContent=label;
-  botEl.classList.add('hide');resEl.classList.remove('hide');
-  resize();                               // the dock is taller than the bar: fit the board above it again
+  resultOn=true;resultTitle=title;resultNote=note;resultLabel=label;
+  turnTxt=title;tipTxt=note;
+  draw();
 }
 // result: 'win', 'lose' or 'draw'
 function endGame(result){
   over=true;busy=false;
-  turnEl.textContent=TXT[result];tipEl.textContent=TXT.tipover;
-  recEl.textContent=TXT.wins+wins;draw();
+  turnTxt=TXT[result];tipTxt=TXT.tipover;
+  recTxt=TXT.wins+wins;draw();
   PAD.sfx(result=='win'?'win':(result=='draw'?'ok':'lose'));
   clearTimeout(resultT);
   resultT=setTimeout(function(){
@@ -293,68 +430,80 @@ function place(x,y){
   unpick();b[y][x]=1;last=[x,y];hist.push([x,y]);PAD.sfx('tap');
   if(checkWin(x,y,1)){wins++;PAD.save('gomoku_wins',wins);endGame('win');return;}
   if(full()){endGame('draw');return;}
-  busy=true;turnEl.textContent=TXT.thinking;draw();
+  busy=true;turnTxt=TXT.thinking;draw();
   aiT=setTimeout(function(){
     var m=aiMove();
     b[m[1]][m[0]]=2;last=[m[0],m[1]];hist.push([m[0],m[1]]);PAD.sfx('tick');
     if(checkWin(m[0],m[1],2)){endGame('lose');return;}
     if(full()){endGame('draw');return;}
-    busy=false;turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;draw();
+    busy=false;turnTxt=TXT.yours;tipTxt=TXT.tip;draw();
   },450);
 }
-function pos(e){
+/* the canvas point in the layout's own CSS pixels */
+function canvasPoint(e){
   var r=cv.getBoundingClientRect();
-  var px=(e.clientX-r.left)*(size/r.width),py=(e.clientY-r.top)*(size/r.height);
-  var x=Math.round((px-pad)/cell),y=Math.round((py-pad)/cell);
+  return {x:(e.clientX-r.left)*(L.W/r.width),y:(e.clientY-r.top)*(L.H/r.height)};
+}
+function hitButton(p){
+  for(var id in BTNS){var q=BTNS[id];if(p.x>=q.x&&p.x<q.x+q.w&&p.y>=q.y&&p.y<q.y+q.h)return id;}
+  return null;
+}
+function boardPos(e){
+  var p=canvasPoint(e);
+  if(p.x<L.bx||p.x>L.bx+L.S||p.y<L.by||p.y>L.by+L.S)return null;   // a tap in a bar never places a stone
+  var x=Math.round((p.x-L.bx-L.pad)/L.cell),y=Math.round((p.y-L.by-L.pad)/L.cell);
   return inb(x,y)?[x,y]:null;
 }
-cv.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;hover=pos(e);draw();});
+cv.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;hover=boardPos(e);draw();});
 /* A fingertip covers the point it taps, so on touch a tap only picks a point: the stone goes down a second
    later, or at once on a second tap there, and a tap elsewhere in that second moves it. A mouse shows the
    hover cursor before the click, so one click places. */
 function unpick(){pick=null;clearTimeout(pickT);}
 function ring(){if(!pick)return;draw();requestAnimationFrame(ring);}
+function runButton(id){
+  if(id==='ud')undo();
+  else if(id==='rs'){if(mode!=='link')reset();}
+  else if(id==='rc')openLink();
+  else if(id==='ln')leaveMatch();
+  else if(id==='again'){if(panelMode==='link')leaveMatch();else{mode='solo';reset();}}
+  if(btnDown===id){btnDown=null;draw();}
+}
 cv.addEventListener('pointerdown',function(e){
   e.preventDefault();
-  var p=pos(e);hover=e.pointerType==='mouse'?p:null;
+  var id=hitButton(canvasPoint(e));
+  if(id){btnDown=id;draw();runButton(id);return;}
+  var p=boardPos(e);hover=e.pointerType==='mouse'?p:null;
   if(!p||!canMoveNow()||b[p[1]][p[0]]){draw();return;}
   if(e.pointerType==='mouse'||(pick&&pick[0]==p[0]&&pick[1]==p[1])){tap(p[0],p[1]);return;}
   unpick();pick=p;pickAt=Date.now();pickT=setTimeout(function(){if(pick)tap(pick[0],pick[1]);},WAIT);
-  tipEl.textContent=TXT.tipsure;PAD.sfx('move');ring();
+  tipTxt=TXT.tipsure;PAD.sfx('move');ring();
 });
-cv.addEventListener('pointerleave',function(){hover=null;draw();});
-document.getElementById('rs').addEventListener('pointerdown',function(e){e.preventDefault();if(mode!=='link')reset();});
-document.getElementById('ud').addEventListener('pointerdown',function(e){e.preventDefault();undo();});
+cv.addEventListener('pointerup',function(){if(btnDown){btnDown=null;draw();}});
+cv.addEventListener('pointercancel',function(){if(btnDown){btnDown=null;draw();}});
+cv.addEventListener('pointerleave',function(){hover=null;if(btnDown)btnDown=null;draw();});
 document.getElementById('lk').addEventListener('pointerdown',function(e){e.preventDefault();startLinkGame();});
-document.getElementById('rc').addEventListener('pointerdown',function(e){e.preventDefault();openLink();});
-document.getElementById('ln').addEventListener('pointerdown',function(e){e.preventDefault();leaveMatch();});
 document.getElementById('st').addEventListener('pointerdown',function(e){
   e.preventDefault();
   if(panelMode==='link'){leaveMatch();return;}  // a finished match goes back to the menu, not a solo game
   mode='solo';updateButtons();ov.classList.add('hide');reset();resize();
 });
-againEl.addEventListener('pointerdown',function(e){
-  e.preventDefault();
-  if(panelMode==='link'){leaveMatch();return;}
-  mode='solo';reset();resize();
-});
 window.addEventListener('resize',resize);
 function undo(){
   if(mode==='link')return;   // no undo in a match: the two boards must stay the same game
   // a stone still waiting to go down is the first thing undo takes back
-  if(pick&&!over&&!busy){unpick();tipEl.textContent=TXT.tip;PAD.sfx('miss');draw();return;}
+  if(pick&&!over&&!busy){unpick();tipTxt=TXT.tip;PAD.sfx('miss');draw();return;}
   // white is still thinking: undo takes back black's stone and white never moves (the button is never dead)
   if(busy&&!over){
     clearTimeout(aiT);busy=false;
     var s=hist.pop();b[s[1]][s[0]]=0;
-    unpick();turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;
+    unpick();turnTxt=TXT.yours;tipTxt=TXT.tip;
     last=hist.length?hist[hist.length-1]:null;
     PAD.sfx('miss');draw();return;
   }
   // nothing to take back, or the game is over: say so with the error sound rather than doing nothing
   if(over||hist.length<2){PAD.sfx('err');return;}
   for(var k=0;k<2;k++){var m=hist.pop();b[m[1]][m[0]]=0;}
-  unpick();tipEl.textContent=TXT.tip;
+  unpick();tipTxt=TXT.tip;
   last=hist.length?hist[hist.length-1]:null;
   PAD.sfx('miss');draw();
 }
@@ -413,28 +562,25 @@ function whyLine(r){
   return LANG==='en'?w.charAt(0).toUpperCase()+w.slice(1)+'. '+TXT.offlineTip:w+'。'+TXT.offlineTip;
 }
 function updateButtons(){
-  show(document.getElementById('ud'),mode!=='link');
-  show(document.getElementById('rs'),mode!=='link');
-  show(document.getElementById('ln'),mode==='link');
-  show(document.getElementById('rc'),mode==='link'&&!linkOpen&&!openingLink&&!over);
   var lkOn=!!LINK&&panelMode==='menu'&&mode!=='link';
-  show(document.getElementById('lk'),lkOn);
+  show(document.getElementById('lk'),lkOn);     // the radio row only on the menu, and only where PAD.link exists
+  if(L&&b)draw();                               // the bar's own buttons come from the state, so a repaint is the update
 }
 function updateLinkUI(){
   if(mode!=='link')return;
   updateButtons();
   if(over)return;                                  // endLinkGame owns the texts once a game is decided
-  if(openingLink){turnEl.textContent=TXT.linking;tipEl.textContent=TXT.linking;recEl.textContent=TXT.linking;resize();return;}
+  if(openingLink){turnTxt=TXT.linking;tipTxt=TXT.linking;recTxt=TXT.linking;resize();return;}
   if(!linkOpen){
-    turnEl.textContent=moves.length?TXT.offline:TXT.notYet;
-    recEl.textContent=turnEl.textContent;
-    tipEl.textContent=whyLine(linkWhy);
+    turnTxt=moves.length?TXT.offline:TXT.notYet;
+    recTxt=turnTxt;
+    tipTxt=whyLine(linkWhy);
     resize();return;
   }
-  recEl.textContent=TXT.linked;
-  if(sendingMove){turnEl.textContent=TXT.sending;tipEl.textContent=TXT.sending;}
-  else if(colourToMove()===linkColour){turnEl.textContent=TXT.myTurn;tipEl.textContent=TXT.linkTip;}
-  else{turnEl.textContent=TXT.peerTurn;tipEl.textContent=TXT.waiting;}
+  recTxt=TXT.linked;
+  if(sendingMove){turnTxt=TXT.sending;tipTxt=TXT.sending;}
+  else if(colourToMove()===linkColour){turnTxt=TXT.myTurn;tipTxt=TXT.linkTip;}
+  else{turnTxt=TXT.peerTurn;tipTxt=TXT.waiting;}
   resize();
 }
 /* one message at a time: the runtime queues 4 at most, and the game wants to know each result */
@@ -594,16 +740,16 @@ function onLinkMessage(data){
 }
 function endLinkGame(result){                        // result: 'win', 'lose' or 'draw', from this side
   over=true;sendingMove=false;
-  turnEl.textContent=result==='win'?TXT.linkWin:result==='lose'?TXT.linkLose:TXT.draw;
-  tipEl.textContent=TXT.menuTip;
-  if(linkOpen)recEl.textContent=TXT.linked;
+  turnTxt=result==='win'?TXT.linkWin:result==='lose'?TXT.linkLose:TXT.draw;
+  tipTxt=TXT.menuTip;
+  if(linkOpen)recTxt=TXT.linked;
   resize();
   PAD.sfx(result==='win'?'win':(result==='draw'?'ok':'lose'));
   clearTimeout(resultT);
   resultT=setTimeout(function(){
     panelMode='link';
     updateButtons();
-    showResult(turnEl.textContent,result==='win'?TXT.linkWinnote:result==='lose'?TXT.linkLosenote:TXT.linkDrawnote,TXT.menu,'link');
+    showResult(turnTxt,result==='win'?TXT.linkWinnote:result==='lose'?TXT.linkLosenote:TXT.linkDrawnote,TXT.menu,'link');
   },900);
 }
 function linkPlace(x,y){                             // a stone of mine in a match
@@ -631,16 +777,31 @@ if(typeof PAD!=='undefined'&&PAD.on)PAD.on('link',function(ev){
   if(ev.type==='close'){
     if(linkOpen)linkWhy=ev.reason||'lost';   // a close we started ("lost" already set) keeps its reason
     linkOpen=false;sendingMove=false;sendQ=[];unpick();
-    updateLinkUI();                                  // the board stays; the footer offers 重新连接
+    updateLinkUI();                                  // the board stays; the bar offers 重新连接
   }
 });
 /* a tiny hook for the Playwright tests: the board and match state as the page shows them, plus a way
    to put a designed position on the board so a test reaches a result without playing the AI. The game
    itself never reads or calls it. */
 window.__gomoku=function(){
+  var bs={},id;
+  for(id in BTNS)bs[id]={x:BTNS[id].x,y:BTNS[id].y,w:BTNS[id].w,h:BTNS[id].h};
   return {board:b.map(function(r){return r.slice();}),moves:moves.length,colour:linkColour,mode:mode,
     open:linkOpen,over:over,sending:sendingMove,syncs:syncs,initiator:LINK?!!LINK.initiator:false,
-    winLine:winLine?winLine.slice():null,wins:wins,size:size,pad:pad,cell:cell};
+    winLine:winLine?winLine.slice():null,wins:wins,size:L?L.S:0,pad:L?L.pad:0,cell:L?L.cell:0,
+    bx:L?L.bx:0,by:L?L.by:0,W:L?L.W:0,H:L?L.H:0,top:L?L.topH:0,bottom:L?L.botH:0,dpr:lastDpr,
+    buttons:bs,result:resultOn?{title:resultTitle,note:resultNote,label:resultLabel}:null};
+};
+window.__gomoku.layout=layoutFor;
+window.__gomoku.missingGlyphs=function(){
+  var miss={},list=[];
+  function walk(v){
+    if(typeof v==='string'){
+      Array.from(v).forEach(function(ch){if(!UIFONT.glyphs[ch]&&!miss[ch]){miss[ch]=1;list.push(ch);}});
+    }else if(v&&typeof v==='object'){for(var k in v)walk(v[k]);}
+  }
+  walk(TXT);
+  return list;
 };
 window.__gomoku.set=function(stones){
   if(!Array.isArray(stones))return;
@@ -649,18 +810,23 @@ window.__gomoku.set=function(stones){
     var s=stones[i];
     if(s&&inb(s[0],s[1]))b[s[1]][s[0]]=s[2]||0;
   }
-  turnEl.textContent=TXT.yours;tipEl.textContent=TXT.tip;hideResult();draw();
+  hideResult();
+  turnTxt=TXT.yours;tipTxt=TXT.tip;draw();
 };
 /* paint the title picture at the largest whole scale that leaves room for the line and the buttons below it */
 var artTone=[[163,173,126],[125,138,88],[74,90,50],[31,42,20]],artPx=null;
 function drawArt(){
   if(ov.classList.contains('hide'))return;
   var cvA=document.getElementById('art'),W=ART.W,H=ART.H;
-  var room=window.innerHeight-(document.getElementById('op').offsetHeight+44+12*2+24);
-  var s=Math.max(1,Math.min(Math.floor((window.innerWidth-8)/W),Math.floor(room/H)));
+  var r=ov.getBoundingClientRect(),w=r.width||331,h=r.height||359;
+  var opH=document.getElementById('op').offsetHeight||21;
+  var nbtns=document.getElementById('lk').classList.contains('hide')?1:2;
+  var reserved=16+12+opH+nbtns*44+(nbtns>1?6:0);
+  var room=Math.max(H,h-reserved);
+  var s=Math.max(1,Math.min(Math.floor((w-16)/W),Math.floor(room/H)));
   var d=window.devicePixelRatio||1,k=Math.max(1,Math.round(s*d));
   cvA.style.width=(W*s)+'px';cvA.style.height=(H*s)+'px';
-  document.getElementById('op').style.maxWidth=(W*s)+'px';document.getElementById('btns').style.width=(W*s)+'px';
+  document.getElementById('op').style.maxWidth=Math.min(320,w-16)+'px';
   if(cvA.width===W*k&&cvA.height===H*k&&artPx)return;
   if(!artPx)artPx=ART.draw(LANG);
   cvA.width=W*k;cvA.height=H*k;
@@ -672,12 +838,22 @@ function drawArt(){
   cx.putImageData(img,0,0);
 }
 window.addEventListener('resize',drawArt);
-reset();resize();drawArt();
-updateButtons();
+function resize(){
+  fit();
+  if(b)draw();
+  if(!ov.classList.contains('hide'))drawArt();
+}
+/* the stage can be sized after the app starts with no resize event (UI.md 13); two reads a frame */
+function watch(){
+  if(fit()){if(b)draw();if(!ov.classList.contains('hide'))drawArt();}
+  if(window.requestAnimationFrame)window.requestAnimationFrame(watch);else setTimeout(watch,120);
+}
+fit();reset();updateButtons();drawArt();
+watch();
 (async function(){
   try{
     var v=await PAD.load('gomoku_wins');
-    if(v!==null&&!isNaN(+v)){wins=+v;recEl.textContent=TXT.wins+wins;}
+    if(v!==null&&!isNaN(+v)){wins=+v;recTxt=TXT.wins+wins;draw();}
   }catch(e){}
 })();
 })();

@@ -58,6 +58,26 @@ test("bundle: nothing to build exits 1, no arguments exits 2", (t) => {
   assert.equal(build("<p>nothing</p>", "."), null);
 });
 
+test("the shared font block follows the later framework block, whichever order the app writes", () => {
+  const game = '<script data-lo-game="9.9.9"></script>';
+  const title = '<script data-lo-title="9.9.9"></script>';
+  for (const [html, later] of [
+    [`<body>\n${game}\n${title}\n<script>var a = 1;</script>\n</body>`, "title"],
+    [`<body>\n${title}\n${game}\n<script>var a = 1;</script>\n</body>`, "game"]
+  ]) {
+    const out = build(html);
+    assert.equal((out.match(/data-lo-font=/g) || []).length, 1, `${later}: one font block`);
+    const fontAt = out.search(/<script data-lo-font="/);
+    const gameAt = out.search(/<script data-lo-game="/);
+    const titleAt = out.search(/<script data-lo-title="/);
+    assert.ok(fontAt > gameAt && fontAt > titleAt, `${later}: the font block is not after both framework blocks`);
+    /* the call that broke was LoTitle.font with lo-title after lo-game; both calls must run after both definitions */
+    assert.ok(out.indexOf("LoGame.font(LO_FONT)") > gameAt, `${later}: LoGame.font runs before LoGame`);
+    assert.ok(out.indexOf("LoTitle.font(LO_FONT)") > titleAt, `${later}: LoTitle.font runs before LoTitle`);
+    assert.equal(build(out), out, `${later}: idempotent`);
+  }
+});
+
 test("the checker wants index.html to match src/ exactly", (t) => {
   const { dir, file } = srcApp(t);
   assert.match(tool("check-app.mjs", dir).out, /index\.html is out of date with src\/: run node tools\/bundle-app\.mjs/);

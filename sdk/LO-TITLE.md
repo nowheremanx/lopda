@@ -15,12 +15,13 @@ Use it for the title of a game or a story (two to five items). Long lists, round
 1. Keep an empty block before your own scripts, and run the bundler:
 
    ```html
-   <script data-lo-title="0.1.0"></script>
+   <script data-lo-title="0.1.1"></script>
    ```
 
    `node tools/bundle-app.mjs registry/apps/<id>` fills it with the released copy and writes a `data-lo-font` block
-   with the lopix12 glyphs your app uses (one block feeds both lo-game and lo-title when an app has the two).
-   The checker accepts only unmodified released copies (`sdk/lo-title.versions.json`).
+   with the lopix12 glyphs your app uses (one block feeds both lo-game and lo-title when an app has the two; it
+   goes after whichever framework block comes later in the file). The checker accepts only unmodified released
+   copies (`sdk/lo-title.versions.json`).
 
 2. Give it a canvas sized by your CSS (the whole screen, or what is left under a top bar), and your picture as
    tone indices:
@@ -46,6 +47,8 @@ Use it for the title of a game or a story (two to five items). Long lists, round
 
    `menu.set({items, index, note})` changes the text later (say, once the save is read); `menu.index()` is the chosen
    item. A canvas that leaves the page is forgotten on the next resize.
+   `menu.destroy()` is for a screen you leave on purpose (play, a shop, a pause): it removes the window resize and
+   canvas pointer listeners and cancels the queued frame, so the closed menu and its picture are not kept alive.
 
 ## The options
 

@@ -61,9 +61,9 @@ manifest.json     store entry (buttons: true, no permissions)
 index.html        bundled app; do not edit by hand
 src/data.js       twelve pages, monsters, bosses, items, shops, people (pure data)
 src/rules.js      state, movement, fights, doors, shops, springs, items, poison (pure functions)
-src/art.js        16x16 sprites and tiles, four tones, original
+src/art.js        16x16 sprites and tiles, the 208x156 title cover, four tones, original
 src/music.js      original MML songs and custom effects
-src/game.js       scenes, drawing, menus, touch, items, save slots, battle and ending
+src/game.js       scenes, drawing, the page frame around the world, the shared title, menus, touch, items, save slots, battle and ending
 ```
 
 ## Playing and checking
@@ -71,10 +71,12 @@ src/game.js       scenes, drawing, menus, touch, items, save slots, battle and e
 ```sh
 node tools/bundle-app.mjs registry/apps/paper-tower   # after any src/ or text change
 node tools/check-app.mjs registry/apps/paper-tower
-node --test tests/paper-tower.test.mjs
+node --test tests/paper-tower.test.mjs tests/paper-tower-fill.test.mjs
 ```
 
 `tests/paper-tower.test.mjs` checks the page geometry, the stairs without folds, the hidden wicks,
 the battle arithmetic and abilities, shops with rising prices, bombs, holy water, poison, saves,
 music parsing, and two careful walks from page 1 to the lamp: one taking the three wicks, one
 without opening a single fold. Both must reach the top, so a secret is a reward, never a lock.
+`tests/paper-tower-fill.test.mjs` checks the play screen on five phone stages, a band tap that is
+not a world tap, and the shared fog title's cover and menu.
