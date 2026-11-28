@@ -6,13 +6,13 @@
 <!-- Ball Maze: tilt the handheld (PAD.motion, SPEC.md 6.4) or push with the D-pad. lo-game.js. MIT License. -->
 </head>
 <body>
-<script data-lo-game="1.4.0">
+<script data-lo-game="1.5.0">
 /*
- * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.5.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.5.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -23,7 +23,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -121,6 +121,38 @@ var LoGame = (function () {
     };
   }
 
+  /* Layout of a fill screen (1.5.0): the world keeps its size, the canvas around it covers the stage.
+     Returns {w, h, k, x, y}: canvas columns and rows, CSS pixels a canvas pixel, and where the world sits.
+     The caller works in CSS pixels from the stage's getBoundingClientRect (fractional on an iPhone). */
+  function fillLayout(stageW, stageH, worldW, worldH) {
+    var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
+    if (stageW > 0 && stageH > 0) {
+      k = stageW / worldW;
+      ch = Math.ceil(stageH / k);
+      if (ch < worldH) {
+        /* a stage too short for the world's width: fit by height and grow wider at the sides */
+        k = stageH / worldH;
+        cw = Math.max(worldW, Math.ceil(stageW / k));
+        ch = worldH;
+        x = Math.floor((cw - worldW) / 2);
+      } else {
+        /* the world's width fills the stage; the rows over it become scenery */
+        cw = worldW;
+        y = Math.floor((ch - worldH) / 2);
+      }
+    }
+    return { w: cw, h: ch, k: k, x: x, y: y };
+  }
+  /* The contain layout the framework has always used with fill off: the world stays whole, paper around it.
+     Returns {w, h, k} with the CSS size rounded, as the canvas style has always been set. */
+  function containLayout(stageW, stageH, worldW, worldH, dpr) {
+    dpr = dpr || 1;
+    var best = Math.min(stageW / worldW, stageH / worldH), k = Math.floor(best * dpr) / dpr;
+    if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+    k = Math.max(0.5, k);
+    return { w: Math.round(worldW * k), h: Math.round(worldH * k), k: k };
+  }
+
   /* ---------------- the game ---------------- */
   function create(opt) {
     opt = opt || {};
@@ -150,19 +182,41 @@ var LoGame = (function () {
     parent.appendChild(canvas);
     var ctx = canvas.getContext("2d");
     var image = ctx.createImageData(W, H);
+    var fill = !!opt.fill, bands = typeof opt.bands === "function" ? opt.bands : null;
+    var lay = { w: W, h: H, k: 1, x: 0, y: 0 };
+    var stageInfo = { w: W, h: H, k: 1, x: 0, y: 0, worldW: W, worldH: H };
+    var stageBuf = null, bandSurface = null, stageImage = null, lastFitW = -1, lastFitH = -1;
     function fit() {
+      if (fill) { fitFill(); return; }
       var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
-      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
-      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
-      k = Math.max(0.5, k);
-      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
-      game.scale = k;
+      var c = containLayout(aw, ah, W, H, window.devicePixelRatio || 1);
+      canvas.style.width = c.w + "px"; canvas.style.height = c.h + "px";
+      game.scale = c.k;
+      game.stage = { w: W, h: H, k: c.k, x: 0, y: 0 };
+    }
+    /* the stage's own box, fractional: the layout that leaves no paper at the sides, top or bottom */
+    function fitFill() {
+      var r = parent.getBoundingClientRect ? parent.getBoundingClientRect() : null;
+      var w = r ? r.width : 0, h = r ? r.height : 0;
+      if (!(w > 0) || !(h > 0)) { w = parent.clientWidth || innerWidth; h = parent.clientHeight || innerHeight; }
+      if (w === lastFitW && h === lastFitH && stageBuf) return;
+      lastFitW = w; lastFitH = h;
+      var L = fillLayout(w, h, W, H);
+      lay = L;
+      stageInfo.w = L.w; stageInfo.h = L.h; stageInfo.k = L.k; stageInfo.x = L.x; stageInfo.y = L.y;
+      canvas.width = L.w; canvas.height = L.h;
+      /* exact sizes, not rounded: a rounded width leaves a line of paper down each side on an iPhone */
+      canvas.style.width = (L.w * L.k) + "px"; canvas.style.height = (L.h * L.k) + "px";
+      stageBuf = new Uint8Array(L.w * L.h); stageBuf.fill(PAPER);
+      bandSurface = makeSurface({ buf: stageBuf, w: L.w, h: L.h });
+      stageImage = ctx.createImageData(L.w, L.h);
+      game.scale = L.k;
+      game.stage = { w: L.w, h: L.h, k: L.k, x: L.x, y: L.y };
+      if (stack.length) render();   /* canvas.width cleared it: draw straight away */
     }
 
     /* --- framebuffer and drawing --- */
     var buf = new Uint8Array(W * H);
-    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
-    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
 
     var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
     function fontCtx() {
@@ -210,108 +264,117 @@ var LoGame = (function () {
       return lines;
     }
 
-    var g = {
-      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
-      clear: function (c) { buf.fill(c == null ? PAPER : c); },
-      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
-      clip: function (x, y, w, h) {
-        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
-        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
-        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
-      },
-      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
-      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
-      rect: function (x, y, w, h, c) {
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
-        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
-      },
-      frame: function (x, y, w, h, c) {
-        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
-      },
-      line: function (x0, y0, x1, y1, c) {
-        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
-        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
-        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
-      },
-      circle: function (cx, cy, r, c, fill) {
-        cx = Math.round(cx); cy = Math.round(cy);
-        for (var y = -r; y <= r; y++) {
-          var span = Math.round(Math.sqrt(r * r + r - y * y));
-          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
-          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
-        }
-        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
-      },
-      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
-      dither: function (x, y, w, h, c, level) {
-        level = clamp(level == null ? 2 : level, 0, 4);
-        x = Math.round(x); y = Math.round(y);
-        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
-          var px = (x + xx) & 1, py = (y + yy) & 1;
-          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
-          if (on) put(x + xx + ox, y + yy + oy, c);
-        }
-      },
-      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
-      sprite: function (s, x, y, o) {
-        o = o || {};
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
-        for (var yy = 0; yy < h; yy++) {
-          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
-          var sy = o.flipY ? h - 1 - yy : yy;
-          for (var xx = 0; xx < w; xx++) {
-            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
-            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
-            if (v === CLEAR) continue;
-            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+    /* a drawing surface over any tone buffer: the world, and with fill a band canvas the app's `bands`
+       callback paints in stage coordinates. Both get the same methods and clip/origin state. */
+    function makeSurface(t) {
+      var sbuf = t.buf, SW = t.w, SH = t.h;
+      var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = SW, cy1 = SH;
+      function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) sbuf[y * SW + x] = c; }
+      var s = {
+        width: SW, height: SH, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+        clear: function (c) { sbuf.fill(c == null ? PAPER : c); },
+        origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+        clip: function (x, y, w, h) {
+          if (x == null) { cx0 = 0; cy0 = 0; cx1 = SW; cy1 = SH; return; }
+          cx0 = clamp(Math.round(x + ox), 0, SW); cy0 = clamp(Math.round(y + oy), 0, SH);
+          cx1 = clamp(Math.round(x + ox + w), 0, SW); cy1 = clamp(Math.round(y + oy + h), 0, SH);
+        },
+        pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+        get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= SW || y >= SH ? null : sbuf[y * SW + x]; },
+        rect: function (x, y, w, h, c) {
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+          for (var yy = ya; yy < yb; yy++) sbuf.fill(c, yy * SW + xa, yy * SW + Math.max(xa, xb));
+        },
+        frame: function (x, y, w, h, c) {
+          s.rect(x, y, w, 1, c); s.rect(x, y + h - 1, w, 1, c); s.rect(x, y, 1, h, c); s.rect(x + w - 1, y, 1, h, c);
+        },
+        line: function (x0, y0, x1, y1, c) {
+          x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+          var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+          for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+        },
+        circle: function (cx, cy, r, c, fill) {
+          cx = Math.round(cx); cy = Math.round(cy);
+          for (var y = -r; y <= r; y++) {
+            var span = Math.round(Math.sqrt(r * r + r - y * y));
+            if (fill) s.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+            else { s.pixel(cx - span, cy + y, c); s.pixel(cx + span, cy + y, c); }
+          }
+          if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); s.pixel(cx + x, cy - s2, c); s.pixel(cx + x, cy + s2, c); }
+        },
+        /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+        dither: function (x, y, w, h, c, level) {
+          level = clamp(level == null ? 2 : level, 0, 4);
+          x = Math.round(x); y = Math.round(y);
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+            var px = (x + xx) & 1, py = (y + yy) & 1;
+            var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+            if (on) put(x + xx + ox, y + yy + oy, c);
+          }
+        },
+        /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+        sprite: function (sp, x, y, o) {
+          o = o || {};
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var w = sp.w, h = sp.h, px = sp.px, one = o.color, map = o.map;
+          for (var yy = 0; yy < h; yy++) {
+            var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+            var sy = o.flipY ? h - 1 - yy : yy;
+            for (var xx = 0; xx < w; xx++) {
+              var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+              var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+              if (v === CLEAR) continue;
+              sbuf[dy * SW + dx] = one != null ? one : map ? map[v] : v;
+            }
+          }
+        },
+        /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+        text: function (str, x, y, o) {
+          o = o || {};
+          var color = o.color == null ? INK : o.color;
+          var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+          lines.forEach(function (ln) {
+            /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+            var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+            if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+            else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+            Array.from(ln).forEach(function (ch) {
+              var gl = glyph(ch);
+              for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+                if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+                put(xx + i + ox, yy + j + oy, color);
+              }
+              xx += gl.adv;
+            });
+            yy += FONT.line;
+          });
+          return lines.length * FONT.line;
+        },
+        measure: measure,
+        wrap: wrap,
+        lineHeight: FONT.line,
+        /* the standard window: paper inside, ink border with cut corners */
+        window: function (x, y, w, h, o) {
+          o = o || {};
+          s.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+          var c = o.border == null ? INK : o.border;
+          s.rect(x + 1, y, w - 2, 1, c); s.rect(x + 1, y + h - 1, w - 2, 1, c);
+          s.rect(x, y + 1, 1, h - 2, c); s.rect(x + w - 1, y + 1, 1, h - 2, c);
+          if (!o.thin) { s.rect(x + 2, y + 2, w - 4, 1, MID); }
+        },
+        /* a small arrow used by menus and "more" markers */
+        arrow: function (x, y, dir, c) {
+          c = c == null ? INK : c;
+          for (var i = 0; i < 4; i++) {
+            if (dir === "down") s.rect(x + i, y + i, 7 - 2 * i, 1, c);
+            else s.rect(x + i, y + i, 1, 7 - 2 * i, c);
           }
         }
-      },
-      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
-      text: function (str, x, y, o) {
-        o = o || {};
-        var color = o.color == null ? INK : o.color;
-        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
-        lines.forEach(function (ln) {
-          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
-          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
-          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
-          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
-          Array.from(ln).forEach(function (ch) {
-            var gl = glyph(ch);
-            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
-              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
-              put(xx + i + ox, yy + j + oy, color);
-            }
-            xx += gl.adv;
-          });
-          yy += FONT.line;
-        });
-        return lines.length * FONT.line;
-      },
-      measure: measure,
-      wrap: wrap,
-      lineHeight: FONT.line,
-      /* the standard window: paper inside, ink border with cut corners */
-      window: function (x, y, w, h, o) {
-        o = o || {};
-        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
-        var c = o.border == null ? INK : o.border;
-        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
-        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
-        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
-      },
-      /* a small arrow used by menus and "more" markers */
-      arrow: function (x, y, dir, c) {
-        c = c == null ? INK : c;
-        for (var i = 0; i < 4; i++) {
-          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
-          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
-        }
-      }
-    };
+      };
+      return s;
+    }
+    var g = makeSurface({ buf: buf, w: W, h: H });
 
     /* --- palette effects: every frame the indexed buffer goes through this map --- */
     var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
@@ -319,8 +382,23 @@ var LoGame = (function () {
       var map = pal.slice();
       if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
       if (flashT > 0) map = map.map(function (v) { return 3 - v; });
-      var d = image.data, n = W * H;
       if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      if (fill) {
+        if (!stageBuf || !stageImage) return 0;
+        var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
+        for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
+          var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
+          var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
+          sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
+        }
+        ctx.putImageData(stageImage, 0, 0);
+        return n2;
+      }
+      var d = image.data, n = W * H;
       for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
         var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
         var c = RGB[map[v]], o = (y * W + x) * 4;
@@ -340,10 +418,27 @@ var LoGame = (function () {
       addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
     }
     addEventListener("blur", function () { BUTTONS.forEach(up); });
-    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    var pointer = { x: 0, y: 0, stageX: 0, stageY: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
     function toScreen(e) {
       var r = canvas.getBoundingClientRect();
-      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+      if (fill) {
+        /* stage pixels (canvas pixels), then the world inside them; a tap in a band still lands on the near edge */
+        var px = (e.clientX - r.left) / (lay.k || 1), py = (e.clientY - r.top) / (lay.k || 1);
+        pointer.stageX = px; pointer.stageY = py;
+        pointer.x = clamp(Math.floor(px - lay.x), 0, W - 1);
+        pointer.y = clamp(Math.floor(py - lay.y), 0, H - 1);
+        return;
+      }
+      pointer.stageX = (e.clientX - r.left) * W / r.width;
+      pointer.stageY = (e.clientY - r.top) * H / r.height;
+      pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
+    }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
     }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
@@ -377,7 +472,8 @@ var LoGame = (function () {
     function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
 
     var game = {
-      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      VERSION: VERSION, width: W, height: H, stage: { w: W, h: H, k: 1, x: 0, y: 0 },
+      g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
       t: function (text, vars) { return pick(text, LANG, vars); },
       INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
 
@@ -414,8 +510,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -520,7 +616,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -552,13 +648,30 @@ var LoGame = (function () {
       game.time += STEP; game.frame++;
       inputEnd();
     }
+    /* the world into the stage: a plain copy, every frame, so the bands can be painted under it */
+    function compose() {
+      var sb = stageBuf, cw = lay.w, x0 = lay.x, y0 = lay.y;
+      for (var y = 0; y < H; y++) {
+        var src = y * W, dst = (y0 + y) * cw + x0;
+        for (var x = 0; x < W; x++) sb[dst + x] = buf[src + x];
+      }
+    }
     function render() {
+      if (fill) {
+        if (!stageBuf) return;
+        /* the app paints the full stage first: sky above the world, floor below, a HUD if it has one */
+        bandSurface.origin(0, 0); bandSurface.clip();
+        if (bands) bands(bandSurface, stageInfo);
+      }
       g.origin(0, 0); g.clip();
       for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      if (fill) compose();
       present();
     }
     function frame(ts) {
       requestAnimationFrame(frame);
+      /* the stage can settle after the app starts with no resize event (an iPhone's bars): check it every frame */
+      if (fill) fitFill();
       if (!last) last = ts;
       acc += Math.min(0.1, (ts - last) / 1000); last = ts;
       var n = 0;
@@ -578,6 +691,7 @@ var LoGame = (function () {
   return {
     VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
     create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    fillLayout: fillLayout, containLayout: containLayout,
     clamp: clamp, lerp: lerp, approach: approach, t: t
   };
 })();
@@ -690,9 +804,106 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","←":"12:AAAAAAAAIAQA/+QAIAAAAAAAAAA=","→":"12:AAAAAAAAAIAE/+AEAIAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","亮":"12:AABA/+IIP4AA/+gCHwEQISweAAA=","任":"12:AAIMLwQQQQwQX+QQQQQQQQT8AAA=","保":"12:AAL8KESET8wQQQX+Q4RUWSQQAAA=","倾":"12:AAI+IIU+Ui3qUqUqVqWIQUQiAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","允":"12:AABACAEQIIf8EUEQEQESISweAAA=","光":"12:AABAREJIFQBA/+EQEQESISweAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","准":"12:AAhQRIT+GID+CISIT+SIiIj+AAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","前":"12:AAIIEQ/+AAfURUfURUfURETMAAA=","势":"12:AAIQ+8IUNU4kJSRC/8CEEEYYAAA=","区":"12:AA/+gAkEiIhQgghQiIkEgA/+AAA=","压":"12:AAf+QAQgQgQgX8QgQoQkQgv+AAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","台":"12:AACAEAIIQE/6ACf8QEQEQEf8AAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","向":"12:AACAEA/+gCnykSkSkSnygCgOAAA=","咬":"12:AAAQ7+oApEqCtEpEoo4QAoDGAAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","园":"12:AA/+gCnygCv6iiiikqo6gC/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","姿":"12:AABA5+CSIoxGCA/+EIMQHw4OAAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","宝":"12:AABA/+gCgCf8BABAf8BIBE/+AAA=","宫":"12:AABA/+gCv6IIP4AAf8QEQEf8AAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","平":"12:AAf8BAREJIBA/+BABABABABAAAA=","应":"12:AAAgf+QAREVEUkSkSIQIQQv+AAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","径":"12:AAL8QEgIIQRo2GR8QQQQQQT+AAA=","得":"12:AAL8SEj8KET8wAX+QIX+SIRYAAA=","快":"12:AAIgIgr8skokokP+IgJQKIMGAAA=","总":"12:AAIIEQf8QEQEf8AAVEUikKD4AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","感":"12:AAAUf+XQQUXIVKnWBAUkUKj6AAA=","慢":"12:AAJ8JEp8tEr+qqL+JEIoIQLuAAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","找":"12:AAQoQk4gQ+XgYkwoQQQSRq2GAAA=","择":"12:AAT+SC5EQ4TGYQx8QQT+QQwQAAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","掌":"12:AAJI/+gCP4IIf8BAf8BA/+BAAAA=","推":"12:AARQRI7+WIT+aIyIT+SISIz+AAA=","摆":"12:AAT+Sq6qT+QQZ8wQT+QgREz6AAA=","放":"12:AAQgIg++REQkekSoSoSQSonGAAA=","斜":"12:AAMESkgU8EJEIk8GIcrkoEIEAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","旗":"12:AARAJ++AQkR+ckU8UkV+UktCAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","未":"12:AABABAf8BABA/+FQFQJIxGBAAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","校":"12:AAIQL+8AJEKCZEdEooIQIoLGAAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","桶":"12:AAL8Io8QL+KSb+eSr+KSKSKWAAA=","梯":"12:AAJEIo/+ISL+aQb+syJSKWIQAAA=","楼":"12:AAKSJU/+I4JUaScgr+IkI4LGAAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","洞":"12:AAn+UCF6kCV6FKFKVKV6kCkGAAA=","深":"12:AAn+UCAohEWCAQH+QQQ4hUmSAAA=","滚":"12:AAAQn+RICkkqRED8RSWUiIjmAAA=","照":"12:AA9+kSki9GkAl+lC9+AAUkiSAAA=","爬":"12:AAHA6+qqqqq+qgqiqiqepAo+AAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","球":"12:AAAU4ST+QQSS5UQYQ0ZSyQAwAAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","甲":"12:AA/+hChC/+hChC/+BABABABAAAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","确":"12:AA8gI8JET+dS1+VSV+VSdSCWAAA=","窖":"12:AABA/+kSZMP4RA/+AAf8QEf8AAA=","笆":"12:AAQge+lIAAf8REREf8QAQCP+AAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","篱":"12:AAQge+lI/+EQTkUU/+kSvqgGAAA=","绕":"12:AAQgQmj4okwaTmgA7+AoJK2OAAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","花":"12:AAEQ/+EQAAEgIiYsrwIgIiIeAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","虫":"12:AABABAf8REREREf8BABEB6+CAAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","许":"12:AAiAT8EQAQwQX+QQQQQQYQQQAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","轮":"12:AAIQ8oREqCpA9EJINw5CJCI+AAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","迷":"12:AAgQSSBUAQ3+Q4RUWSQQoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","通":"12:AAj8QoAQD+yST+SST+SSoAn+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","部":"12:AAEefSASRUKU/yASfSRcRQfQAAA=","酒":"12:AAn+RIBIn+VKFKGOUCX+kCn+AAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","钟":"12:AAQQYQj+6SSSSS7+QQQQYQQQAAA=","钮":"12:AAT8Ykgk4kQkT85EREREZEX+AAA=","锤":"12:AAQMZwgQ7+RUT+5URUT+YQR8AAA=","键":"12:AAQIe+iK7+UKW+6IS+WIbIU+AAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","闪":"12:AAn+QCBChChCiiiikSoKgCgOAAA=","闸":"12:AAn+QCP6pKv6pKpKv6hChChOAAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","颗":"12:AA++qI++qi+qIq+qIqcIqUIiAAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","鼠":"12:AAe8QEe8QEf8AAVUTMVUTMdyAAA=","齿":"12:AABAJ8JAJA/+AARERESkUUf8AAA=","！":"12:AAAAIAcAcAcAIAIAIAAAIAAAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA="}});
 </script>
 <script>
-var game = LoGame.create({ width: 160, height: 176, lang: "zh" });
+var game = LoGame.create({ width: 160, height: 176, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+/* sdk/LO-GAME.md 2.1: with fill on, a tap in the bands around the world is clamped onto the world's
+   nearest edge (pointer.x/y stay inside it), so every direct read of game.pointer asks whether the
+   press landed in the world first. A band tap must not start a game, pick a level or dismiss a card. */
+function worldPoint() {
+  var p = game.pointer, st = game.stage;
+  return p.stageX >= st.x && p.stageX < st.x + game.width &&
+    p.stageY >= st.y && p.stageY < st.y + game.height;
+}
+function worldTap() { return game.pointer.pressed && worldPoint(); }
+/* the ball follows a finger held on the world; one that went down in a band never grabs it, and one
+   that went down on the world keeps pulling even if it slides off (a real finger does) */
+var touchInWorld = false;
+function noteTouch() { if (game.pointer.pressed) touchInWorld = worldPoint(); }
+
+/* ---- the stone around the tray (sdk/UI.md 13, sdk/LO-GAME.md 2.1) ----
+   The world keeps its 160 x 176 size, its levels and every hit test; lo-game's fill canvas grows the wall
+   above it and the flagstones it stands on below, and a stone jamb beside it on Safari's short stage.
+   None of it repeats a level number or a readout: it is the wall and the table the tray lives on.
+   The still screens (title, the level list, an area's card, a pause and its menu, the tally) paint the
+   same stone flat and empty, so their bands never look like the maze is being played. */
+var COURSE = 9;                          /* canvas rows in one course of the wall */
+
+function bandsCalm() {
+  var top = game.top ? game.top() : null;
+  return top !== playScene || paused || state === "intro" || state === "clear";
+}
+
+/* coursed stone: ink mortar and joints, one lit chip on some stones; flat, never a dither */
+function bandWall(s, w, top) {
+  s.rect(0, 0, w, top, s.DARK);
+  for (var y = top, c = 0; y > 0; y -= COURSE, c++) {
+    var h = Math.min(COURSE, y), y0 = y - h, off = (c & 1) ? 11 : 0, i = 0, x;
+    if (h >= 2) s.rect(0, y - 1, w, 1, s.INK);
+    for (x = -off; x < w; x += 22, i++) {
+      if (x >= 0) s.rect(x, y0, 1, h - 1, s.INK);
+      if (h >= 5 && (i + c) % 3 === 0 && x + 2 >= 0) s.rect(x + 2, y0 + 1, 6, 1, s.MID);
+    }
+  }
+}
+
+/* the floor the tray rests on: a shadow under its near edge, one lit row, flagstones to the canvas edge */
+function bandFloor(s, w, h, by) {
+  var bh = h - by;
+  s.rect(0, by, w, bh, s.DARK);
+  s.rect(0, by, w, Math.min(2, bh), s.INK);
+  if (bh >= 4) s.rect(0, by + 2, w, 1, s.MID);
+  for (var y = by + 3, r = 0; y < h; y += 9, r++) {
+    var hh = Math.min(9, h - y), off = (r & 1) ? 13 : 0, x;
+    if (y + hh < h) s.rect(0, y + hh, w, 1, s.INK);
+    for (x = -off; x < w; x += 26) if (x >= 0) s.rect(x, y, 1, hh, s.INK);
+    if (hh >= 3 && r % 2 === 0) s.rect(Math.max(0, 6 + (r % 3) * 31), y + 1, 5, 1, s.MID);
+  }
+  if (bh >= 12) s.rect(0, h - 2, w, 2, s.INK);
+}
+
+/* one oil lamp on the wall above the tray, lit only while the maze is being played */
+function bandLamp(s, cx, gy) {
+  s.rect(cx - 10, gy - 1, 21, 1, s.MID);         /* the shelf's lit edge */
+  s.rect(cx - 10, gy, 21, 2, s.INK);             /* and its shadow */
+  s.rect(cx - 5, gy - 5, 11, 4, s.PAPER);        /* the bowl */
+  s.rect(cx - 5, gy - 5, 11, 1, s.MID);
+  s.rect(cx + 5, gy - 7, 2, 3, s.INK);           /* the handle */
+  s.rect(cx - 3, gy - 11, 7, 6, s.PAPER);        /* the flame */
+  s.rect(cx - 1, gy - 13, 3, 2, s.PAPER);
+  s.pixel(cx, gy - 14, s.MID);
+  s.pixel(cx + 1, gy - 8, s.MID);
+}
+
+/* a spare marble left on the flagstones below the tray */
+function bandMarble(s, x, y) {
+  s.rect(x - 3, y, 7, 1, s.INK);
+  s.circle(x, y - 4, 3, s.INK, true);
+  s.circle(x, y - 4, 2, s.MID, true);
+  s.pixel(x - 1, y - 5, s.PAPER);
+}
+
+function paintBands(s, st) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var bot = h - (y0 + wh), left = x0, right = w - (x0 + ww), calm = bandsCalm();
+  s.clear(s.DARK);
+  if (!calm) {
+    if (y0 > 0) bandWall(s, w, y0);
+    if (bot > 0) bandFloor(s, w, h, y0 + wh);
+  }
+  /* the tray's rim: a lit bevel on the far side, a shadow on the near side (light from the top left) */
+  if (y0 >= 1) s.rect(x0, y0 - 1, ww, 1, s.MID);
+  if (left >= 1) s.rect(x0 - 1, y0, 1, wh, s.MID);
+  if (bot >= 1) s.rect(x0, y0 + wh, ww, 1, s.INK);
+  if (right >= 1) s.rect(x0 + ww, y0, 1, wh, s.INK);
+  /* the jambs on a stage wider than the world: one joint so they read as stone, not a bar */
+  if (left >= 8) s.rect(x0 - 6, 0, 1, h, s.INK);
+  if (right >= 8) s.rect(x0 + ww + 5, 0, 1, h, s.INK);
+  if (calm) return;
+  if (y0 >= 28) bandLamp(s, Math.floor(w / 2), y0 - 5);
+  if (bot >= 18) bandMarble(s, x0 + Math.floor(ww * 0.22), y0 + wh + 12);
+}
 
 /* the view: a 160x144 window on the map between the 16 px HUD and the foot line; maps are up to 40x36 tiles */
 var HUD = 16, TILE = 8, COLS = 20, ROWS = 18, VIEW_W = COLS * TILE, VIEW_H = ROWS * TILE, FOOT = HUD + VIEW_H;
@@ -1186,7 +1397,7 @@ function roll(dt) {
   if (game.btn("left")) ax -= KEY_ACC; if (game.btn("right")) ax += KEY_ACC;
   if (game.btn("up")) ay -= KEY_ACC; if (game.btn("down")) ay += KEY_ACC;
   var p = game.pointer;
-  if (p.down && p.y >= HUD && p.y < FOOT) {             /* touch: the ball is pulled toward the finger */
+  if (p.down && touchInWorld && p.y >= HUD && p.y < FOOT) {             /* touch: the ball is pulled toward the finger */
     var dx = p.x + cam.x - ball.x, dy = p.y - HUD + cam.y - ball.y, d = Math.sqrt(dx * dx + dy * dy);
     if (d > 3) { ax += dx / d * KEY_ACC; ay += dy / d * KEY_ACC; }
   }
@@ -1624,9 +1835,9 @@ game.scene("title", {
     if (!loaded) return;                                 /* the save says which levels are open: a key before it lands would start level 1 */
     var d = game.dir();
     if (d.x) { var n = LoGame.clamp(sel + d.x, 0, prog.unlocked); picked = true; if (n !== sel) { sel = n; game.sfx("move"); } else game.sfx("err"); }
-    if (d.y > 0 || (game.pointer.pressed && game.pointer.y > 156 && game.pointer.x < 96)) { game.sfx("tap"); game.go("levels"); return; }
+    if (d.y > 0 || (worldTap() && game.pointer.y > 156 && game.pointer.x < 96)) { game.sfx("tap"); game.go("levels"); return; }
     if (game.pressed("select") && HAS_MOTION) { mode = mode === "tilt" ? "keys" : "tilt"; game.save("mode", mode); game.sfx("tick"); }
-    if (game.pressed("a") || game.pressed("start") || (game.pointer.pressed && game.pointer.y > 156)) { game.sfx("ok"); game.go("play", sel); }
+    if (game.pressed("a") || game.pressed("start") || (worldTap() && game.pointer.y > 156)) { game.sfx("ok"); game.go("play", sel); }
   },
   draw: function (g) {
     g.clear(g.PAPER);
@@ -1677,7 +1888,7 @@ game.scene("levels", {
     }
     if (game.pressed("b")) { game.sfx("tap"); game.go("title"); return; }
     var p = game.pointer;
-    if (p.pressed && p.y >= HUD && p.y < FOOT) {
+    if (worldTap() && p.y >= HUD && p.y < FOOT) {
       var r = listRows()[Math.floor((p.y - HUD + listTop) / ROW_H)];
       if (r && r.level != null) {
         if (r.level > prog.unlocked) { lockedHint(); return; }
@@ -1719,7 +1930,7 @@ game.scene("levels", {
   }
 });
 
-game.scene("play", {
+var playScene = game.scene("play", {
   enter: function (n) {
     n = typeof n === "number" ? n : 0;
     loadLevel(n, n % 4 === 0);                           /* the first level of an area opens on the area's card */
@@ -1728,10 +1939,11 @@ game.scene("play", {
   },
   exit: function () { sensorOff(); },
   update: function (dt) {
+    noteTouch();
     stateT += dt;
     sparks.forEach(function (s) { s.t += dt; });
     if (state === "intro") {
-      var any = game.pointer.pressed || ["a", "b", "start", "select", "up", "down", "left", "right"].some(function (b) { return game.pressed(b); });
+      var any = worldTap() || ["a", "b", "start", "select", "up", "down", "left", "right"].some(function (b) { return game.pressed(b); });
       if (stateT > 1.5 || (any && stateT > 0.2)) { state = "roll"; stateT = 0; }
       return;
     }

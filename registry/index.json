@@ -568,7 +568,7 @@
         "0333112033333330",
         "0000000000000000"
       ],
-      "version": "2.0.1",
+      "version": "2.1.0",
       "released": "2026-10-16",
       "updated": "2026-11-28",
       "description": "倾斜机身让小钢珠滚过花园、地窖和钟楼十二关：捡宝石、点亮存档点、绕开慢吞吞的甲虫，别掉进洞。也能用方向键推。",
@@ -588,8 +588,8 @@
         "motion"
       ],
       "path": "apps/tilt-maze/index.html",
-      "sha256": "a8f9d4db8c0f72629174fcb514d737eb5cf6d99416d2d5d355c6e878165bb131",
-      "bytes": 97579
+      "sha256": "ab77d85b225ce980e925d185027dec46b95802d570e21d6ab75ba3fa0d638cc1",
+      "bytes": 108521
     },
     {
       "spec": "lopda/1",
