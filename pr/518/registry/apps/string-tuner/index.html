@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>调音器</title>
+<!-- Lo-PDA app (lopda/1): a string tuner for guitar and ukulele. The microphone's pitch (PAD.mic, SPEC.md 6.4; the exact
+`hz` from runtime 1.7.0, the rounded `pitch` before) moves a needle over +-50 cents. Tap-driven, so no chin pad (sdk/UI.md 1).
+Copyright (c) 2026 Haowei Wu. MIT License. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;color:#1f2a14;font-family:monospace;user-select:none;-webkit-user-select:none}
+body{display:flex;flex-direction:column}
+button{font-family:monospace;font-size:15px;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;
+  min-height:44px;padding:0 8px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #1f2a14}
+header{flex:none;padding:8px 12px 0}
+#tuning{width:100%;text-align:left;font-weight:bold;display:flex;justify-content:space-between;align-items:center}
+main{flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;padding:12px 12px 8px}
+/* the meter takes the height that is left: its picture grows taller on a tall phone (fit()) instead of floating */
+#mwrap{flex:1;min-height:90px;display:flex;align-items:center}
+#meter{display:block;width:100%;image-rendering:pixelated;image-rendering:crisp-edges;border:3px solid #1f2a14;box-sizing:border-box;flex:none}
+/* the reading: note name, octave, cents and the lamp, one line */
+#read{display:flex;align-items:center;justify-content:space-between;min-height:64px;flex:none}
+#note{font-size:48px;font-weight:bold;line-height:1}
+#note sub{font-size:20px;vertical-align:baseline}
+#note.stale,#cents.stale{color:#4a5a32}
+#cents{font-size:20px;font-weight:bold;min-width:4.5em;text-align:center}
+#lamp{font-size:15px;font-weight:bold;padding:6px 8px;border:2px solid #4a5a32;color:#4a5a32;min-width:3em;text-align:center}
+#lamp.on{background:#1f2a14;color:#a3ad7e;border-color:#1f2a14}
+#msg{font-size:15px;min-height:44px;display:flex;align-items:center;justify-content:center;text-align:center;flex:none}
+#msg.tap{border:2px dashed #1f2a14;cursor:pointer}
+#strings{display:flex;gap:8px;flex:none}
+#strings button{flex:1;min-width:0;padding:0;font-size:17px;font-weight:bold;min-height:52px;position:relative}
+#strings button sub{font-size:12px}
+/* the string the tuner is reading is inverted; a locked one also carries a bar on top; a tuned one a bar below */
+#strings button.cur{background:#1f2a14;color:#a3ad7e}
+#strings button.lock::before{content:"";position:absolute;left:4px;right:4px;top:3px;height:3px;background:currentColor}
+#strings button.ok:not(.cur){background:#7d8a58}
+#strings button.ok::after{content:"";position:absolute;left:8px;right:8px;bottom:4px;height:3px;background:currentColor}
+footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
+footer button{flex:1}
+#auto.on{background:#1f2a14;color:#a3ad7e;box-shadow:3px 3px 0 #4a5a32}
+/* the tuning list: a screen of its own over the tuner */
+#list{position:fixed;inset:0;background:#a3ad7e;display:none;flex-direction:column}
+#list.open{display:flex}
+#list header{display:flex;gap:8px;align-items:center;padding:8px 12px}
+#list header b{flex:1;font-size:17px}
+#rows{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 12px 12px}
+#rows h3{font-size:13px;color:#4a5a32;margin:12px 0 4px;font-weight:normal}
+#rows .row{display:flex;width:100%;justify-content:space-between;align-items:center;margin:0 0 8px;box-shadow:none;text-align:left;gap:8px}
+#rows .row span{font-size:13px;overflow-wrap:anywhere;text-align:right}
+#rows .row.sel{background:#1f2a14;color:#a3ad7e}
+#rows .inst{display:flex;gap:8px}
+#rows .inst .row{flex:1;min-width:0}
+#rows .more{min-width:44px;margin:0 0 8px;font-size:17px;box-shadow:none}
+#rows .row.sub{width:calc(100% - 20px);margin-left:20px}
+#a4{display:flex;align-items:center;gap:8px;margin-top:4px}
+#a4 span{flex:1;font-size:15px}
+#a4 button{min-width:44px;font-size:20px;font-weight:bold}
+/* the start screen: the box art, and one tap that opens the mic (the runtime asks for it on every start anyway) */
+#splash{position:fixed;inset:0;background:#a3ad7e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  cursor:pointer;-webkit-tap-highlight-color:transparent}
+#splash.gone{display:none}
+#art{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+#go{font-size:17px;font-weight:bold;min-height:44px;display:flex;align-items:center;padding:0 12px;border:2px solid #1f2a14;
+  box-shadow:3px 3px 0 #1f2a14}
+</style>
+</head>
+<body>
+<header><button id="tuning"><span id="tname"></span><span>▾</span></button></header>
+<main>
+  <div id="mwrap"><canvas id="meter" width="160" height="64"></canvas></div>
+  <div id="read"><div id="note">-</div><div id="cents"></div><div id="lamp"></div></div>
+  <div id="msg"></div>
+  <div id="strings"></div>
+</main>
+<footer><button id="auto"></button><button id="tone"></button></footer>
+<div id="list"><header><b id="ltitle"></b><button id="back"></button></header><div id="rows"></div></div>
+<div id="splash"><canvas id="art" width="160" height="160"></canvas><div id="go"></div></div>
+
+<!-- The tuner's music and maths, free of the DOM so tests/string-tuner.test.mjs can run them in Node. -->
+<script id="logic">
+var Tuner = (function () {
+  /* Strings low to high as MIDI numbers (E2 = 40, A4 = 69). flats: name the notes with flats (a tuning a half step down). */
+  var TUNINGS = [
+    { id: "gtr-std",   group: "guitar", zh: "标准",        en: "Standard",        notes: [40, 45, 50, 55, 59, 64] },
+    { id: "gtr-dropd", group: "guitar", zh: "Drop D",      en: "Drop D",          notes: [38, 45, 50, 55, 59, 64] },
+    { id: "gtr-half",  group: "guitar", zh: "降半音",      en: "Half step down",  notes: [39, 44, 49, 54, 58, 63], flats: true },
+    { id: "gtr-whole", group: "guitar", zh: "降全音",      en: "Whole step down", notes: [38, 43, 48, 53, 57, 62] },
+    { id: "gtr-dadgad",group: "guitar", zh: "DADGAD",      en: "DADGAD",          notes: [38, 45, 50, 55, 57, 62] },
+    { id: "gtr-openg", group: "guitar", zh: "Open G",      en: "Open G",          notes: [38, 43, 50, 55, 59, 62] },
+    { id: "gtr-opend", group: "guitar", zh: "Open D",      en: "Open D",          notes: [38, 45, 50, 54, 57, 62] },
+    { id: "gtr-opene", group: "guitar", zh: "Open E",      en: "Open E",          notes: [40, 47, 52, 56, 59, 64] },
+    /* ukulele strings in playing order, top to bottom: the high G of the standard tuning comes first (re-entrant) */
+    { id: "uke-std",   group: "uke",    zh: "标准（高 G）", en: "Standard (high G)", notes: [67, 60, 64, 69] },
+    { id: "uke-lowg",  group: "uke",    zh: "低 G",        en: "Low G",           notes: [55, 60, 64, 69] },
+    { id: "uke-bari",  group: "uke",    zh: "上低音",      en: "Baritone",        notes: [50, 55, 59, 64] },
+    /* the bass's low strings (E1 41 Hz, B0 31 Hz) are under the mic's 50 Hz floor: they are read by their second harmonic
+       and folded down an octave, like the guitar's low E */
+    { id: "bass-std",  group: "bass",   zh: "四弦标准",    en: "4-string",        notes: [28, 33, 38, 43] },
+    { id: "bass-5",    group: "bass",   zh: "五弦",        en: "5-string",        notes: [23, 28, 33, 38, 43] },
+    { id: "bass-dropd",group: "bass",   zh: "Drop D",      en: "Drop D",          notes: [26, 33, 38, 43] },
+    { id: "violin",    group: "violin", zh: "标准",        en: "Standard",        notes: [55, 62, 69, 76] },
+    { id: "viola",     group: "viola",  zh: "标准",        en: "Standard",        notes: [48, 55, 62, 69] },
+    { id: "cello",     group: "cello",  zh: "标准",        en: "Standard",        notes: [36, 43, 50, 57] },
+    { id: "mandolin",  group: "mandolin", zh: "标准",      en: "Standard",        notes: [55, 62, 69, 76] },
+    /* the banjo's short fifth string is a high G, played first */
+    { id: "banjo-g",   group: "banjo",  zh: "Open G",      en: "Open G",          notes: [67, 50, 55, 59, 62] },
+    { id: "erhu",      group: "erhu",   zh: "内弦 D 外弦 A", en: "D and A",       notes: [62, 69] },
+    { id: "pipa",      group: "pipa",   zh: "标准",        en: "Standard",        notes: [45, 50, 52, 57] },
+    { id: "chromatic", group: "chrom",  zh: "半音模式",    en: "Chromatic",       notes: [] }
+  ];
+  /* the instruments in the list, in order; each one's first tuning is its default */
+  var GROUPS = ["guitar", "bass", "uke", "violin", "viola", "cello", "mandolin", "banjo", "erhu", "pipa", "chrom"];
+  var SHARP = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  var FLAT = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+  var IN_TUNE = 3, IN_TUNE_MS = 500;   /* within 3 cents for half a second lights the lamp */
+  var ATTACK_MS = 250;
+
+  function byId(id) { for (var i = 0; i < TUNINGS.length; i++) if (TUNINGS[i].id === id) return TUNINGS[i]; return null; }
+  function hz(midi, a4) { return a4 * Math.pow(2, (midi - 69) / 12); }
+  function cents(f, target) { return 1200 * Math.log(f / target) / Math.LN2; }
+  function name(midi, flats) { return { n: (flats ? FLAT : SHARP)[((midi % 12) + 12) % 12], o: Math.floor(midi / 12) - 1 }; }
+  function nearest(f, a4) { return Math.round(69 + 12 * Math.log(f / a4) / Math.LN2); }
+  /* the guitar's low strings are rich in their second harmonic, and a reading can come an octave high or low: move it by
+     octaves to within half an octave of the string being tuned */
+  function fold(f, target) {
+    while (f > target * Math.SQRT2) f /= 2;
+    while (f < target / Math.SQRT2) f *= 2;
+    return f;
+  }
+  /* which string a reading belongs to: the closest in cents; when nothing is within 60 cents, try the reading an octave
+     down and up too. The string already shown stays while it is within 120 cents unless another is clearly closer (20
+     cents), so the needle does not flick between two strings a whole tone apart (the ukulele's G and A). */
+  function pick(f, targets, cur) {
+    function best(g) {
+      var b = -1, bc = Infinity;
+      for (var i = 0; i < targets.length; i++) { var c = Math.abs(cents(g, targets[i])); if (c < bc) { bc = c; b = i; } }
+      return { i: b, c: bc };
+    }
+    var r = best(f);
+    if (r.c > 60) {
+      var lo = best(f / 2), hi = best(f * 2);
+      /* an octave high is the usual mistake (a low string's second harmonic), so down wins a tie: E3 is the low E */
+      if (lo.c < r.c) r = lo;
+      if (hi.c < r.c - 1) r = hi;
+    }
+    if (cur >= 0 && cur < targets.length && cur !== r.i) {
+      var cc = Math.abs(cents(fold(f, targets[cur]), targets[cur]));
+      if (cc < 120 && cc < r.c + 20) return cur;
+    }
+    return r.i;
+  }
+  /* a median of the last three readings (owner: the needle should live and tremble, not settle on a verdict; three only
+     drops single spikes). A reading more than 70 cents from it is held back: one alone is a glitch and is
+     dropped, two in a row that agree are a new note, and the median starts afresh from them */
+  function smoother() {
+    var a = [], pend = null;
+    function median() { var t = a.slice().sort(function (x, y) { return x - y; }); return t[t.length >> 1]; }
+    return {
+      push: function (f) {
+        if (a.length && Math.abs(cents(f, median())) > 70) {
+          if (pend !== null && Math.abs(cents(f, pend)) <= 70) { a = [pend, f]; pend = null; return median(); }
+          pend = f;
+          return a.length < 2 ? null : median();
+        }
+        pend = null;
+        a.push(f); if (a.length > 3) a.shift();
+        return a.length < 2 ? null : median();
+      },
+      reset: function () { a = []; pend = null; }
+    };
+  }
+  /* the whole reading for one smoothed frequency: which string (or note), its target, the cents off */
+  function read(f, tuning, a4, cur, lock) {
+    if (!tuning.notes.length) {
+      var m = nearest(f, a4), t = hz(m, a4);
+      return { i: -1, midi: m, target: t, cents: cents(f, t) };
+    }
+    var targets = tuning.notes.map(function (n) { return hz(n, a4); });
+    var i = lock >= 0 ? lock : pick(f, targets, cur);
+    var g = fold(f, targets[i]);
+    return { i: i, midi: tuning.notes[i], target: targets[i], cents: cents(g, targets[i]) };
+  }
+  function inGroup(g) { return TUNINGS.filter(function (t) { return t.group === g; }); }
+  return { TUNINGS: TUNINGS, GROUPS: GROUPS, inGroup: inGroup, IN_TUNE: IN_TUNE, IN_TUNE_MS: IN_TUNE_MS, ATTACK_MS: ATTACK_MS, byId: byId, hz: hz, cents: cents, name: name,
+    nearest: nearest, fold: fold, pick: pick, smoother: smoother, read: read };
+})();
+</script>
+
+<script>
+(function () {
+  "use strict";
+  var EN = PAD.lang === "en";
+  var T = EN ? {
+    guitar: "Guitar", bass: "Bass", uke: "Ukulele", violin: "Violin", viola: "Viola", cello: "Cello", mandolin: "Mandolin",
+    banjo: "Banjo", erhu: "Erhu", pipa: "Pipa", chrom: "Any instrument", list: "Tuning", back: "Back", auto: "Auto", locked: "Locked",
+    tone: "Play note", ok: "IN TUNE", more: "Other tunings", pluck: "Pluck a string", sing: "Play or sing a note",
+    asking: "Asking for the mic...", go: "Tap to start", denied: "No mic: tap here to ask again, or tune by ear with Play note",
+    none: "No mic on this device: tune by ear with Play note", a4: "Reference A4", hz: "Hz"
+  } : {
+    guitar: "吉他", bass: "贝斯", uke: "尤克里里", violin: "小提琴", viola: "中提琴", cello: "大提琴", mandolin: "曼陀林",
+    banjo: "班卓琴", erhu: "二胡", pipa: "琵琶", chrom: "其他乐器", list: "定弦", back: "返回", auto: "自动认弦", locked: "已锁定",
+    tone: "听音", ok: "准", more: "其他定弦", pluck: "拨一根弦", sing: "弹或唱一个音",
+    asking: "正在开话筒…", go: "点一下，开话筒", denied: "没开话筒：点这里再问一次，或点 听音 用耳朵调",
+    none: "这台设备没有话筒：点 听音 用耳朵调", a4: "标准音 A4", hz: "Hz"
+  };
+  var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
+  var RGB = TONES.map(function (h) { return [parseInt(h.substr(1, 2), 16), parseInt(h.substr(3, 2), 16), parseInt(h.substr(5, 2), 16)]; });
+  function $(id) { return document.getElementById(id); }
+
+  /* ---- settings: the tuning and A4, kept between visits ---- */
+  var set = { v: 1, tuning: "gtr-std", a4: 440 };
+  var tuning = Tuner.byId(set.tuning);
+  function store() { PAD.save("set", set); }
+
+  /* ---- the reading ---- */
+  var sm = Tuner.smoother();
+  var cur = -1;            /* the string shown (auto) */
+  var lock = -1;           /* the string the player locked, or -1 for auto */
+  var tuned = [];          /* strings that reached the lamp since the tuning was chosen */
+  var shown = null;        /* the last reading: {i, midi, cents} */
+  var lastHeard = 0, okSince = 0, lampOn = false, toneUntil = 0;
+  var mic = "off";         /* off | asking | on | denied | none */
+  var needle = 0, needleTo = 0, live = false, dirty = true;
+  var lvl = 0;             /* the mic's loudness 0-1, drawn small in the meter's corner so the player sees it hears */
+  var attackUntil = 0;     /* a fresh pluck rings sharp for a moment: readings wait until it settles */
+
+  function now() { return Date.now(); }
+
+  function onSound(s) {
+    if (mic !== "on" || listOpen) return;
+    var t = now();
+    if (s.level !== lvl) {
+      var was = lvl; lvl = s.level || 0; dirty = true;
+      /* a jump of 4 steps (about 7 dB) is a new pluck: its first 250 ms are sharp, the harder the more */
+      if (lvl - was >= 0.125) { attackUntil = now() + Tuner.ATTACK_MS; sm.reset(); }
+    }
+    if (now() < attackUntil) return;
+    if (t < toneUntil) return;                       /* our own reference tone is playing: not the string */
+    var f = typeof s.hz === "number" ? s.hz : (typeof s.pitch === "number" ? s.pitch : null);
+    if (f === null) return;                          /* silence, breath, noise: the staleness timer handles it */
+    /* mains hum (50 / 60 Hz) in a quiet room: nothing more than 3 semitones under the lowest string is a string */
+    if (tuning.notes.length && f < Tuner.hz(Math.min.apply(null, tuning.notes) - 3, set.a4)) return;
+    var g = sm.push(f);
+    if (g === null) return;
+    var r = Tuner.read(g, tuning, set.a4, cur, lock);
+    if (r.i >= 0 && r.i !== cur) { cur = r.i; okSince = 0; }
+    shown = r; lastHeard = t; live = true;
+    needleTo = Math.max(-50, Math.min(50, r.cents));
+    if (Math.abs(r.cents) <= Tuner.IN_TUNE) { if (!okSince) okSince = t; }
+    else okSince = 0;
+    dirty = true;
+  }
+
+  /* ---- drawing the meter: a 160 x 64 tone buffer, written with putImageData ---- */
+  var cv = $("meter"), cx = cv.getContext("2d"), W = 160, H = 64, buf, img;
+  var PX = 80, PY = 74, R = 62;                         /* the needle's pivot sits below the window, like a VU meter */
+  /* the picture is 160 px wide and as tall as the space allows (56-104 px): a longer needle on a taller phone */
+  function fit() {
+    var box = $("mwrap"), w = box.clientWidth - 6, h = box.clientHeight - 6;
+    var nh = Math.max(56, Math.min(104, Math.round(160 * h / Math.max(1, w))));
+    if (nh === H && buf) return;
+    H = nh; PY = H + 10; R = H - 2;
+    cv.height = H; buf = new Uint8Array(W * H); img = cx.createImageData(W, H); dirty = true;
+  }
+  var SPAN = 50 * Math.PI / 180;                        /* +-50 cents is +-50 degrees */
+  function px(x, y, t) { x = Math.round(x); y = Math.round(y); if (x >= 0 && x < W && y >= 0 && y < H) buf[y * W + x] = t; }
+  function line(a, r0, r1, t, thick) {
+    var s = Math.sin(a), c = Math.cos(a);
+    for (var r = r0; r <= r1; r += 0.5) {
+      var x = PX + s * r, y = PY - c * r;
+      px(x, y, t); if (thick) { px(x + 1, y, t); }
+    }
+  }
+  function draw() {
+    buf.fill(3);
+    /* the scale: a tick every 10 cents, the middle ones long, and a filled band for the in-tune zone */
+    for (var k = -50; k <= 50; k += 10) line(k / 50 * SPAN, k % 50 === 0 ? R - 12 : R - 7, R, 0, k === 0);
+    for (k = -45; k <= 45; k += 10) line(k / 50 * SPAN, R - 2, R, 1, false);
+    for (var d = -SPAN; d <= SPAN; d += 0.004) px(PX + Math.sin(d) * (R + 2), PY - Math.cos(d) * (R + 2), 1);
+    for (d = -Tuner.IN_TUNE; d <= Tuner.IN_TUNE; d += 0.25) line(d / 50 * SPAN, R + 3, R + 7, lampOn ? 0 : 2, false);
+    /* "-" and "+" marks at the ends, drawn as pixels so they stay four-tone */
+    for (var i = 0; i < 5; i++) { px(8 + i, 8, 0); px(148 + i, 8, 0); px(150, 6 + i, 0); }
+    /* the input level, bottom left: an empty box when silent, filling as the mic hears more */
+    for (var lx = 0; lx < 32; lx++) { px(5 + lx, H - 7, 2); px(5 + lx, H - 2, 2); }
+    for (var ly = H - 7; ly <= H - 2; ly++) { px(4, ly, 2); px(37, ly, 2); }
+    for (lx = 0; lx < Math.round(lvl * 31); lx++) for (ly = H - 6; ly <= H - 3; ly++) px(5 + lx, ly, mic === "on" ? 1 : 2);
+    /* the needle: ink while it hears a string, dark when the sound has died */
+    line(needle / 50 * SPAN, 6, R - 2, live ? 0 : 1, true);
+    for (var y = -2; y <= 2; y++) for (var x = -3; x <= 3; x++) px(PX + x, H - 3 + y, 0);
+    var p = img.data;
+    for (var j = 0; j < buf.length; j++) { var c = RGB[buf[j]]; p[j * 4] = c[0]; p[j * 4 + 1] = c[1]; p[j * 4 + 2] = c[2]; p[j * 4 + 3] = 255; }
+    cx.putImageData(img, 0, 0);
+  }
+
+  function noteHtml(midi, flats) {
+    var n = Tuner.name(midi, flats);
+    return n.n + "<sub>" + n.o + "</sub>";
+  }
+  function render() {
+    var t = now();
+    if (live && t - lastHeard > 600) { live = false; okSince = 0; needleTo = shown ? needleTo : 0; dirty = true; }
+    var on = live && okSince && t - okSince >= Tuner.IN_TUNE_MS;
+    if (on !== lampOn) {
+      lampOn = on; dirty = true;
+      /* every time the lamp lights it chimes (the mic skips the chime itself); the string keeps a mark that it was tuned */
+      if (on) {
+        PAD.sfx("ok"); toneUntil = t + 500;
+        if (shown && shown.i >= 0) tuned[shown.i] = true;
+      }
+    }
+    var moved = Math.abs(needleTo - needle) > 0.05;
+    if (moved) needle += (needleTo - needle) * 0.5;   /* quick, so each reading's wobble shows */
+    if (!dirty && !moved) return;
+    dirty = false;
+    draw();
+    var note = $("note"), ce = $("cents");
+    if (shown) {
+      note.innerHTML = noteHtml(shown.midi, tuning.flats);
+      var c = Math.round(shown.cents);
+      ce.textContent = (c > 0 ? "+" : c < 0 ? "-" : "") + Math.abs(c);
+    } else if (lock >= 0) { note.innerHTML = noteHtml(tuning.notes[lock], tuning.flats); ce.textContent = ""; }
+    else { note.textContent = "-"; ce.textContent = ""; }
+    note.className = ce.className = live ? "" : "stale";
+    var lamp = $("lamp"); lamp.textContent = T.ok; lamp.className = lampOn ? "on" : "";
+    var msg = $("msg");
+    msg.className = mic === "denied" ? "tap" : "";
+    msg.textContent = mic === "asking" ? T.asking : mic === "denied" ? T.denied : mic === "none" ? T.none
+      : live ? "" : (tuning.notes.length ? T.pluck : T.sing);
+    var bs = $("strings").children, show = lock >= 0 ? lock : cur;
+    for (var i = 0; i < bs.length; i++) {
+      bs[i].className = (i === show ? "cur" : "") + (i === lock ? " lock" : "") + (tuned[i] ? " ok" : "");
+    }
+    var au = $("auto");
+    au.textContent = lock >= 0 ? T.locked : T.auto;
+    au.className = lock >= 0 ? "" : "on";
+    au.style.visibility = tuning.notes.length ? "visible" : "hidden";
+  }
+  function frame() { fit(); render(); requestAnimationFrame(frame); }
+
+  /* ---- the tuning ---- */
+  /* "吉他 · Drop D"; an instrument with one tuning is just its name; chromatic is just "半音模式" */
+  function tuningLabel(tu) {
+    if (tu.group === "chrom") return EN ? tu.en : tu.zh;
+    return Tuner.inGroup(tu.group).length > 1 ? T[tu.group] + " · " + (EN ? tu.en : tu.zh) : T[tu.group];
+  }
+  function chooseTuning(tu, quiet) {
+    tuning = tu; set.tuning = tu.id; if (!quiet) store();
+    cur = -1; lock = -1; tuned = []; shown = null; live = false; needleTo = 0; okSince = 0; sm.reset();
+    $("tname").textContent = tuningLabel(tu);
+    var row = $("strings"); row.innerHTML = "";
+    tu.notes.forEach(function (m, i) {
+      var b = document.createElement("button");
+      b.innerHTML = noteHtml(m, tu.flats);
+      b.addEventListener("click", function () { tapString(i); });
+      row.appendChild(b);
+    });
+    row.style.display = tu.notes.length ? "flex" : "none";
+    dirty = true;
+  }
+  /* a tap locks that string (the needle reads only it); a tap on the locked one goes back to auto */
+  function tapString(i) {
+    PAD.sfx("tap");
+    lock = lock === i ? -1 : i;
+    if (lock >= 0) cur = lock;
+    shown = null; okSince = 0; sm.reset(); live = false; needleTo = 0;
+    dirty = true;
+  }
+  function playTone() {
+    var midi = lock >= 0 ? tuning.notes[lock] : cur >= 0 ? tuning.notes[cur] : shown ? shown.midi : tuning.notes.length ? tuning.notes[0] : 69;
+    var f = Tuner.hz(midi, set.a4);
+    /* the phone's speaker barely plays 82 Hz: a narrow pulse carries the note in its overtones, soft and with a long fade */
+    PAD.sfx({ wave: "square", duty: 1, from: f, to: f, ms: 1500, attack: 8, decay: 1200, vol: 0.45 });
+    toneUntil = now() + 1700; sm.reset();
+    if (!shown && midi) { shown = { i: tuning.notes.indexOf(midi), midi: midi, cents: 0 }; live = false; }
+    dirty = true;
+  }
+
+  /* ---- the microphone: on while the tuner screen is up, off on the list ---- */
+  function startMic() {
+    if (!PAD.mic) { mic = "none"; dirty = true; return; }
+    mic = "asking"; dirty = true;
+    PAD.mic.start().then(function (r) {
+      if (listOpen) { PAD.mic.stop(); mic = "off"; return; }
+      mic = r === "on" ? "on" : r === "denied" ? "denied" : "none"; dirty = true;
+    }, function () { mic = "none"; dirty = true; });
+  }
+  function stopMic() { if (PAD.mic) PAD.mic.stop(); mic = "off"; live = false; lvl = 0; dirty = true; }
+
+  /* ---- the box art: a 160 x 160 picture, four tones packed four to a byte (the owner's drawing, quantised; the title is
+     in the picture). It is the start screen: one tap there opens the mic, so the runtime's question follows a tap. */
+  var ART = {
+    zh: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD/////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA//////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP//////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD///////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA////////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP///////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD////////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA/////////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP/////////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD//w//AAAAD///8KqqqqAACgAAqqqqqqqqqqqqqqqqqqqqqqqqqqoA//8P/wAAAA////CqqqqgAAoAAKqqqqqqqqqqqqqqqqqqqqqqqqqqAP//8P8P8P8P8AAAAACqoKoKCqCqqqqqqqqqqqqqqqqqqqqqqqqqqgD///D/D/D/D/AAAAAAqqCqCgqgqqqqqqqqqqqqqqqqqqqqqqqqqqoA/////w8ADw//D///CqqgqgoKoKqqqqqqqqqqqqqqqqqqqqqqqqqqAP////8PAA8P/w///wqqoKoKCqCqqqqqqqqqqqqqqqqqqqqqqqqqqgD/////D/D/D//w//D6qqAACgAAqqqqqqqqqqqqqqqqqqqqqqqqqqoA/////w/w/w//8P/w/qqgAAoAAKqqqqqqqqqAAAAACqqqqqqqqqqqAP//AP8PAA8PAAAAAAAKqqqgoKqqqqqqqqqpAlVVVUCqqqqqqqqqqgD//wD/DwAPDwAAAAAACqqqoKCqqqqqqqqqoKlVVVVUBqqqqqqqqqoA///w/w///w////////8AAAAAAAqqqqqqoCpVVVVVVVQKqqqqqqqqAP//8P8P//8P////////AAAAAAAKqqqqAAqlVVVVVVVVUAKqqqqqqgD///D/DwAPD/8AAAAP//4KqqoKqqqqqCqqVVVVVVVVVVVQaqqqqqoA///w/w8ADw//AAAAD///CqqqCqqqqqiqpVVVVVVVVVVVVGqqqqqqAP//8P8PDw8P/w///w//AAAKAAAKqqqopVVVVVVVVVVVVVQqqqqqqgD///D/Dw8PD/8P//8P/wAACgAACqqqqJVVVVVVVVVVVVVUKqqqqqoA///w8A8ADw//AAAAD//w/woKoKqqqqiVVVVVVVVVVVVVVCqqqqqqAP//8PAPAA8P/wAAAA//8P8PCqCqqqqolVVVVVVVVVVVVVQqqqqqqgD///APD///D/8P//8P//D/DwqgqqqqqJVVVVVVVVVVVVVUKqqqqqoA///wDw///w//D///D//w/w8OoKqqqqiVVVVVVVVVVVVVVCqqqqqqAP//8PD///AP/wAAAA//8AAPAACqqqqqlVVVVVVVVVVVVVAqqqqqqgD///Dw///wD/8AAAAP//AADwAAqqqqqpVVVVVVVVVVVVVQaqqqqqoA/////////////////////////+qqqqqVVVVVVVVVVVVVUGqqqqqqAP/////////////////////////6qqqplVVVVVVVVVVVVVBqqqqqqgD//////////////////////////qqAKpVVVVVVVVVVVVVQaAGqqqoA///////////////////////////qPgaVVVVVVVVVVVVVUGH8qqqqAP//////////////////////////4+qilVQBVVVVVVVAFVCKq4qqqgD//////////////////////////+OqoiVYAVVVVVVVgoVQiqrGqqoA///////////////////////////OqpAlUvgVVVVVVDxFQAqq8qqqAP//////////////////////////zqpRJUP5FVVVVVI6FUBKqrKqqgD//////////////////////////86lUSVH5RVVVVVSaiVASqqyqqoA///////////////////////////JVVElSVUVVVVVUoSRQEqqoqqqAP//////////////////////////4FVCJUJWVVVVVVWpBUCCqkqqqgD//////////////////////////+hVQiVQAVVVVVVVgBVCgqpKqqoA///////////////////////////7FUolVVVVVVVVVhVVQqGkKqqqAP//////////////////////////7oUqJVVVVVVVVVYVVUKoUKqqqgD///////////////////////////ugqiVVVlVVVVVWFVUCqgKqqqoA///////////////////////////6qqolVVUVVVVVVhVVAqqqqqqqAP///////////////////////////qqqKVVVFVVVVVYVVQKqqqqqqgD///////////////////////////u+6ilVVRVVVVVWFVUCqqqqqqoA///////////////////////////u67opVVUVVVVVWFVVAqqqqqqqAP//////////////////////////+67qKVVWFVVVVVhVVQKqqqqqqgD///////////////////////////66qolVVhVVVVVYVVUKqqqqqqoA///////////////////////////7qrqJVVUVVVVVWFVVCqqqqqqqAP/////////////////////////77qAOiVVVFVVVVVhVVQqACqqqqgD///////////////////////////uPg4lVVRVVVVVYVVUKS/qqqqoA///////////////////////////uOqGJVVUVVVVVYVVVCiqyqqqqAP//////////////////////////+OqgiVVVlVVVVWFVVAoqraqqqgD//////////////////////////+OqqElWVoVVVVVoBFQEaqsqqqoA////////////////////////v//zqpSJWPmFVVVVYeUUGVqrKqqqAP//////////////////////////46pUilz5hVVVVWPhFBlWqyqqqgD///////////////////////////NVVIpcqIVVVVVioRQZVVcqqqoA//////////////////////////vhVVQKVgKFVVVVagUUAFVVKqqqAP//////////////////////////8FVUilKWhVVVVYqUFCoVVCqqqgD///////////////////////////oVUopVAiFVVVWGBVQqFVaqqqoA///////////////////////////uhUqKVVUhVVVVhlVUKgVKqqqqAP//////////////////////////+6AuilVVIVVVVYhVVCqACqqqqgD/////////////////////////6+7ru4pVVSFVVVWIVVQqqqqqqqoA//////////////////////+////7vu6KVVUhVVVVGFVUKqqqqqqqAP///////////////////////7///uu7ilVVIVVVVRhVUCqqqqqqqgD////////////////////////v//7qu4pVVSFVVVUYVVAqqqqqqqoA//////////////////////////r7vu6KVVUhVVVVGFVQKqqqqqqqAP//////////////////////vv+/7uu7ilVVIVVVVRhVUCqqqqqqqgD///////////////////////7///u+7opVVQhVVVUhVVAqqqqqqqoA///////////////////////////u67qKVVUIVVVWYVVQKqqqqqqqAP///////////////////+///6//+pVailVVCFVVVmFVUCqqqqqqqgD///////////////////v/+/7///o+oopVVQhVVVZhVVACqqqqqqoA///////////////////////////s+qOKVVUIVVVWYVVQ/AAqqqqqAP//////////////////v+7++/674uqlilVVCFVVVmFVU6tAqqqqqgD/////////////////////+/+v/+OqpApVVghVVVhhUVP6/AaqqqoA///////////////////////////jqlSKVlaIVVVYaVBR///8KqqqAP//////////////v/7//+//+/+/46VUSlj2iFVVWOOUUH///8KqqgD/////////////////////vv/v/+JVVApc+YZVVVjv1FAb///wqqoA//////////////////////u///vglVSKWKmGVVVY4pRQAr7//mqqAP///////////////+//7/7//7+/qJVRiloCxlVVWKwEUCBr//8qqgD//////////7///+////+/+/7v++5VUopW5cdVVVitUFAqAf//yqoA///////v//////////////u/7/vukCqJVQXHVVVhiAFQKqgv//iqAP///////8D//////+/v//v/67/vu7ruiVVVx1VVYZhVUCqqX//8qgD///////8cP///++/+/7/uu7/uu67ru4lVVcdVVWGYVVAqqqv/7yoA///////8Pw//7//////v//7ru+67uu6JVVXGVVVhmFVQKqqiv/8KAP///////P/P////++vvvu7/v+67ruu7iVVVhVVVYRhVVCqqpL//JgD///////z/z/////////+/++u6rquq6olVVYVVVYUYVVQqqoo//zIA///////8/8/////////7/+77uq6rqqqCVVWFVVWFGFVQqpP6P/8sAP///////P/P//++//77v+6/uu67rqu6opVVhVVVhRhVUKov6j//XAD///////zuj/////+77uu77u+67ru67qKVVcVVVYUAVUCo+qo//98A///////AAAP////77vv+77++7ruu67qopVXFVVWFAAVCo+qqP//PAP//////D/qU7+777/v/67vu67quq6rqqCVYhVVVhPzhBZOqqj//zwD//6qqqiqVVKqqqrv/+7quu77uqqqqqqolWcVFVhT+5QqOqqk//88A//z///////////8P//u+7/+q7rquqqqqaViFhVYU/7gKOqAAP//PAP/8//6qqqqqqqqqTr/+67vu67ruu6qqqolYhYVWFP/+Kjqihj//ywD//Oqqqqqqqqqqqkvuu67uu67uu+7qqqqZWGGFVhZ//wiqoio//+sA//iqqqqqqqqqqqpOv+7ru+7ruu66qqqpWVhhhVYWf78IqqIqL//rAP/8qAAAAAAAAAAKSqqrqu67quq6rqqqqqJYYUVYFir/hKqAqi//6wD//KGqqqqqqqqqqkqqqqqqqqqqqqqqqqqiWHFFWFY//5Kqgqkv//cA//yiv////////+pOu67ru+7ruu6qqqqqolhhRVhWH//iqgqgL//zAO74ov/////////6Su67/u67ru67qqqqqqJYYWVYVg//4qgqqi///wD//KL/////////+kq7ruu77uu67qqqqqqiWGFhWFYP/+AAaqov//8A/7yi///Vlar///pOrqu+7ru+6rqqqqqqolhhYVhYD//iCiqYr///AP/8ov/6////a//6TqqruuqqqqqqqqqqqqO76+/6q8v78KhqKL///wD//KL/X//v//b/+k67ruq6rqq6rqqqqqqj6+/v+/vLr/yYYKa///sA//yi/f//7/////pK7ru+7ruu7ruqqqqqo+vv7/v706/+JgKi///7AP/8ouv//+///536Truu67vuq7ruqqqqqmPr7+/7+/L//yqiov//+wDu+KL7///n///3+kruu77uu67uqqqqqqqgMDAgAAgC//8Koor///sA//yi////5///3/pKu67quq6ruqpqqqqqonFxYVFYWL//iVAL////AP/8ov///+f////6Squu6rqqqqqqqqqqqqJxcWFVWFi//+FWK////wD//KL////n////+kruu6rqq6rqqqqqqqqicXFhVVhYf//4VK////8A/ryi////5/////pOu67ru+7qqqqqqqqqonFxYVFYWD///gKv////AP/8ov///+v////6Su67vu67uqqqqqqqqpJxcWFRWFgv//+qv////wDu+KL////r////+k67ruu6qqqqqqqqqqqicXFhUVhYH///6v////8A//yi////AL////pK7quq6qqqqqqqqqqqonFxYVFYWA////v/////AP/8ov//8AAv///qSq6rquqqqqqqqqqqqqJxcWFRWFgP/////////wDu+KK//8AAC///qk67rqq6qqqqqqqqqqqicXFhUVhYC/////////8A/7yoAAAD//AAAApK7ru66qqqqqqqqqqqonFxYVFYWBP/////////AO7sqqqqqqqqqqqqTruu6qqqqqqqqqqqqqJxcWFRWFgS/////////wC/+Kqqqqqqqqqqqkquq6qqqqqqqqqqqqqicXFhUVhYEv////////8A7/yqqqqqqqqqqqpKqqqqqqqqqqqqqqqqonFxYVFYWBb/////////AO/8qqqqqpGqqqqqSruuqqqqqqqqqqqqqqJxcWFRXFgU/////////wD+6KqqqqqQqqqqqk7uu6qqqqqqqqqqqqqicXFhUVxYFD////////8A//yqqqqqkaqqqqpKu67qqqqqqqqqqqqqonFxYVFcWBU/////////AOroqqqqqqaqqqqqSu66qqqqqqqqqqqqqqJxcWFRWFgVP////////wC/+KqqqqqqqqqqqkqqqqqqqqqqqqqqqqqicXFhVVhYFS////////8AVaSqqqqqqqqqqqlKu66qqqqqqqqqqqqqo/a6uqquqlWP////////AP/8VVVVVVVVVVVVSqqqqqqqqqqqqqqqqpJxcWFRWFgVi////////wD//wAAAAAAAAAAABVVVVVqqqqqqqqqqWpicXFhUVhYFof///////8A////+qqqqq///////qqqmqqqqqqqqqqqknFxYVFcWBVX////////AP//6qqqqqqqqqqqqqqqqpqqqqqqqqqpqqJxcWFRXFgVUv///////wCqqqqqqqqqqqqqqqqqqqqaqqqqqqqqqqqicXFhUVhYGVa///////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqpqqqqonFxYVFYWBVUr///////AKqqqqqqqqqqqqqqqqqqqpaqqmqqqqmqpmJxcWFRWFgVVSv//////wCqqqqqqqqqqqqqqqqqqqqaqqqqqqmqqqmScXFhUVhYFVYq//////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqqqqqmYnFxYVFYWBVVSv//////AKqqqqqqqqqqqqqqqqqqqpqqqqqqqqpqqpJxcWFRWFgVVVK//////wCqqqqqqqqqqqqqqqqqqqqaqqqqqqqqqqqScXFhUVxYFVVVq/////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqqqqqqonFxYVFYWBVVVSv/////AKqqqqqqqqqqqqqqqqqqqpqqqqqqqqqmapJxcWFRWFgVVVVK/////wCqqqqqqqqqqqqqqqqqqqqWqqqqmqaqqZqScXFhUVhYFVVVUr////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqpqqpWonFxYVFYWBVVVVSv////AKqqqqqqqqqqqqqqqqqqqpqqqqqqqqqqmqJxcWFRWFgVVVVUb////wCqqqqqqqqqqqqqqqqqqqqaqqqqmqqpqqpScXFhUVhYFVVVVSv///8AVVVVVVVVVVVVVVVVVqqqmqqqqqqqqVqpUnFxYVFYWBVVVVVK////AFVVVVVVVVVVVVVVVVaqqpqqqqqpqqpqqlP6urqqrqqVWVVVSv///wBVVVVVVVVVVVVVVVVWqqqapqqqqlqqVWlScXFhUVhYFZVVVVq///8AVVVVVVVVVVVVVVVVVqqqmqqqpqqWqpVVUnFxYVVYWBVVVVVWv///AFVVVVVVVVVVVVVVVVaqqpqqqqqqlqqlVVJxcWFVWFgVVVVVUq///wBVVVVVVVVVVVVVVVVWqqqWpmmapqqWpVVicXFhVVhYFVVVVVSr//8AVVVVVVVVVVVVVVVVVqqqmpmmZlapVZVVUnFxYVVYWBVVVVVUq///AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+    en: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD/////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA//////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP//////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD///////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA////////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP///////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD////////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA/////////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP/////////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD//wAAAA//////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA//8AAAAP//////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP////D/////////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD////w//////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA////8P//////////qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAP////D//////////+qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgD////w//8P/w8PAP/wAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoA////8P//D/8PDwD/8ACqqqqqqqqqqqqqqqqAAAAACqqqqqqqqqqqAP////D//w//DwD/Dw+qCqqqqqqqqqqqqqqpAlVVVUCqqqqqqqqqqgD////w//8P/w8A/w8P+gqqqqqqqqqqqqqqoKlVVVVUBqqqqqqqqqoA////8P//D/8PD/8PAAAKqqqqqqqqqqqqoCpVVVVVVVQKqqqqqqqqAP////D//w//Dw//DwAACqqqqqqqqqqqAAqlVVVVVVVVUAKqqqqqqgD////w//8P/w8P/w8P//6qqqqqqqqqqCqqVVVVVVVVVVVQaqqqqqoA////8P//D/8PD/8PD///qqqqqqqqqqiqpVVVVVVVVVVVVGqqqqqqAP////D//w/wDw//Dw//D/qqqqqqqqqopVVVVVVVVVVVVVQqqqqqqgD////w//8P8A8P/w8P/w//qqqqqqqqqJVVVVVVVVVVVVVUKqqqqqoA////8P//8A8PD/8P8AD///qqqqqqqqiVVVVVVVVVVVVVVCqqqqqqAP////D///APDw//D/AA////qqqqqqqolVVVVVVVVVVVVVQqqqqqqgD///////////////////////qqqqqqqJVVVVVVVVVVVVVUKqqqqqoA///////////////////////+qqqqqqiVVVVVVVVVVVVVVCqqqqqqAP////////////////////////qqqqqqlVVVVVVVVVVVVVAqqqqqqgD/////////////////////////qqqqqpVVVVVVVVVVVVVQaqqqqqoA/////////////////////////+qqqqqVVVVVVVVVVVVVUGqqqqqqAP/////////////////////////6qqqplVVVVVVVVVVVVVBqqqqqqgD//////////////////////////qqAKpVVVVVVVVVVVVVQaAGqqqoA///////////////////////////qPgaVVVVVVVVVVVVVUGH8qqqqAP//////////////////////////4+qilVQBVVVVVVVAFVCKq4qqqgD//////////////////////////+OqoiVYAVVVVVVVgoVQiqrGqqoA//8P//D////////////////////OqpAlUvgVVVVVVDxFQAqq8qqqAP//D//w////////////////////zqpRJUP5FVVVVVI6FUBKqrKqqgD//w//8P///////////////////86lUSVH5RVVVVVSaiVASqqyqqoA//8P//D////////////////////JVVElSVUVVVVVUoSRQEqqoqqqAP//D//w////////////////////4FVCJUJWVVVVVVWpBUCCqkqqqgD//w//8P///////////////////+hVQiVQAVVVVVVVgBVCgqpKqqoA//8P//DwAA/////////////////7FUolVVVVVVVVVhVVQqGkKqqqAP//D//w8AAP////////////////7oUqJVVVVVVVVVYVVUKoUKqqqgD//w//8PD/8P////////////////ugqiVVVlVVVVVWFVUCqgKqqqoA//8P//Dw//D////////////////6qqolVVUVVVVVVhVVAqqqqqqqAP//D//w8P/w/////////////////qqqKVVVFVVVVVYVVQKqqqqqqgD//w//8PD/8P////////////////u+6ilVVRVVVVVWFVUCqqqqqqoA//8P//Dw//D////////////////u67opVVUVVVVVWFVVAqqqqqqqAP//D//w8P/w////////////////+67qKVVWFVVVVVhVVQKqqqqqqgD//w//8PD/8P////////////////66qolVVhVVVVVYVVUKqqqqqqoA//8P//Dw//D////////////////7qrqJVVUVVVVVWFVVCqqqqqqqAP//8AAP8AAP///////////////77qAOiVVVFVVVVVhVVQqACqqqqgD///AAD/AAD/////////////////uPg4lVVRVVVVVYVVUKS/qqqqoA///////w///////////////////uOqGJVVUVVVVVYVVVCiqyqqqqAP//////8P//////////////////+OqgiVVVlVVVVWFVVAoqraqqqgD///////D//////////////////+OqqElWVoVVVVVoBFQEaqsqqqoA///////w////////////////v//zqpSJWPmFVVVVYeUUGVqrKqqqAP//////////////////////////46pUilz5hVVVVWPhFBlWqyqqqgD///////////////////////////NVVIpcqIVVVVVioRQZVVcqqqoA//////////////////////////vhVVQKVgKFVVVVagUUAFVVKqqqAP//////////////////////////8FVUilKWhVVVVYqUFCoVVCqqqgD///////////////////////////oVUopVAiFVVVWGBVQqFVaqqqoA///////////////////////////uhUqKVVUhVVVVhlVUKgVKqqqqAP//////////////////////////+6AuilVVIVVVVYhVVCqACqqqqgD/////////////////////////6+7ru4pVVSFVVVWIVVQqqqqqqqoA//////////////////////+////7vu6KVVUhVVVVGFVUKqqqqqqqAP///////////////////////7///uu7ilVVIVVVVRhVUCqqqqqqqgD////////////////////////v//7qu4pVVSFVVVUYVVAqqqqqqqoA//////////////////////////r7vu6KVVUhVVVVGFVQKqqqqqqqAP//////////////////////vv+/7uu7ilVVIVVVVRhVUCqqqqqqqgD///////////////////////7///u+7opVVQhVVVUhVVAqqqqqqqoA///////////////////////////u67qKVVUIVVVWYVVQKqqqqqqqAP///////////////////+///6//+pVailVVCFVVVmFVUCqqqqqqqgD///////////////////v/+/7///o+oopVVQhVVVZhVVACqqqqqqoA///////////////////////////s+qOKVVUIVVVWYVVQ/AAqqqqqAP//////////////////v+7++/674uqlilVVCFVVVmFVU6tAqqqqqgD/////////////////////+/+v/+OqpApVVghVVVhhUVP6/AaqqqoA///////////////////////////jqlSKVlaIVVVYaVBR///8KqqqAP//////////////v/7//+//+/+/46VUSlj2iFVVWOOUUH///8KqqgD/////////////////////vv/v/+JVVApc+YZVVVjv1FAb///wqqoA//////////////////////u///vglVSKWKmGVVVY4pRQAr7//mqqAP///////////////+//7/7//7+/qJVRiloCxlVVWKwEUCBr//8qqgD//////////7///+////+/+/7v++5VUopW5cdVVVitUFAqAf//yqoA///////v//////////////u/7/vukCqJVQXHVVVhiAFQKqgv//iqAP///////8D//////+/v//v/67/vu7ruiVVVx1VVYZhVUCqqX//8qgD///////8cP///++/+/7/uu7/uu67ru4lVVcdVVWGYVVAqqqv/7yoA///////8Pw//7//////v//7ru+67uu6JVVXGVVVhmFVQKqqiv/8KAP///////P/P////++vvvu7/v+67ruu7iVVVhVVVYRhVVCqqpL//JgD///////z/z/////////+/++u6rquq6olVVYVVVYUYVVQqqoo//zIA///////8/8/////////7/+77uq6rqqqCVVWFVVWFGFVQqpP6P/8sAP///////P/P//++//77v+6/uu67rqu6opVVhVVVhRhVUKov6j//XAD///////zuj/////+77uu77u+67ru67qKVVcVVVYUAVUCo+qo//98A///////AAAP////77vv+77++7ruu67qopVXFVVWFAAVCo+qqP//PAP//////D/qU7+777/v/67vu67quq6rqqCVYhVVVhPzhBZOqqj//zwD//6qqqiqVVKqqqrv/+7quu77uqqqqqqolWcVFVhT+5QqOqqk//88A//z///////////8P//u+7/+q7rquqqqqaViFhVYU/7gKOqAAP//PAP/8//6qqqqqqqqqTr/+67vu67ruu6qqqolYhYVWFP/+Kjqihj//ywD//Oqqqqqqqqqqqkvuu67uu67uu+7qqqqZWGGFVhZ//wiqoio//+sA//iqqqqqqqqqqqpOv+7ru+7ruu66qqqpWVhhhVYWf78IqqIqL//rAP/8qAAAAAAAAAAKSqqrqu67quq6rqqqqqJYYUVYFir/hKqAqi//6wD//KGqqqqqqqqqqkqqqqqqqqqqqqqqqqqiWHFFWFY//5Kqgqkv//cA//yiv////////+pOu67ru+7ruu6qqqqqolhhRVhWH//iqgqgL//zAO74ov/////////6Su67/u67ru67qqqqqqJYYWVYVg//4qgqqi///wD//KL/////////+kq7ruu77uu67qqqqqqiWGFhWFYP/+AAaqov//8A/7yi///Vlar///pOrqu+7ru+6rqqqqqqolhhYVhYD//iCiqYr///AP/8ov/6////a//6TqqruuqqqqqqqqqqqqO76+/6q8v78KhqKL///wD//KL/X//v//b/+k67ruq6rqq6rqqqqqqj6+/v+/vLr/yYYKa///sA//yi/f//7/////pK7ru+7ruu7ruqqqqqo+vv7/v706/+JgKi///7AP/8ouv//+///536Truu67vuq7ruqqqqqmPr7+/7+/L//yqiov//+wDu+KL7///n///3+kruu77uu67uqqqqqqqgMDAgAAgC//8Koor///sA//yi////5///3/pKu67quq6ruqpqqqqqonFxYVFYWL//iVAL////AP/8ov///+f////6Squu6rqqqqqqqqqqqqJxcWFVWFi//+FWK////wD//KL////n////+kruu6rqq6rqqqqqqqqicXFhVVhYf//4VK////8A/ryi////5/////pOu67ru+7qqqqqqqqqonFxYVFYWD///gKv////AP/8ov///+v////6Su67vu67uqqqqqqqqpJxcWFRWFgv//+qv////wDu+KL////r////+k67ruu6qqqqqqqqqqqicXFhUVhYH///6v////8A//yi////AL////pK7quq6qqqqqqqqqqqonFxYVFYWA////v/////AP/8ov//8AAv///qSq6rquqqqqqqqqqqqqJxcWFRWFgP/////////wDu+KK//8AAC///qk67rqq6qqqqqqqqqqqicXFhUVhYC/////////8A/7yoAAAD//AAAApK7ru66qqqqqqqqqqqonFxYVFYWBP/////////AO7sqqqqqqqqqqqqTruu6qqqqqqqqqqqqqJxcWFRWFgS/////////wC/+Kqqqqqqqqqqqkquq6qqqqqqqqqqqqqicXFhUVhYEv////////8A7/yqqqqqqqqqqqpKqqqqqqqqqqqqqqqqonFxYVFYWBb/////////AO/8qqqqqpGqqqqqSruuqqqqqqqqqqqqqqJxcWFRXFgU/////////wD+6KqqqqqQqqqqqk7uu6qqqqqqqqqqqqqicXFhUVxYFD////////8A//yqqqqqkaqqqqpKu67qqqqqqqqqqqqqonFxYVFcWBU/////////AOroqqqqqqaqqqqqSu66qqqqqqqqqqqqqqJxcWFRWFgVP////////wC/+KqqqqqqqqqqqkqqqqqqqqqqqqqqqqqicXFhVVhYFS////////8AVaSqqqqqqqqqqqlKu66qqqqqqqqqqqqqo/a6uqquqlWP////////AP/8VVVVVVVVVVVVSqqqqqqqqqqqqqqqqpJxcWFRWFgVi////////wD//wAAAAAAAAAAABVVVVVqqqqqqqqqqWpicXFhUVhYFof///////8A////+qqqqq///////qqqmqqqqqqqqqqqknFxYVFcWBVX////////AP//6qqqqqqqqqqqqqqqqpqqqqqqqqqpqqJxcWFRXFgVUv///////wCqqqqqqqqqqqqqqqqqqqqaqqqqqqqqqqqicXFhUVhYGVa///////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqpqqqqonFxYVFYWBVUr///////AKqqqqqqqqqqqqqqqqqqqpaqqmqqqqmqpmJxcWFRWFgVVSv//////wCqqqqqqqqqqqqqqqqqqqqaqqqqqqmqqqmScXFhUVhYFVYq//////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqqqqqmYnFxYVFYWBVVSv//////AKqqqqqqqqqqqqqqqqqqqpqqqqqqqqpqqpJxcWFRWFgVVVK//////wCqqqqqqqqqqqqqqqqqqqqaqqqqqqqqqqqScXFhUVxYFVVVq/////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqqqqqqonFxYVFYWBVVVSv/////AKqqqqqqqqqqqqqqqqqqqpqqqqqqqqqmapJxcWFRWFgVVVVK/////wCqqqqqqqqqqqqqqqqqqqqWqqqqmqaqqZqScXFhUVhYFVVVUr////8AqqqqqqqqqqqqqqqqqqqqmqqqqqqpqqpWonFxYVFYWBVVVVSv////AKqqqqqqqqqqqqqqqqqqqpqqqqqqqqqqmqJxcWFRWFgVVVVUb////wCqqqqqqqqqqqqqqqqqqqqaqqqqmqqpqqpScXFhUVhYFVVVVSv///8AVVVVVVVVVVVVVVVVVqqqmqqqqqqqqVqpUnFxYVFYWBVVVVVK////AFVVVVVVVVVVVVVVVVaqqpqqqqqpqqpqqlP6urqqrqqVWVVVSv///wBVVVVVVVVVVVVVVVVWqqqapqqqqlqqVWlScXFhUVhYFZVVVVq///8AVVVVVVVVVVVVVVVVVqqqmqqqpqqWqpVVUnFxYVVYWBVVVVVWv///AFVVVVVVVVVVVVVVVVaqqpqqqqqqlqqlVVJxcWFVWFgVVVVVUq///wBVVVVVVVVVVVVVVVVWqqqWpmmapqqWpVVicXFhVVhYFVVVVVSr//8AVVVVVVVVVVVVVVVVVqqqmpmmZlapVZVVUnFxYVVYWBVVVVVUq///AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  };
+  function drawArt(canvas) {
+    var raw = atob(ART[EN ? "en" : "zh"]), ctx = canvas.getContext("2d"), im = ctx.createImageData(160, 160), d = im.data;
+    for (var i = 0; i < 160 * 160; i++) {
+      var t = (raw.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3, c = RGB[t];
+      d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(im, 0, 0);
+    /* whole-pixel scale, so the pixels stay square and sharp */
+    var box = canvas.parentNode, k = Math.max(1, Math.floor(Math.min(box.clientWidth - 24, box.clientHeight - 80, 480) / 160));
+    canvas.style.width = canvas.style.height = (160 * k) + "px";
+  }
+
+  /* ---- the tuning list ---- */
+  var listOpen = false;
+  var expanded = {};       /* which instruments show their tunings; the current one opens with the list */
+  function notesText(tu) { return tu.notes.map(function (m) { return Tuner.name(m, tu.flats).n; }).join(" "); }
+  function buildList() {
+    var rows = $("rows"); rows.innerHTML = "";
+    /* one row per instrument: the row chooses its default tuning, the arrow on the right opens its other tunings */
+    Tuner.GROUPS.forEach(function (g) {
+      var list = Tuner.inGroup(g), mine = tuning.group === g;
+      var line = document.createElement("div"); line.className = "inst";
+      var b = document.createElement("button");
+      b.className = "row" + (mine && (list.length === 1 || !expanded[g]) ? " sel" : "");
+      var l = document.createElement("b"); l.textContent = g === "chrom" ? T.chrom : T[g];
+      var sp = document.createElement("span");
+      var pick = mine ? tuning : list[0];
+      sp.textContent = g === "chrom" ? (EN ? list[0].en : list[0].zh)
+        : (list.length > 1 && mine ? (EN ? pick.en : pick.zh) + "  " : "") + notesText(pick);
+      b.appendChild(l); b.appendChild(sp);
+      b.addEventListener("click", function () { PAD.sfx("ok"); chooseTuning(list[0]); closeList(); });
+      line.appendChild(b);
+      if (list.length > 1) {
+        var more = document.createElement("button"); more.className = "more";
+        more.textContent = expanded[g] ? "\u25be" : "\u25b8";
+        more.setAttribute("aria-label", T.more);
+        more.addEventListener("click", function () { PAD.sfx("tap"); expanded[g] = !expanded[g]; buildList(); });
+        line.appendChild(more);
+      }
+      rows.appendChild(line);
+      if (list.length > 1 && expanded[g]) list.forEach(function (tu) {
+        var r = document.createElement("button");
+        r.className = "row sub" + (tu === tuning ? " sel" : "");
+        var tl = document.createElement("b"); tl.textContent = EN ? tu.en : tu.zh;
+        var ts = document.createElement("span"); ts.textContent = notesText(tu);
+        r.appendChild(tl); r.appendChild(ts);
+        r.addEventListener("click", function () { PAD.sfx("ok"); chooseTuning(tu); closeList(); });
+        rows.appendChild(r);
+      });
+    });
+    var a = document.createElement("div"); a.id = "a4";
+    var lab = document.createElement("span");
+    function show() { lab.textContent = T.a4 + " = " + set.a4 + " " + T.hz; }
+    function step(d) {
+      return function () {
+        var v = set.a4 + d;
+        if (v < 432 || v > 446) { PAD.sfx("err"); return; }
+        set.a4 = v; store(); show(); PAD.sfx("tick");
+      };
+    }
+    var minus = document.createElement("button"); minus.textContent = "-"; minus.addEventListener("click", step(-1));
+    var plus = document.createElement("button"); plus.textContent = "+"; plus.addEventListener("click", step(1));
+    show(); a.appendChild(lab); a.appendChild(minus); a.appendChild(plus);
+    var h2 = document.createElement("h3"); h2.textContent = T.a4; rows.appendChild(h2);
+    rows.appendChild(a);
+  }
+  function openList() {
+    PAD.sfx("tap"); listOpen = true; stopMic();
+    expanded = {}; if (Tuner.inGroup(tuning.group).length > 1) expanded[tuning.group] = true;
+    buildList(); $("list").className = "open";
+    $("rows").scrollTop = 0;
+  }
+  function closeList() {
+    listOpen = false; $("list").className = "";
+    shown = null; sm.reset(); needleTo = 0; dirty = true;
+    startMic();
+  }
+
+  $("tuning").addEventListener("click", openList);
+  $("back").addEventListener("click", function () { PAD.sfx("tap"); closeList(); });
+  $("auto").addEventListener("click", function () { if (lock >= 0) tapString(lock); });
+  $("tone").addEventListener("click", playTone);
+  $("msg").addEventListener("click", function () { if (mic === "denied") { PAD.sfx("tap"); startMic(); } });
+  $("ltitle").textContent = T.list; $("back").textContent = T.back; $("tone").textContent = T.tone;
+  if (PAD.mic) PAD.on("sound", onSound);
+
+  /* keys work too (keyboard, or a runtime that shows the pad anyway): left / right pick a string, A plays it,
+     B leaves the list or a lock, START opens the list */
+  PAD.on("press", function (b) {
+    if (splash) { if (b === "a" || b === "start") go(); return; }
+    if (listOpen) { if (b === "b" || b === "start") { PAD.sfx("tap"); closeList(); } return; }
+    var n = tuning.notes.length;
+    if ((b === "left" || b === "right") && n) {
+      var i = lock >= 0 ? lock : cur >= 0 ? cur : (b === "left" ? n : -1);
+      i = Math.max(0, Math.min(n - 1, i + (b === "left" ? -1 : 1)));
+      lock = -1; tapString(i);
+    }
+    else if (b === "a") playTone();
+    else if (b === "b" && lock >= 0) tapString(lock);
+    else if (b === "start") openList();
+  });
+
+  /* ---- the start screen: the mic opens on its tap ---- */
+  var splash = true;
+  function go() {
+    if (!splash) return;
+    splash = false; $("splash").className = "gone"; PAD.sfx("tap");
+    startMic();
+  }
+  $("splash").addEventListener("click", go);
+  $("go").textContent = T.go;
+  drawArt($("art"));
+
+  function begin(saved) {
+    if (saved && saved.v === 1) {
+      if (Tuner.byId(saved.tuning)) set.tuning = saved.tuning;
+      if (saved.a4 >= 432 && saved.a4 <= 446 && saved.a4 === Math.round(saved.a4)) set.a4 = saved.a4;
+    }
+    chooseTuning(Tuner.byId(set.tuning), true);
+    requestAnimationFrame(frame);
+  }
+  /* a save that cannot be read just means the defaults; nothing else is kept */
+  PAD.load("set").then(begin, function () { begin(null); });
+})();
+</script>
+</body>
+</html>
