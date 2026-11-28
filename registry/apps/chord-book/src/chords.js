@@ -130,6 +130,13 @@ var Chords = (function () {
   function name(c) { var Q = qual(c.q); return NAMES[c.root] + (Q && Q.show ? Q.show : c.q) + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
   function qual(id) { return Object.prototype.hasOwnProperty.call(QI, id) ? QUALS[QI[id]] : null; }
 
+  /* the shape chord -> the chord its strings sound with a capo, and back with a negative n (15.2): root and bass up n
+     semitones, the quality unchanged, no bass stays no bass. n 0 returns the same chord. */
+  function transpose(c, n) {
+    n = n || 0;
+    return { root: mod12(c.root + n), q: c.q, bass: c.bass === null || c.bass === undefined ? null : mod12(c.bass + n) };
+  }
+
   /* the labs that name an extension (a 9, 11 or 13, plain or altered): stacked an octave up when a chord's tones are
      read, so an add11 sounds at 17 semitones, above the 5th */
   var EXTLAB = { "9": true, "b9": true, "#9": true, "11": true, "#11": true, "13": true, "b13": true };
@@ -156,13 +163,16 @@ var Chords = (function () {
   }
 
   /* what each string of a voicing sounds, low E first: null for a muted string, else its pitch and the degree it is in the
-     chord (R, 3, 5, b7, 9...), "/" for a slash chord's extra bass. An open C is x, R, 3, 5, R, 3: five notes, not three. */
-  function strings(frets, c) {
+     chord (R, 3, 5, b7, 9...), "/" for a slash chord's extra bass. An open C is x, R, 3, 5, R, 3: five notes, not three.
+     With a capo (1.4.10) the pitch and the note name move up but the degree is still read against the shape: c is the shape
+     chord, so the degree lookup uses OPEN + frets, without the capo. */
+  function strings(frets, c, capo) {
+    capo = capo || 0;
     var ts = tones(c), out = [];
     for (var s = 0; s < 6; s++) {
       if (frets[s] < 0) { out.push(null); continue; }
-      var m = OPEN[s] + frets[s], pc = mod12(m), lab = "";
-      for (var i = 0; i < ts.length; i++) if (ts[i].pc === pc) { lab = ts[i].lab; break; }
+      var shape = OPEN[s] + frets[s], m = shape + capo, pc = mod12(m), lab = "";
+      for (var i = 0; i < ts.length; i++) if (ts[i].pc === mod12(shape)) { lab = ts[i].lab; break; }
       out.push({ s: s, midi: m, pc: pc, lab: lab });
     }
     return out;
@@ -259,7 +269,11 @@ var Chords = (function () {
   }
 
   /* ---------------- the generator (section 2.4) ---------------- */
-  function midiOf(frets) { var out = []; for (var i = 0; i < 6; i++) if (frets[i] >= 0) out.push(OPEN[i] + frets[i]); return out; }
+  function midiOf(frets, capo) {
+    var out = [], c = capo || 0;
+    for (var i = 0; i < 6; i++) if (frets[i] >= 0) out.push(OPEN[i] + frets[i] + c);
+    return out;
+  }
   /* which fingers a hand needs: a barre on the lowest fret when two or more strings share it and nothing between
      them is lower (an open or muted string cannot sit under a barre); one finger for every other fretted note */
   function fingerCount(frets) {
@@ -435,9 +449,10 @@ var Chords = (function () {
 
   /* ---------------- naming a voicing (section 3.4) ---------------- */
   /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 32.
-     The notes' pitch classes must hold every required tone of the quality and nothing outside it but the bass. */
-  function identify(frets) {
-    var notes = midiOf(frets);
+     The notes' pitch classes must hold every required tone of the quality and nothing outside it but the bass.
+     With a capo the frets sound capo semitones higher, so the names are the chords actually heard (15.3). */
+  function identify(frets, capo) {
+    var notes = midiOf(frets, capo);
     if (notes.length < 2) return [];
     var bass = mod12(Math.min.apply(null, notes)), have = {}, set = [];
     notes.forEach(function (n) { if (!have[mod12(n)]) { have[mod12(n)] = true; set.push(mod12(n)); } });
@@ -467,7 +482,7 @@ var Chords = (function () {
   return {
     OPEN: OPEN, NAMES: NAMES, PICK_NAMES: PICK_NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT, EXTLAB: EXTLAB,
-    parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
+    parse: parse, name: name, qual: qual, transpose: transpose, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
     fingerCount: fingerCount, assignFingers: assignFingers, barreFromFingers: barreFromFingers, position: position,
     midiOf: midiOf, fretText: fretText,

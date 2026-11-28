@@ -1114,3 +1114,200 @@ test("chord-book 1.4.4: a chord opened from a progression keeps the key's spelli
   assert.deepEqual(errors, []);
 });
 
+/* ---------------- the capo (1.4.10, docs/design/chord-book.md 15) ---------------- */
+
+/* pick a capo in the picker, then leave it: the row rebuilds on the way, so each tap finds it afresh */
+async function setCapo(p, n) {
+  await tap(p, "#chord");
+  await tap(p, p.locator("#capo button").nth(n));
+  await tap(p, "#pok");
+}
+
+test("chord-book 1.4.10: the picker's capo row is 0-12; capo 2 keeps the C shape and sounds D", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await p.evaluate(() => {
+      window.__notes = [];
+      const play = window.Guitar.play;
+      window.Guitar.play = (notes, gap, ring) => { window.__notes.push(notes.slice()); return play(notes, gap, ring); };
+    });
+    await tap(p, "#chord");
+    await fits(p, "#picker", size, "the picker with the capo row");
+    const cells = p.locator("#capo button");
+    assert.equal(await cells.count(), 13, "0 through 12");
+    assert.deepEqual(await cells.allTextContents(), Array.from({ length: 13 }, (_, i) => String(i)));
+    assert.equal(await text(p, "#capoH"), "变调夹");
+    const heights = await p.evaluate(() => [...document.querySelectorAll("#capo button")].map((b) => Math.round(b.getBoundingClientRect().height)));
+    assert.ok(heights.every((h) => h >= 44), `every capo cell is 44 px: ${heights}`);
+    assert.ok(await cells.first().evaluate((b) => b.classList.contains("sel")), "0 is the capo at first");
+    /* a tap takes effect at once: the rows behind the picker already show it */
+    await tap(p, cells.nth(2));
+    assert.ok(await p.locator("#capo button").nth(2).evaluate((b) => b.classList.contains("sel")));
+    assert.equal(await text(p, "#cname"), "C", "the header keeps the shape's name");
+    assert.equal(await text(p, "#qname"), "大三", "and the shape's quality");
+    const line = await text(p, "#line");
+    assert.ok(line.startsWith("x32010 · 变调夹 2 · 实际 D · 1 / "), line);
+    assert.ok(await p.locator("#line").evaluate((e) => e.scrollWidth <= e.clientWidth + 1), "the line is not clipped");
+    await tap(p, "#pok");
+    assert.equal(await text(p, "#tones"), "xDRF#3A5DRF#3", "the real notes, the shape's degrees");
+    await p.evaluate(() => { window.__notes = []; });
+    for (let i = 0; i < 5; i++) await tap(p, p.locator("#tones button").nth(i));
+    assert.deepEqual(await p.evaluate(() => window.__notes.map((n) => n[0])), [50, 54, 57, 62, 66], "each string played at the real pitch");
+    /* capo 12 is an octave: the same notes, every pitch twelve higher */
+    await setCapo(p, 12);
+    assert.equal(await text(p, "#cname"), "C");
+    const twelve = await text(p, "#line");
+    assert.ok(twelve.startsWith("x32010 · 变调夹 12 · 实际 C · 1 / "), twelve);
+    assert.equal(await text(p, "#tones"), "xCRE3G5CRE3", "an octave is the same notes");
+    await p.evaluate(() => { window.__notes = []; });
+    for (let i = 0; i < 5; i++) await tap(p, p.locator("#tones button").nth(i));
+    assert.deepEqual(await p.evaluate(() => window.__notes.map((n) => n[0])), [60, 64, 67, 72, 76], "an octave up");
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("chord-book 1.4.10: the finder names the sounding chord, and 看这个和弦 comes back under the capo", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await setCapo(p, 2);
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  assert.ok(await p.locator("#finder").evaluate((e) => e.classList.contains("open")));
+  assert.equal(await text(p, "#fname"), "D", "x32010 under capo 2 sounds D");
+  assert.equal(await text(p, "#fpos"), "1 品起 · 变调夹 2");
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push(notes.slice()); return play(notes, gap, ring); };
+  });
+  await tap(p, "#fplay");
+  assert.deepEqual(await p.evaluate(() => window.__notes[0]), [50, 54, 57, 62, 66], "Listen is at the real pitch");
+  await tap(p, "#fsee");
+  assert.equal(await text(p, "#cname"), "C", "the main screen holds the shape");
+  const line = await text(p, "#line");
+  assert.ok(line.startsWith("x32010 · 变调夹 2 · 实际 D · 1 / "), line);
+  await p.waitForTimeout(400);
+  assert.equal(await p.evaluate(() => window.__saves.set.capo), 2, "the capo stays");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.10: 连接 at capo 2 shows D's progressions and plays them a tone up", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await setCapo(p, 2);
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push(notes.slice()); return play(notes, gap, ring); };
+  });
+  await tap(p, "#prog");
+  assert.equal(await text(p, "#gtitle"), "D 的和弦连接 · 变调夹 2");
+  const card = p.locator("#glist .card").first();
+  assert.equal(await card.locator(".chips").textContent(), "DABmG", "the pop four in the real key");
+  assert.equal(await card.locator(".grole").textContent(), "D 在这里是 I");
+  await tap(p, card.locator(".gplay"));
+  assert.deepEqual(await p.evaluate(() => window.__notes[0]), [50, 54, 57, 62, 66], "the shape C at capo 2");
+  await tap(p, card.locator(".gplay"));
+  /* a chip opens the shape under the capo, its real name in the info line */
+  await tap(p, card.locator(".chips button").nth(2));
+  assert.ok(!(await p.locator("#progs").isVisible()));
+  assert.equal(await text(p, "#cname"), "Am", "Bm is the shape Am under the capo");
+  const line = await text(p, "#line");
+  assert.ok(line.startsWith("x02210 · 变调夹 2 · 实际 Bm · "), line);
+  /* a chord the key writes differently: D major's #I°7 is D#dim7, whose shape is C#dim7; the key's spelling goes in the
+     info line's real name, the header and the quality line stay the shape's (15.2) */
+  await tap(p, "#chord");
+  await tap(p, p.locator("#roots button", { hasText: /^C$/ }));
+  await tap(p, p.locator("#quals button", { hasText: "大三" }).first());
+  await tap(p, "#pok");
+  await tap(p, "#prog");
+  const passing = p.locator("#glist .card").filter({ hasText: "减七经过" }).first();
+  await tap(p, passing.locator(".chips button", { hasText: /^D#dim7$/ }));
+  assert.equal(await text(p, "#cname"), "C#dim7", "the shape under the capo");
+  assert.equal(await text(p, "#qname"), "减七", "the shape's quality, with no book-name suffix");
+  assert.match(await text(p, "#line"), /^x4[0-9x]* · 变调夹 2 · 实际 D#dim7 · /);
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.10: the improv view names the real root and marks the capo", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await setCapo(p, 2);
+  await tap(p, "#view"); await tap(p, "#view"); await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "即兴");
+  assert.equal(await text(p, "#qname"), "D Ionian（大调） · 变调夹 2 · 1 / 4");
+  assert.equal(await text(p, "#line"), "R 3 11 5 13 7 9", "the degrees are the shape's, unchanged");
+  assert.equal(await p.locator("#tones .legend").textContent(), "■ 根音 ● 和弦音 ○ 延伸音 × 避免音");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.10: the picture is the shape's, pixel for pixel, at capo 0, 2 and 12", { skip, timeout: 120000 }, async (t) => {
+  const { p, errors } = await open(t);
+  const pixels = () => p.locator("#pic").evaluate((c) => Array.from(c.getContext("2d").getImageData(0, 0, c.width, c.height).data).join(","));
+  const shots = {};
+  for (const capo of [0, 2, 12]) {
+    if (capo) await setCapo(p, capo);
+    /* four taps go round the views and back to the box */
+    for (let i = 0; i < 4; i++) {
+      const view = await text(p, "#view");
+      (shots[view] = shots[view] || {})[capo] = await pixels();
+      await tap(p, "#view");
+    }
+  }
+  assert.deepEqual(Object.keys(shots).sort(), ["即兴", "度数", "框图", "指板"].sort());
+  for (const view of Object.keys(shots)) {
+    assert.equal(shots[view][2], shots[view][0], `${view} at capo 2 looks the same`);
+    assert.equal(shots[view][12], shots[view][0], `${view} at capo 12 looks the same`);
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.10: the capo is saved; an old save opens at 0 and a broken one is dropped", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  assert.match(await text(p, "#line"), /^x32010 · 1 \//, "a new save starts at capo 0");
+  await setCapo(p, 5);
+  assert.ok((await text(p, "#line")).startsWith("x32010 · 变调夹 5 · 实际 F · "));
+  await p.waitForTimeout(400);
+  assert.equal(await p.evaluate(() => window.__saves.set.capo), 5);
+  const s = await p.evaluate(() => window.__saves.set);
+  const again = await open(t, { saved: s });
+  assert.ok((await text(again.p, "#line")).startsWith("x32010 · 变调夹 5 · 实际 F · "), "the capo comes back");
+  await tap(again.p, "#chord");
+  assert.ok(await again.p.locator("#capo button").nth(5).evaluate((b) => b.classList.contains("sel")));
+  /* an old save has no capo key; a save with one outside 0-12 is not believed */
+  const old = await open(t, { saved: { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] } });
+  assert.match(await text(old.p, "#line"), /^x32010 · 1 \//);
+  const bad = await open(t, { saved: { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, capo: 13, recent: [] } });
+  assert.match(await text(bad.p, "#line"), /^x32010 · 1 \//, "a capo past 12 is no capo");
+  assert.deepEqual(errors, []);
+  assert.deepEqual(old.errors, []);
+  assert.deepEqual(bad.errors, []);
+  assert.deepEqual(again.errors, []);
+});
+
+test("chord-book 1.4.10: the capo's words in English", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { lang: "en" });
+  await tap(p, "#chord");
+  assert.equal(await text(p, "#capoH"), "Capo");
+  await tap(p, p.locator("#capo button").nth(2));
+  await tap(p, "#pok");
+  assert.match(await text(p, "#line"), /^x32010 · Capo 2 · sounds D · /);
+  await tap(p, "#prog");
+  assert.equal(await text(p, "#gtitle"), "Progressions with D · Capo 2");
+  await tap(p, "#gback");
+  await tap(p, "#view"); await tap(p, "#view"); await tap(p, "#view");
+  assert.equal(await text(p, "#qname"), "D Ionian (major) · Capo 2 · 1 / 4");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.10: a temporary finder voicing stays when the capo changes", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  /* start the finder on C x32010 (base 1), then move the low E to fret 5: 532010, a shape not in Am7's list */
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  await tap(p, p.locator("#frets button").nth(4 * 6 + 0));
+  await tap(p, "#fsee");
+  assert.match(await text(p, "#line"), /^532010 · 1 \//, "the finder's guessed shape is shown as a temporary first voicing");
+  /* changing the capo moves the pitch and the real name, not the hand: the same 532010 stays */
+  await setCapo(p, 2);
+  assert.match(await text(p, "#line"), /^532010 · 变调夹 2 · 实际 /, "the temporary voicing is still the hand's shape");
+  assert.deepEqual(errors, []);
+});
+

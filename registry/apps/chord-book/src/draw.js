@@ -185,14 +185,17 @@ var Draw = (function () {
 
   /* The improv view (1.4.0): the neck with every note of a scale and the chord's tones, by kind, on all 15 frets and the
      open strings: the root a square, a chord tone a dot (land on these), a tension a ring (colour you can hold), an avoid
-     note a small cross (pass through it). notes: Scales' [{pc, kind}]. */
-  function scale(notes) {
+     note a small cross (pass through it). notes: Scales' [{pc, kind}]; with a capo the notes are the sounding scale and
+     each place is read capo semitones above the shape's own fret, so the picture is the shape's and does not move
+     (15.3). */
+  function scale(notes, capo) {
+    capo = capo || 0;
     var b = neckFrame(), kind = {}, s, f, bottom = NY + 5 * NS;
     notes.forEach(function (n) { kind[n.pc] = n.kind; });
     for (s = 0; s < 6; s++) {
       var y = bottom - s * NS;
       for (f = 0; f <= 15; f++) {
-        var k = kind[(Chords.OPEN[s] + f) % 12], x = neckX(f);
+        var k = kind[(Chords.OPEN[s] + f + capo) % 12], x = neckX(f);
         if (!k) continue;
         if (f === 0) b.rect(x - 3, y - 3, 7, 7, PAPER);
         if (k === "r") b.rect(x - 3, y - 3, 7, 7, INK);

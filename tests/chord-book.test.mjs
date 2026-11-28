@@ -703,3 +703,61 @@ test("the improv picture marks every place of the scale by kind and leaves other
   /* fret 2 of the high E is F#, not in C Ionian: the string runs through */
   assert.equal(at(12 + 9 + 5, 6), 1);
 });
+
+/* ---------------- the capo (1.4.10, docs/design/chord-book.md 15) ---------------- */
+
+test("capo: transpose moves the root and the bass, keeps the quality, and comes back", () => {
+  assert.deepEqual({ ...C.transpose(C.parse("C"), 2) }, { ...C.parse("D") }, "C up two semitones is D");
+  assert.deepEqual({ ...C.transpose(C.parse("D/F#"), 2) }, { ...C.parse("E/Ab") }, "the bass moves too, in the book's fixed names");
+  assert.deepEqual({ ...C.transpose(C.transpose(C.parse("D/F#"), 2), -2) }, { ...C.parse("D/F#") }, "and back again");
+  assert.equal(C.transpose(C.parse("C"), 0).bass, null, "a chord with no bass keeps none");
+  assert.equal(C.transpose(C.parse("C"), 12).root, 0, "an octave is the same chord");
+  assert.equal(C.transpose(C.parse("Am7"), 3).q, "m7", "the quality does not change");
+  assert.deepEqual({ ...C.transpose(C.parse("Ebmaj7"), 11) }, { ...C.parse("Dmaj7") }, "up eleven, mod twelve");
+});
+
+test("capo: 0 is a no-op for transpose, strings, midiOf, identify and Draw.scale", () => {
+  const same = (a, b, what) => assert.equal(JSON.stringify(a), JSON.stringify(b), what);
+  const cases = [["C", "x32010"], ["Am/G", "3x2210"], ["E7b9", "07676x"], ["Cmaj7#11", "x34000"], ["Ab9/B", "x1200x"]];
+  for (const [name, f] of cases) {
+    const c = C.parse(name), frets = C.fr(f);
+    same(C.transpose(c, 0), c, `${name}: transpose 0`);
+    same(C.strings(frets, c), C.strings(frets, c, 0), `${name}: strings 0`);
+    same(C.midiOf(frets), C.midiOf(frets, 0), `${name}: midiOf 0`);
+    same(C.identify(frets), C.identify(frets, 0), `${name}: identify 0`);
+  }
+  /* the improv picture of a chord and its first scale: the same buffer with and without the 0 */
+  const notes = S.forChord(C.parse("C"), null).list[0].notes;
+  const a = D.scale(notes), b = D.scale(notes, 0);
+  assert.equal([...a.px].join(","), [...b.px].join(","), "Draw.scale 0 is the same buffer");
+});
+
+test("capo: a C shape at capo 2 sounds D, and its degrees are still the shape's", () => {
+  const c = C.parse("C"), frets = C.fr("x32010"), s = [...C.strings(frets, c, 2)];
+  assert.deepEqual(s.map((x) => (x ? C.NAMES[x.pc] : null)), [null, "D", "F#", "A", "D", "F#"], "D F# A D F#");
+  assert.deepEqual(s.map((x) => (x ? x.lab : null)), [null, "R", "3", "5", "R", "3"], "the degrees do not move");
+  assert.deepEqual([...C.midiOf(frets, 2)], [50, 54, 57, 62, 66], "a tone above the shape's own [48, 52, 55, 60, 64]");
+  /* capo 12 is an octave: the same notes as capo 0, every pitch twelve higher */
+  const twelve = [...C.strings(frets, c, 12)];
+  assert.deepEqual(twelve.map((x) => (x ? C.NAMES[x.pc] : null)), [...C.strings(frets, c)].map((x) => (x ? C.NAMES[x.pc] : null)), "the same notes");
+  assert.deepEqual([...C.midiOf(frets, 12)], [...C.midiOf(frets)].map((m) => m + 12), "an octave up");
+});
+
+test("capo: the finder names the chord the strings sound, and the name comes back to the shape", () => {
+  const d = [...C.identify(C.fr("x32010"), 2)];
+  assert.equal(C.name(d[0]), "D", "x32010 under capo 2 is D");
+  assert.deepEqual({ ...C.transpose(d[0], -2) }, { ...C.parse("C") }, "and -2 takes it back to the shape");
+  assert.equal(C.name([...C.identify(C.fr("2x0232"), 2)][0]), "E/Ab", "D/F# under capo 2 is E/Ab, in the fixed names");
+  assert.equal(C.name([...C.identify(C.fr("x32010"))][0]), "C", "capo 0 still names the shape");
+});
+
+test("capo: the improv picture is the shape's picture at every capo, 0 through 12", () => {
+  for (const shape of ["C", "Am7", "Abdim7", "C13"]) {
+    const base = [...D.scale(S.forChord(C.parse(shape), null).list[0].notes).px].join(",");
+    for (let capo = 0; capo <= 12; capo++) {
+      const sounding = C.transpose(C.parse(shape), capo);
+      const b = D.scale(S.forChord(sounding, null).list[0].notes, capo);
+      assert.equal([...b.px].join(","), base, `${shape} at capo ${capo}`);
+    }
+  }
+});
