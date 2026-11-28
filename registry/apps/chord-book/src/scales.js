@@ -74,9 +74,20 @@ var Scales = (function () {
     "6":   [["ionian", [5]], ["lydian"], ["majpent"]],
     "m6":  [["dorian"], ["melmin"]],
     "9":   [["mixolydian", [5]], ["lyddom"], ["mixob13", [5]]],
-    "m9":  [["dorian"], ["aeolian", [8]], ["minpent"]]
+    "m9":  [["dorian"], ["aeolian", [8]], ["minpent"]],
+    "maj9": [["ionian", [5]], ["lydian"], ["majpent"]],
+    "13":  [["mixolydian", [5]], ["lyddom"], ["blues"]],
+    "7#9": [["altered"], ["hwdim"], ["mixolydian"]],
+    "6/9": [["ionian", [5]], ["lydian"], ["majpent"]],
+    "m11": [["dorian"], ["aeolian", [8]], ["minpent"]],
+    "add11": [["ionian"], ["mixolydian"]]
   };
   var MAJOR = [0, 2, 4, 5, 7, 9, 11], MINOR = [0, 2, 3, 5, 7, 8, 10];
+  /* the labs the line reads after the chord's run: a natural 9 always (1.4.2). A b9, #9, 13 or b13 joins it only when
+     the chord itself owns one of those colours (13, 7#9, later b9...); then the whole altered/13 group reads after the
+     run. In the existing 19 such notes are scale tensions and keep their old pitch order. An 11 sounds between the 3rd
+     and the 5th and stays in the run's pitch order. */
+  var UPPER = { "9": true, "b9": true, "#9": true, "13": true, "b13": true };
 
   /* one option: the scale's notes and the chord's tones together, low to high, each {iv, pc, lab, kind} with kind
      "r" root, "c" chord tone, "t" tension, "a" avoid. A chord tone keeps the chord's own name (the 6 of a 6 chord). */
@@ -93,8 +104,14 @@ var Scales = (function () {
       n.pc = mod12(c.root + v);
       return n;
     });
-    /* the line reads left to right, and a 9 is an extension: it goes last, so the scale's own run stays in pitch order */
-    var line = notes.filter(function (n) { return n.lab !== "9"; }).concat(notes.filter(function (n) { return n.lab === "9"; }));
+    /* the line reads left to right. The 9 is read last (1.4.2); a b9, #9, 13 or b13 is read last only when the chord
+       itself has one, so the old 19 keep their order and C13 / C7#9 put their own colour after the run. An 11 stays
+       where it sounds, between the 3rd and the 5th (1.4.7). */
+    var owns = false;
+    Q.lab.forEach(function (l) { if (l !== "9" && UPPER[l]) owns = true; });
+    function upper(n) { return n.lab === "9" || (owns && UPPER[n.lab]); }
+    var line = notes.filter(function (n) { return !upper(n); })
+      .concat(notes.filter(upper).sort(function (a, b) { return a.iv - b.iv; }));
     /* the avoid notes said in words after the scale's own line: which chord tone each sits a half step over, or for a
        sus4 that the 3 would undo the suspension */
     var zh = [], en = [];
