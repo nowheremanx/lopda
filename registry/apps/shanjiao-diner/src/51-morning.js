@@ -111,6 +111,11 @@ game.scene("morning", {
     if (game.repeat("right")) { MORNING_SEL = (MORNING_SEL + 1) % acts.length; game.sfx("move"); }
     // up/down still move the same row on a one-row bar
     if (game.pressed("a")) morningAct(MORNING_SEL);
+    else {
+      /* the action bar: 30 game px tall (44 css px at 331 px wide) */
+      var hit = tapCell(acts.length, 6, 190, 204, 30);
+      if (hit >= 0) { MORNING_SEL = hit; morningAct(hit); }
+    }
     if (game.pressed("b")) game.go("help", { from: "morning" });
     if (game.pressed("start")) {
       game.sfx("tap");

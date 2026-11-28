@@ -153,9 +153,17 @@ game.scene("battle", {
       if (game.repeat("up")) { B.sel ^= 2; game.sfx("move"); }
       if (game.repeat("down")) { B.sel ^= 2; game.sfx("move"); }
       if (game.pressed("a")) playerAction(B.sel);
+      else {
+        /* the drawn 2x2 grid: cells x 6..106 / 106..200, rows y 178..191 / 191..205 */
+        var p = game.pointer, cell = -1;
+        if (p.pressed && p.x >= 6 && p.x < 200 && p.y >= 178 && p.y < 206) {
+          cell = (p.y < 191 ? 0 : 2) + (p.x < 106 ? 0 : 1);
+        }
+        if (cell >= 0) { B.sel = cell; playerAction(cell); }
+      }
       if (game.pressed("b")) playerAction(4);
     } else if (B.mode === "end") {
-      if (game.pressed("a") || game.pressed("b")) {
+      if (game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
         game.sfx("tap");
         game.pop({ result: B.result, drops: B.drops, money: B.money });
       }
