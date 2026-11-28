@@ -4,8 +4,8 @@ var GM = (typeof GM !== "undefined" && GM) || {};
 GM.ui = (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
   var T = GM.text(LANG);
-  var state, ctx, cv, ov, introEl, foot, lv, cash, tm, bar;
-  var last = 0, lastScreen = "", lastHud = "", lastFoot = "", lastIntro = "";
+  var state, ctx, cv, ov, introEl;
+  var last = 0, lastScreen = "", lastIntro = "";
   var lastJingleId = 0;
 
   function $(id) { return document.getElementById(id); }
@@ -21,11 +21,8 @@ GM.ui = (function () {
     ctx.imageSmoothingEnabled = false;
     ov = $("ov");
     introEl = $("intro");
-    foot = $("foot");
-    lv = $("lv");
-    cash = $("cash");
-    tm = $("tm");
-    bar = $("barfill");
+    /* the scoreboard is painted in the sky above the mine (src/22-hud.js), in this language */
+    GM.hudT = T;
     document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
     document.title = T.title;
     cv.addEventListener("pointerdown", onCanvas);
@@ -34,8 +31,6 @@ GM.ui = (function () {
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
-    updateHud(true);
-    updateFoot(true);
   }
 
   function setBest(info) {
@@ -297,46 +292,9 @@ GM.ui = (function () {
     } else {
       ov.innerHTML = "";
     }
-    updateFoot(true);
-    updateHud(true);
     updateIntro();
     musicFor(screen);
     saveRun();
-  }
-
-  function updateHud(force) {
-    var sec = Math.ceil(state.time);
-    var key = state.screen + "|" + state.level + "|" + state.bank + "|" + state.target + "|" + sec + "|" + (state.bank >= state.target);
-    if (!force && key === lastHud) return;
-    lastHud = key;
-    lv.textContent = GM.fmt(T.level, { n: state.level });
-    cash.textContent = money(state.bank) + " / " + GM.money(state.target);
-    cash.className = state.bank >= state.target ? "met" : "";
-    tm.textContent = GM.fmt(T.time, { n: sec });
-    tm.className = sec <= 10 && state.screen === "play" ? "low" : "";
-    bar.style.width = Math.max(0, Math.min(100, Math.round(state.bank / (state.target || 1) * 100))) + "%";
-  }
-
-  function updateFoot(force) {
-    var text, dyn = state.dynamite > 0 ? state.dynamite : 0;
-    if (state.screen === "play" || state.screen === "intro") text = GM.footPlayText(LANG, dyn);
-    else if (state.screen === "paused") text = T.pauseFoot;
-    else if (state.screen === "confirm") text = T.confirmFoot;
-    else if (state.screen === "codex") text = T.codexFoot;
-    else if (state.screen === "clear") text = T.footClear;
-    else if (state.screen === "shop") text = T.footShop;
-    else if (state.screen === "over") text = T.footOver;
-    else if (state.screen === "victory") text = T.footVictory;
-    else text = T.menuFoot;
-    if (!force && text === lastFoot) return;
-    lastFoot = text;
-    if ((state.screen === "play" || state.screen === "intro") && dyn <= 0) {
-      /* the B key is always taught, but greyed out while there is nothing to throw */
-      var b = esc(GM.fmt(T.footB, { n: 0 }));
-      foot.innerHTML = esc(T.footPlay).replace("{b}", '<span style="color:#7d8a58">' + b + "</span>");
-    } else {
-      foot.textContent = text;
-    }
   }
 
   function updateIntro() {
@@ -354,8 +312,10 @@ GM.ui = (function () {
     if (state.strength) buff.push(T.buffNames[0]);
     if (state.clover) buff.push(T.buffNames[1]);
     if (state.book) buff.push(T.buffNames[2]);
+    /* the keys are taught here, while the level opens: during play the whole screen is the mine */
     var html = "<b>" + esc(GM.fmt(T.intro, { n: state.level, t: GM.money(state.target) })) + "</b><span>" + esc(tip) + "</span>" +
-      (buff.length ? "<span>" + esc(GM.fmt(T.buffIntro, { b: buff.join(" · ") })) + "</span>" : "");
+      (buff.length ? "<span>" + esc(GM.fmt(T.buffIntro, { b: buff.join(" · ") })) + "</span>" : "") +
+      '<span class="keys">' + esc(GM.footPlayText(LANG, state.dynamite > 0 ? state.dynamite : 0)) + "</span>";
     if (html === lastIntro) return;
     lastIntro = html;
     introEl.innerHTML = html;
@@ -610,18 +570,19 @@ GM.ui = (function () {
     if (document.hidden && (state.screen === "play" || state.screen === "intro") && GM.pause(state)) enter("paused");
   }
 
+  /* the canvas fills the stage: 320 columns across the width, as many rows as the height allows; the mine keeps
+     its 320 x 288 and the rows left over become sky and bedrock (GM.frameLayout) */
   function fit() {
     if (!cv) return;
-    var stage = $("stage");
-    var aw = stage.clientWidth - 12, ah = stage.clientHeight - 12;
-    if (aw < 40 || ah < 40) return;
-    var k = Math.min(aw / GM.BW, ah / GM.BH);
-    var dpr = window.devicePixelRatio || 1;
-    var kk = Math.floor(k * dpr) / dpr;
-    if (kk < k * 0.9) kk = k;
-    kk = Math.max(0.75, kk);
-    cv.style.width = Math.round(GM.BW * kk) + "px";
-    cv.style.height = Math.round(GM.BH * kk) + "px";
+    var stage = $("stage"), w = stage.clientWidth, h = stage.clientHeight;
+    if (w < 40 || h < 40) return;
+    var L = GM.frameLayout(w, h);
+    if (cv.width !== GM.BW) cv.width = GM.BW;
+    if (cv.height !== L.H) cv.height = L.H;
+    GM.setLayout(L);
+    cv.style.width = Math.round(GM.BW * L.k) + "px";
+    cv.style.height = Math.round(L.H * L.k) + "px";
+    if (state && (state.screen === "play" || state.screen === "intro")) GM.draw(ctx, state);
   }
 
   function loop(now) {
@@ -632,8 +593,6 @@ GM.ui = (function () {
       pump();
       if (state.screen !== lastScreen) enter(state.screen);
       if (state.screen === "play" || state.screen === "intro") {
-        updateHud();
-        updateFoot();
         updateIntro();
         GM.draw(ctx, state);
       }

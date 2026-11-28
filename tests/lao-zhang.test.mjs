@@ -7,6 +7,7 @@ import { read, readJSON, runScript } from "./helpers.mjs";
 const ctx = runScript("registry/apps/lao-zhang/src/00-data.js");
 vm.runInContext(read("registry/apps/lao-zhang/src/10-game.js"), ctx, { filename: "registry/apps/lao-zhang/src/10-game.js" });
 vm.runInContext(read("registry/apps/lao-zhang/src/20-art.js"), ctx, { filename: "registry/apps/lao-zhang/src/20-art.js" });
+vm.runInContext(read("registry/apps/lao-zhang/src/22-hud.js"), ctx, { filename: "registry/apps/lao-zhang/src/22-hud.js" });
 const GM = ctx.GM;
 
 test("ten written levels have rising cumulative targets, and endless keeps rising", () => {
@@ -452,6 +453,27 @@ test("dynamite already in the pack does not use up the shop's one stick", () => 
   const again = state.shopOffers.findIndex((o) => o.key === "dynamite");
   assert.equal(GM.buy(state, again), true);
   assert.equal(state.dynamite, 3);
+});
+
+test("the play screen fills the phone: the mine stays 320 x 288, the sky always holds the scoreboard", () => {
+  /* the app's screen with the chin pad on an iPhone SE, 14 and Pro Max (sdk/UI.md), and a wide desktop window */
+  for (const [w, h] of [[331, 359], [346, 518], [386, 606], [900, 500]]) {
+    const L = GM.frameLayout(w, h);
+    assert.equal(L.sky + GM.BH + L.rock, L.H, `${w}x${h}: the bands and the mine make the canvas`);
+    assert.ok(L.sky >= GM.SKY_MIN, `${w}x${h}: sky ${L.sky} under ${GM.SKY_MIN}`);
+    assert.ok(L.rock === 0 || L.rock >= GM.ROCK_MIN, `${w}x${h}: a bedrock band of ${L.rock} rows has no room for the carts`);
+    assert.ok(GM.BW * L.k <= w + 0.5 && L.H * L.k <= h + 0.5, `${w}x${h}: the canvas runs off the stage`);
+    assert.ok(Math.abs(GM.BW * L.k - w) < 1 || Math.abs(L.H * L.k - h) < 1, `${w}x${h}: the canvas fills neither side`);
+  }
+  assert.equal(GM.frameLayout(331, 359).rock, 0, "the smallest screen has no bedrock band");
+  assert.ok(GM.frameLayout(386, 606).rock > 0, "a tall phone gets the carts");
+});
+
+test("the gauge and the carts count from the cash the level started with", () => {
+  const state = { bank: 41810, levelBank: 41500, target: 43900 };
+  assert.equal(GM.levelShare(state, state.bank - state.levelBank), 310 / 2400);
+  assert.equal(GM.cartPile(GM.levelShare(state, 1400)), 3);
+  assert.equal(GM.cartPile(GM.levelShare(state, 99999)), 6);
 });
 
 test("the rock book makes rocks worth ten times: a big rock $100, so it can repay its $150", () => {

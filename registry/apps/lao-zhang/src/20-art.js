@@ -943,13 +943,6 @@ GM.drawRival = function (buf, state) {
   GM.drawWang(buf, state);
 };
 
-GM.drawDynamite = function (buf, state) {
-  if (state.dynamite <= 0) return;
-  var bx = 94 * GM.SCALE, by = 3 * GM.SCALE;
-  GM.spriteDraw(buf, GM.SPR.dynIcon, bx, by);
-  GM.textMain(buf, "×" + state.dynamite, bx + 18, by + 4, GM.INK, GM.SCALE);
-};
-
 GM.draw = function (ctx, state) {
   if (!GM.SPR) GM.initArt();
   var key = state.levelSeed;
@@ -986,7 +979,7 @@ GM.draw = function (ctx, state) {
   GM.drawHook(buf, state.hook);
   GM.drawMiner(buf, state);
   if (state.rival) GM.drawRival(buf, state);
-  GM.drawDynamite(buf, state);
+  /* the dynamite count lives on the scoreboard in the sky now (src/22-hud.js) */
   if (state.bomb) {
     var bp = GM.bombPos(state.bomb);
     var bxp = Math.round(bp.x * GM.SCALE), byp = Math.round(bp.y * GM.SCALE);
@@ -1035,6 +1028,7 @@ GM.draw = function (ctx, state) {
     sy = Math.round((Math.random() * 2 - 1) * 4);
   }
   GM.present(ctx, buf, sx, sy);
+  if (GM.hudT && GM.paintBands) GM.paintBands(ctx, state, GM.hudT);
 };
 
 GM.present = function (ctx, buf, sx, sy) {
@@ -1054,7 +1048,8 @@ GM.present = function (ctx, buf, sx, sy) {
       u32[y * GM.BW + x] = GM.RGB32[t];
     }
   }
-  ctx.putImageData(GM._img, 0, 0);
+  /* the mine sits under the sky band (src/22-hud.js); a shake moves the mine, never the scoreboard */
+  ctx.putImageData(GM._img, 0, GM.L ? GM.L.sky : 0);
 };
 
 GM.spriteCanvas = function (spr) {
