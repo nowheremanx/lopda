@@ -24,7 +24,7 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 ailines.js (the AI lines' document v:2: several keys like SIM cards, on/off, a default and one line per use, the upgrade from the single key; pure functions),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
                 gamepad.js (Bluetooth controllers, remotes and keyboards as the chin pad's keys through LP.setButton; polled while the chin pad
-                shows or its Settings page is open, keys only while the pad shows; default keys per kind, press-to-bind on Settings -> 手柄, `data/users/local/gamepad` {v:1, maps, keys}; decisions.md section 78),
+                shows or its Settings page is open, keys only while the pad shows; default keys per kind, press-to-bind on Settings -> 手柄, `data/users/local/gamepad` {v:1, maps, keys, labels}; decisions.md section 78),
                 lenses.js (which physical camera lenses a phone has, pure functions), finder.js (the viewfinder's look: luma, the Bayer dither,
                 exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions), exif.js (a single print's APP1 Exif segment, with a GPS IFD when the print has a place, pure functions),
                 acoustic.js (the 4-FSK acoustic modem, M2: byte/symbol mapping, preamble, phase-continuous synth and
