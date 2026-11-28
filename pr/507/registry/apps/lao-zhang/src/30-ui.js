@@ -579,11 +579,11 @@ GM.ui = (function () {
     fitW = stage.clientWidth; fitH = stage.clientHeight;
     if (w < 40 || h < 40) return;
     var L = GM.frameLayout(w, h);
-    if (cv.width !== GM.BW) cv.width = GM.BW;
+    if (cv.width !== L.W) cv.width = L.W;
     if (cv.height !== L.H) cv.height = L.H;
     GM.setLayout(L);
     /* exact sizes, not rounded: a rounded width left a line of paper down each side on an iPhone */
-    cv.style.width = (GM.BW * L.k) + "px";
+    cv.style.width = (L.W * L.k) + "px";
     cv.style.height = (L.H * L.k) + "px";
     if (state && (state.screen === "play" || state.screen === "intro")) GM.draw(ctx, state);
   }

@@ -3715,8 +3715,8 @@ GM.present = function (ctx, buf, sx, sy) {
       u32[y * GM.BW + x] = GM.RGB32[t];
     }
   }
-  /* the mine sits under the sky band (src/22-hud.js); a shake moves the mine, never the scoreboard */
-  ctx.putImageData(GM._img, 0, GM.L ? GM.L.sky : 0);
+  /* the mine sits under the sky band, at its left edge x0 (src/22-hud.js); a shake moves the mine, never the scoreboard */
+  ctx.putImageData(GM._img, GM.L ? GM.L.x0 : 0, GM.L ? GM.L.sky : 0);
 };
 
 GM.spriteCanvas = function (spr) {
@@ -3799,18 +3799,26 @@ GM.SKY_MIN = 56;     /* framebuffer rows the full scoreboard needs: label, cash 
 GM.SKY_SLIM = 18;    /* a short screen (Safari with its bars) gets the scoreboard on one line instead */
 GM.ROCK_MIN = 48;    /* the bedrock band only when it has room for a cart on its rails */
 
-/* The canvas for a stage of w x h CSS pixels: as wide as the stage (320 columns), as tall as the stage allows
-   (rounded up: the last part of a row is cut off by the stage, never left as a line of paper). Under SKY_MIN rows of
-   sky the scoreboard goes slim; a stage too wide for even that (a desktop window) fits by height, with paper at
-   the sides and the full scoreboard.
-   Returns {H, sky, rock, k, slim}: canvas rows, sky rows above the mine, bedrock rows below it, CSS pixels a column. */
+/* The canvas for a stage of w x h CSS pixels: it always covers the stage, edge to edge, with no paper left over.
+   - Normally it is the mine's 320 columns across the width and as many rows as the height allows (rounded up: part
+     of the last row is cut off by the stage). Rows over the mine's 288 become sky; on tall phones, also bedrock.
+   - Under SKY_MIN rows of sky the scoreboard goes slim (one line).
+   - A stage too short for even that (Safari with its bars, a desktop window) fits by height instead, and the canvas
+     grows wider than the mine: the columns at each side carry the sky, the ground and the dirt on (GM.paintSides),
+     never items, and the hook never reaches them.
+   Returns {W, H, x0, sky, rock, k, slim}: canvas columns and rows, the mine's left edge, sky rows above the mine,
+   bedrock rows below it, CSS pixels a canvas pixel. */
 GM.frameLayout = function (w, h) {
-  var least = GM.BH + GM.SKY_SLIM, H = GM.BH + GM.SKY_MIN, k = 1;
+  var W = GM.BW, H = GM.BH + GM.SKY_MIN, k = 1;
   if (w > 0 && h > 0) {
     k = w / GM.BW;
     H = Math.ceil(h / k - 0.01);
-    /* too short for even the slim line: paper at the sides anyway, so the full scoreboard, fitted by height */
-    if (H < least) { H = GM.BH + GM.SKY_MIN; k = h / H; }
+    if (H < GM.BH + GM.SKY_SLIM) {
+      /* a little short (a phone in Safari): the slim line; far too short (a wide window): the full scoreboard */
+      H = H >= GM.BH ? GM.BH + GM.SKY_SLIM : GM.BH + GM.SKY_MIN;
+      k = h / H;
+      W = Math.max(GM.BW, Math.ceil(w / k - 0.01));
+    }
   }
   var extra = H - GM.BH, sky = extra, rock = 0;
   if (extra >= GM.SKY_MIN + GM.ROCK_MIN + 20) {
@@ -3818,11 +3826,11 @@ GM.frameLayout = function (w, h) {
     sky = Math.max(GM.SKY_MIN + 16, Math.min(104, Math.round(extra * 0.45)));
     rock = extra - sky;
   }
-  return { H: H, sky: sky, rock: rock, k: k, slim: sky < GM.SKY_MIN };
+  return { W: W, H: H, x0: Math.floor((W - GM.BW) / 2), sky: sky, rock: rock, k: k, slim: sky < GM.SKY_MIN };
 };
 
 GM.L = GM.frameLayout(0, 0);
-GM.setLayout = function (L) { GM.L = L; GM._skyKey = GM._rockKey = ""; GM._skyImg = GM._rockImg = null; };
+GM.setLayout = function (L) { GM.L = L; GM._skyKey = GM._rockKey = GM._sideKey = ""; GM._skyImg = GM._rockImg = null; };
 
 /* ---------- lopix12 for the scoreboard ----------
    The app carries lopix12 (sdk/fonts, OFL) for its title screen: tools/bundle-app.mjs writes the glyphs it uses into
@@ -3856,7 +3864,7 @@ GM.hudGlyph = function (ch) {
 };
 
 /* a band: one tone index a pixel, 320 wide; the canvas rows above or below the mine */
-GM.band = function (h) { return { w: GM.BW, h: h, b: new Uint8Array(GM.BW * Math.max(1, h)) }; };
+GM.band = function (h, w) { w = w || GM.L.W; return { w: w, h: h, b: new Uint8Array(w * Math.max(1, h)) }; };
 GM.bandRect = function (bd, x, y, w, h, c) {
   var x0 = Math.max(0, Math.round(x)), x1 = Math.min(bd.w, Math.round(x + w));
   var y0 = Math.max(0, Math.round(y)), y1 = Math.min(bd.h, Math.round(y + h)), yy, xx;
@@ -4054,15 +4062,46 @@ GM.paintRock = function (bd, state) {
 };
 
 /* paint the two bands when what they show has changed; the mine itself is put every frame by GM.present */
+/* the columns beside the mine on a wide canvas: each row carries on what the mine's edge column shows (sky, hills,
+   the ground line, the seam), and the dirt below gets the same sparse specks; nothing else */
+GM.paintSides = function (ctx, state) {
+  var L = GM.L, bg = state.bg, wl = L.x0, wr = L.W - GM.BW - L.x0, side, w, x0, img, u32, x, y, t, edge, h;
+  if (!bg) return;
+  var dirtTop = (GM.GROUND + 7) * GM.SCALE;
+  for (side = 0; side < 2; side++) {
+    w = side ? wr : wl;
+    if (w <= 0) continue;
+    x0 = side ? L.x0 + GM.BW : 0;
+    edge = side ? GM.BW - 1 : 0;
+    img = ctx.createImageData(w, GM.BH);
+    u32 = new Uint32Array(img.data.buffer);
+    for (y = 0; y < GM.BH; y++) {
+      for (x = 0; x < w; x++) {
+        if (y < dirtTop) t = bg[y * GM.BW + edge];
+        else {
+          h = (Math.imul((x0 + x) >> 1, 73856093) ^ Math.imul(y >> 1, 19349663)) >>> 0;
+          t = h % 53 === 0 ? GM.MID : GM.DARK;
+        }
+        u32[y * w + x] = GM.RGB32[t === GM.CLEAR ? GM.PAPER : t];
+      }
+    }
+    ctx.putImageData(img, x0, L.sky);
+  }
+};
+
 GM.paintBands = function (ctx, state, T) {
   var L = GM.L, img, bd, u32, i, key;
+  if (L.W > GM.BW) {
+    key = L.W + "|" + L.H + "|" + state.bgKey;
+    if (key !== GM._sideKey) { GM._sideKey = key; GM.paintSides(ctx, state); }
+  }
   if (L.sky > 0) {
     key = GM.skyKey(state, T);
     if (key !== GM._skyKey) {
       GM._skyKey = key;
       bd = GM.band(L.sky);
       GM.paintSky(bd, state, T);
-      img = GM._skyImg || (GM._skyImg = ctx.createImageData(GM.BW, L.sky));
+      img = GM._skyImg || (GM._skyImg = ctx.createImageData(L.W, L.sky));
       u32 = new Uint32Array(img.data.buffer);
       for (i = 0; i < bd.b.length; i++) u32[i] = GM.RGB32[bd.b[i]];
       ctx.putImageData(img, 0, 0);
@@ -4074,7 +4113,7 @@ GM.paintBands = function (ctx, state, T) {
       GM._rockKey = key;
       bd = GM.band(L.rock);
       GM.paintRock(bd, state);
-      img = GM._rockImg || (GM._rockImg = ctx.createImageData(GM.BW, L.rock));
+      img = GM._rockImg || (GM._rockImg = ctx.createImageData(L.W, L.rock));
       u32 = new Uint32Array(img.data.buffer);
       for (i = 0; i < bd.b.length; i++) u32[i] = GM.RGB32[bd.b[i]];
       ctx.putImageData(img, 0, L.sky + GM.BH);
@@ -4717,11 +4756,11 @@ GM.ui = (function () {
     fitW = stage.clientWidth; fitH = stage.clientHeight;
     if (w < 40 || h < 40) return;
     var L = GM.frameLayout(w, h);
-    if (cv.width !== GM.BW) cv.width = GM.BW;
+    if (cv.width !== L.W) cv.width = L.W;
     if (cv.height !== L.H) cv.height = L.H;
     GM.setLayout(L);
     /* exact sizes, not rounded: a rounded width left a line of paper down each side on an iPhone */
-    cv.style.width = (GM.BW * L.k) + "px";
+    cv.style.width = (L.W * L.k) + "px";
     cv.style.height = (L.H * L.k) + "px";
     if (state && (state.screen === "play" || state.screen === "intro")) GM.draw(ctx, state);
   }
