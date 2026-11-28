@@ -88,9 +88,9 @@ test("string-tuner: the start screen's art is the largest whole-pixel copy that 
 });
 
 test("string-tuner: the meter fills its band, 40-220 rows, and nothing overflows a 331 x 359 stage", () => {
-  /* the wrap's css width/height and the picture rows the app reaches, for the three stages of sdk/UI.md 1 (the short
-     331 x 359 is the phone's own stage in Safari, where the fixed rows tighten) */
-  const BANDS = [[315, 97, 47], [322, 206, 101], [362, 390, 173]];
+  /* the wrap's css width/height and the picture rows the app reaches on the three stages of sdk/UI.md 1: 331 x 473,
+     346 x 518 and 386 x 738 (the app has no chin pad, so 331 x 473 is its smallest stage there) */
+  const BANDS = [[307, 161, 82], [322, 206, 101], [362, 390, 173]];
   for (const [w, h, rows] of BANDS) {
     assert.equal(Tuner.meterRows(w, h), rows, `${w}x${h}`);
     const px = Tuner.meterHeight(rows, w);
@@ -104,6 +104,7 @@ test("string-tuner: the meter fills its band, 40-220 rows, and nothing overflows
   const fixed = 48 + 14 + 52 + 30 + 44 + 24 + 50;
   const wrap = 359 - fixed;
   assert.ok(wrap >= 90, String(wrap));
+  assert.equal(Tuner.meterRows(315, wrap), 47, "the short stage's own band");
   assert.ok(Tuner.meterHeight(Tuner.meterRows(315, wrap), 315) <= wrap + 1, "the meter fits the leftover band");
   assert.ok(fixed + wrap <= 359, "and the screen adds up to the stage with nothing cut off");
 });
