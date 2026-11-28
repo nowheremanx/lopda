@@ -19,7 +19,7 @@ test("the current lo-title.js is a released version", () => {
 function withBlock(t, from, tag, name = "my-app") {
   const dir = copyApp(t, from, name);
   const file = join(dir, "index.html");
-  writeFileSync(file, readFileSync(file, "utf8").replace(tag, '<script data-lo-title="0.1.0"></script>\n' + tag));
+  writeFileSync(file, readFileSync(file, "utf8").replace(tag, '<script data-lo-title="0.1.1"></script>\n' + tag));
   return { dir, file };
 }
 
@@ -53,7 +53,7 @@ test("with lo-game too, one font block feeds both, and an edited lo-title copy i
 
 /* ---------- the menu, on a fake canvas ---------- */
 function fake({ width = 331, height = 359, dpr = 1 } = {}) {
-  const listeners = {}, frames = [], timers = [];
+  const listeners = {}, win = {}, frames = [], timers = [];
   let image = null;
   const canvas = {
     width: 0, height: 0, style: {}, isConnected: true,
@@ -62,11 +62,16 @@ function fake({ width = 331, height = 359, dpr = 1 } = {}) {
       createImageData: (w, h) => ({ width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }),
       putImageData(img) { image = img; }
     }),
-    addEventListener: (type, f) => { listeners[type] = f; }, setPointerCapture() {}
+    addEventListener: (type, f) => { listeners[type] = f; },
+    removeEventListener: (type, f) => { if (listeners[type] === f) delete listeners[type]; },
+    setPointerCapture() {}
   };
   const ctx = runScript("sdk/lo-title.js", {
-    devicePixelRatio: dpr, addEventListener() {}, removeEventListener() {}, atob: (s) => Buffer.from(s, "base64").toString("binary"),
-    requestAnimationFrame: (f) => { frames.push(f); return frames.length; }, cancelAnimationFrame() {},
+    devicePixelRatio: dpr,
+    addEventListener: (type, f) => { win[type] = f; },
+    removeEventListener: (type, f) => { if (win[type] === f) delete win[type]; },
+    atob: (s) => Buffer.from(s, "base64").toString("binary"),
+    requestAnimationFrame: (f) => { frames.push(f); return frames.length; }, cancelAnimationFrame() { frames.length = 0; },
     setTimeout: (f) => { timers.push(f); return timers.length; }, clearTimeout() {}
   });
   const font = JSON.parse(readFileSync(join(import.meta.dirname, "..", "sdk", "fonts", "lopix12.json"), "utf8"));
@@ -89,7 +94,7 @@ function fake({ width = 331, height = 359, dpr = 1 } = {}) {
     for (let q = 0; q < d.length; q += 4) seen.add(d[q] + "," + d[q + 1] + "," + d[q + 2]);
     return [...seen].sort();
   };
-  return { canvas, listeners, LoTitle: ctx.LoTitle, settle, runTimers, rowsOf, palette };
+  return { canvas, listeners, win, frames, LoTitle: ctx.LoTitle, settle, runTimers, rowsOf, palette };
 }
 /* a dark picture: nothing in it is paper, so every paper pixel on the screen is the chosen word's fill */
 const ART = { w: 156, h: 156, px: new Uint8Array(156 * 156).fill(3) };
@@ -144,6 +149,32 @@ test("the menu by touch: a tap on a small word rolls to it, a tap on the big wor
   listeners.pointerup(ev(340)); settle();
   assert.equal(m.index(), 0);
   assert.deepEqual(picks, [2], "a drag never picks");
+});
+
+test("destroy removes the listeners and the queued frame, and a remount works", () => {
+  const f = fake();
+  const m = f.LoTitle.mount(f.canvas, { art: ART, items: [{ label: "A" }, { label: "B" }], index: 0 });
+  f.settle();
+  assert.equal(typeof f.win.resize, "function", "the resize listener is on the window");
+  assert.equal(typeof f.listeners.pointerdown, "function");
+  m.press("down");
+  assert.ok(f.frames.length > 0, "a roll queues a frame");
+  m.destroy();
+  assert.equal(f.win.resize, undefined, "the window resize listener is gone");
+  for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+    assert.equal(f.listeners[type], undefined, type + " is gone");
+  }
+  assert.equal(f.frames.length, 0, "the queued frame is cancelled");
+  assert.equal(m.press("down"), false, "a destroyed menu takes no keys");
+  m.destroy();                                            /* twice is safe */
+
+  /* going back to the title mounts a new menu on a canvas the old one has let go */
+  const m2 = f.LoTitle.mount(f.canvas, { art: ART, items: [{ label: "A" }] });
+  f.settle();
+  assert.equal(m2.index(), 0);
+  assert.equal(typeof f.win.resize, "function");
+  m2.destroy();
+  assert.equal(f.win.resize, undefined);
 });
 
 test("the menu draws in the four tones only, and maxScale caps the big word", () => {

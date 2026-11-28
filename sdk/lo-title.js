@@ -1,4 +1,4 @@
-/* lo-title.js 0.1.0: one title screen for every Lo-PDA app. MIT. See sdk/LO-TITLE.md.
+/* lo-title.js 0.1.1: one title screen for every Lo-PDA app. MIT. See sdk/LO-TITLE.md.
  *
  * The fog title: the app's cover picture covers the whole canvas edge to edge, a dithered fog rises from the bottom
  * over its lower third, and the menu stands in the fog as bare words, no boxes. The chosen word is big, painted like
@@ -24,14 +24,16 @@
  *   });
  *   PAD.on("press", function (b) { if (onTitle) menu.press(b); });   // up / down roll, a / start pick
  *   menu.set({ items: [...], index: 1 })     // new items or text (a save was read)
+ *   menu.destroy()                           // when the screen goes: remove its listeners and stop its frames
  *
  * The canvas is sized by the app's CSS (give it the whole screen, or the area under a top bar); this file reads its
- * size on mount and on every resize, and forgets it once the canvas leaves the page.
+ * size on mount and on every resize, and forgets it once the canvas leaves the page. An app that mounts a title on
+ * a screen it will leave calls destroy() so the resize listener, the pointer listeners and any queued frame go.
  * Touch: a tap on the chosen word picks, a tap on a small word rolls to it, a finger dragged up or down turns the menu.
  */
 var LoTitle = (function () {
   "use strict";
-  var VERSION = "0.1.0";
+  var VERSION = "0.1.1";
   var CODE = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];   /* paper, mid, dark, ink */
   var ROLL_MS = 130, SHAKE_MS = 320, FLASH_MS = 160, REASON_MS = 1500;
 
@@ -177,13 +179,14 @@ var LoTitle = (function () {
     var softTop = 0, softRamp = 1, clipBot = 0;   /* a word thins out above softTop and hides under the bar */
     var st = { pos: 0, from: 0, to: 0, t0: null, dur: ROLL_MS, dir: 1, moving: false, seen: 0,
       flashT0: 0, shakeT0: 0, reasonIdx: -1, reasonTimer: null, drag: null };
-    var raf = null, fullNext = true, hits = [];
+    var raf = null, fullNext = true, hits = [], dead = false;
 
     function items() { return o.items || []; }
     function clampIndex(i) { return Math.max(0, Math.min(items().length - 1, Math.round(i) || 0)); }
     function current() { return st.moving ? st.to : clampIndex(st.pos); }
 
     function set(p) {
+      if (dead) return;
       for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) o[k] = p[k];
       if (p.index !== undefined) { st.pos = st.from = st.to = st.seen = clampIndex(p.index); st.moving = false; }
       else if (st.pos > items().length - 1) { st.pos = st.from = st.to = st.seen = clampIndex(st.pos); st.moving = false; }
@@ -476,10 +479,10 @@ var LoTitle = (function () {
     }
 
     /* ---------- time: frames run only while something moves ---------- */
-    function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+    function kick() { if (!raf && !dead) raf = requestAnimationFrame(tick); }
     function tick(t) {
       raf = null;
-      if (canvas.isConnected === false) return;
+      if (dead || canvas.isConnected === false) return;
       /* an animation starts on the frame after it was asked for, on the frames' own clock */
       t = t || 1e-3;
       if (st.moving && st.t0 === null) st.t0 = t;
@@ -526,6 +529,7 @@ var LoTitle = (function () {
       if (o.onPick) o.onPick(i);
     }
     function press(b) {
+      if (dead) return false;
       if (b === "up" || b === "down") { rollTo(current() + (b === "down" ? 1 : -1)); return true; }
       if (b === "a" || b === "start") { pick(current()); return true; }
       return false;
@@ -576,8 +580,25 @@ var LoTitle = (function () {
       kick();
     }
     function onResize() {
+      if (dead) return;
       if (canvas.isConnected === false) { removeEventListener("resize", onResize); return; }
       layout(); fullNext = true; kick();
+    }
+    function onCancel() { st.drag = null; }
+    /* the screen is going: the resize and pointer listeners and any queued frame go with it, and nothing that
+       arrives late can draw into a canvas the app has dropped */
+    function destroy() {
+      if (dead) return;
+      dead = true;
+      removeEventListener("resize", onResize);
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMoveP);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
+      if (raf && typeof cancelAnimationFrame === "function") cancelAnimationFrame(raf);
+      raf = null;
+      if (st.reasonTimer) { clearTimeout(st.reasonTimer); st.reasonTimer = null; }
+      st.drag = null;
     }
 
     set(opts || {});
@@ -585,7 +606,7 @@ var LoTitle = (function () {
     canvas.addEventListener("pointerdown", onDown);
     canvas.addEventListener("pointermove", onMoveP);
     canvas.addEventListener("pointerup", onUp);
-    canvas.addEventListener("pointercancel", function () { st.drag = null; });
+    canvas.addEventListener("pointercancel", onCancel);
     addEventListener("resize", onResize);
     ready = true;
     layout();
@@ -596,7 +617,8 @@ var LoTitle = (function () {
       press: press,
       set: set,
       index: current,
-      redraw: function () { layout(); fullNext = true; kick(); }
+      redraw: function () { if (dead) return; layout(); fullNext = true; kick(); },
+      destroy: destroy
     };
   }
 

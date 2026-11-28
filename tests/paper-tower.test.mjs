@@ -489,13 +489,11 @@ function bootTower(lang) {
   };
   return { app, game, run, tap };
 }
-/* the title, its menu, 新的一页, and the half second it fades into the play scene */
+/* the title (lo-title: one A picks 新的一页), and the half second it fades into the play scene */
 async function startPlay(t) {
   await t.run(10);
   await t.tap("a");
-  await t.run(6);
-  await t.tap("a");
-  await t.run(90);
+  await t.run(100);
   return t;
 }
 /* a g that only records: the sheet's pages and the map's footer need no framebuffer */
@@ -575,11 +573,8 @@ test("an unreadable save: the title says so, the save sheet still answers B, and
   await run(10);
   assert.ok(rejected >= 1);
   assert.equal(app.ctx.get("canSave"), false);
-  const shown = [], draw = game.g.text;
-  game.g.text = function (str, x, y, o) { shown.push(str); return draw.call(game.g, str, x, y, o); };
   await run(1);
-  game.g.text = draw;
-  assert.ok(shown.includes("存档读不出，这次不存"), "the title says the save cannot be read");
+  assert.match(app.ctx.get("titleSpec")().note, /存档读不出/, "the title says the save cannot be read");
 
   let popped = false;
   game.push(app.ctx.get("slotsScene")("save")).then(() => { popped = true; });
@@ -614,18 +609,18 @@ for (const lang of ["zh", "en"]) {
     const titles = [], answers = [];
     game.choose = (items, o) => { titles.push(o && o.title); return Promise.resolve(answers.shift()); };
     game.push = () => Promise.resolve({ key: "slot1", v: R.hydrate(plain(slot)) });
-    const menu = app.ctx.get("titleMenu");
+    const menu = app.ctx.get("titlePick");
     const LOAD = 2, ASK = lang === "zh" ? "当前进度会被替换" : "This replaces your run";
 
-    answers.push(LOAD, 1);              /* 读取存档, slot 1, then 再想想 */
-    await menu();
-    assert.equal(titles[1], ASK);
+    answers.push(1);                    /* 读取存档, slot 1, then 再想想 */
+    await menu(LOAD);
+    assert.equal(titles[0], ASK);
     assert.deepEqual(writes, [], "再想想 leaves the auto save alone");
 
     titles.length = 0;
-    answers.push(LOAD, 0);              /* the same, then 读这个存档 */
-    await menu();
-    assert.equal(titles[1], ASK);
+    answers.push(0);                    /* the same, then 读这个存档 */
+    await menu(LOAD);
+    assert.equal(titles[0], ASK);
     assert.deepEqual(writes, [["auto", 2]], "the slot now is the run in progress");
   });
 }
@@ -647,8 +642,8 @@ test("loading a slot with no run in progress asks nothing", async () => {
   const titles = [];
   game.choose = (items, o) => { titles.push(o && o.title); return Promise.resolve(1); };   /* no auto: 读取存档 is item 1 */
   game.push = () => Promise.resolve({ key: "slot1", v: R.hydrate(plain(slot)) });
-  await app.ctx.get("titleMenu")();
-  assert.equal(titles.length, 1, "only the title menu was shown");
+  await app.ctx.get("titlePick")(app.ctx.get("titleSpec")().acts.indexOf("load"));
+  assert.equal(titles.length, 0, "no run: the slot opens with no confirm");
   assert.deepEqual(writes, [["auto", 3]]);
 });
 

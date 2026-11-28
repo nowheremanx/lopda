@@ -28,7 +28,9 @@ export function boot(file, opt = {}) {
     : { left: 0, top: 0, width: 160, height: 144 };
   const el = () => ({
     style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
-    addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); }, appendChild() {}, setPointerCapture() {},
+    addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); },
+    removeEventListener(type, f) { const a = elListeners[type] || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); },
+    appendChild() {}, setPointerCapture() {},
     getContext: () => ctx2d, getBoundingClientRect: () => rect
   });
   class KeyboardEvent { constructor(type, o = {}) { this.type = type; this.key = o.key; this.repeat = false; } preventDefault() {} }
@@ -40,6 +42,7 @@ export function boot(file, opt = {}) {
     innerWidth: 160, innerHeight: 144, devicePixelRatio: 1,
     requestAnimationFrame: (f) => { raf.push(f); return raf.length; },
     addEventListener: (type, f) => { (listeners[type] = listeners[type] || []).push(f); },
+    removeEventListener: (type, f) => { const a = listeners[type] || []; const i = a.indexOf(f); if (i >= 0) a.splice(i, 1); },
     dispatchEvent: (e) => { (listeners[e.type] || []).forEach((f) => f(e)); },
     __yield: () => new Promise((r) => setImmediate(r)),
     __frame: () => { const q = raf.splice(0); ts += 1000 / 60 + 1e-4; q.forEach((f) => f(ts)); },
