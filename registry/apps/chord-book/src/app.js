@@ -49,7 +49,7 @@
     if (typeof c.root === "number" && c.root >= 0 && c.root < 12 && Chords.qual(c.q) &&
       (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
-    /* a save from before 1.4.4 may hold a combination with no voicing (Ab9/B and sixteen others): show C instead */
+    /* a save from before 1.4.4 may hold a combination with no voicing (Ab9/B and seventeen others): show C instead */
     if (!Chords.voicings(chord()).length) set.cur = { root: 0, q: "", bass: null, i: 0 };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
     if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
@@ -83,8 +83,9 @@
     set.recent = [n].concat(set.recent.filter(function (r) { return r !== n; })).slice(0, 8);
   }
   function go(c, i) {
-    /* seventeen root / quality / bass combinations have no voicing in this book (Ab9/B and the m9 family, the altered
-       and ninth colours over some basses, and C7b9/B): refuse rather than blank the main screen (1.4.4, 1.4.7, 1.4.8) */
+    /* eighteen root / quality / bass combinations have no voicing in this book (Ab9/B and the m9 family, the altered
+       and ninth colours over some basses, C7b9/B and Cm13/B): refuse rather than blank the main screen (1.4.4, 1.4.7,
+       1.4.8, 1.4.9) */
     if (!Chords.voicings(c).length) { sfx("err"); return false; }
     if (Chords.name(c) !== Chords.name(chord())) temp = null;
     spelledName = null;

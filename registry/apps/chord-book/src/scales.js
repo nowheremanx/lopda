@@ -83,7 +83,12 @@ var Scales = (function () {
     "add11": [["ionian"], ["mixolydian"]],
     "7b9": [["altered"], ["hwdim"], ["phrygdom", [5]]],
     "7b5": [["lyddom", [7]], ["wholetone"], ["altered"]],
-    "7#5": [["wholetone"], ["altered"]]
+    "7#5": [["wholetone"], ["altered"]],
+    /* 1.4.9: the sus4's 4 stays, and its major 3 is the avoid note */
+    "maj7#11": [["lydian"], ["majpent"]],
+    "m13": [["dorian"], ["aeolian", [8]], ["minpent"]],
+    "9sus4": [["mixolydian", [4]], ["ionian", [4]], ["minpent"]],
+    "madd9": [["dorian"], ["aeolian", [8]], ["minpent"]]
   };
   var MAJOR = [0, 2, 4, 5, 7, 9, 11], MINOR = [0, 2, 3, 5, 7, 8, 10];
   /* the labs the line reads after the chord's run: a natural 9 always (1.4.2). A b9, #9, 13 or b13 joins it only when
