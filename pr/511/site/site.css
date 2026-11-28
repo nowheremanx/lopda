@@ -1,0 +1,21 @@
+/* Lo-PDA website: the top bar every page shares (the landing page, events/, gallery/). site.js writes the bar; this is
+   its look, self-contained so a page's own styles cannot change it. MIT License, see LICENSE. */
+nav.site{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:color-mix(in srgb,#171815 82%,transparent);
+  backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px);border-bottom:1px solid #33362e;
+  font:14px -apple-system,"SF Pro Text",system-ui,"Segoe UI",Roboto,"PingFang SC",sans-serif;color:#eef0e6}
+nav.site .in{max-width:1080px;margin:0 auto;box-sizing:border-box;padding-left:max(20px,env(safe-area-inset-left,0px));
+  padding-right:max(20px,env(safe-area-inset-right,0px));display:flex;align-items:center;gap:22px;height:52px}
+nav.site .mark{font:24px/1 "VT323",ui-monospace,Menlo,monospace;letter-spacing:.06em;text-decoration:none;color:inherit;margin-right:auto}
+nav.site .l{text-decoration:none;color:#9a9f8c;white-space:nowrap}
+nav.site .in>*{flex-shrink:0;white-space:nowrap}
+nav.site .l:hover,nav.site .l[aria-current]{color:#eef0e6}
+nav.site .lang{background:none;border:0;color:#9a9f8c;font:inherit;cursor:pointer;padding:8px 4px}
+nav.site .lang:hover{color:#eef0e6}
+nav.site .open{display:inline-flex;align-items:center;border-radius:999px;padding:8px 16px;font:600 14px/1 inherit;font-family:inherit;
+  text-decoration:none;white-space:nowrap;background:#c4432f;color:#fff;box-shadow:inset 0 -3px 0 rgba(0,0,0,.25)}
+nav.site .open:hover{filter:brightness(1.08)}
+/* a phone keeps every item but GitHub, closer together; the gaps tighten again on the smallest ones */
+@media (max-width:480px){nav.site .in{gap:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+  nav.site .gh{display:none} nav.site .mark{font-size:21px} nav.site .open{padding:8px 13px} nav.site .lang{padding:8px 2px}}
+@media (max-width:380px){nav.site .in{gap:10px} nav.site .mark{font-size:19px}}
+@media (max-width:340px){nav.site .in{gap:7px} nav.site .mark{font-size:17px} nav.site .open{padding:8px 10px}}
