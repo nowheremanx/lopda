@@ -975,7 +975,7 @@ test("zhenyao-tower: ZT.fight (tests only, not on any menu) starts a route fight
 });
 
 /* The whole game, played by tests/zhenyao-play.js ("full": breadth-first walking, A through every dialogue, the smart
-   battle player) from 进入小镇 on the title to 序章 完. Real time would be more than 20 minutes, so the app frame's clock is
+   battle player) from 新游戏 on the title to 序章 完. Real time would be more than 20 minutes, so the app frame's clock is
    ours: requestAnimationFrame is replaced (after the game has started; lo-game asks for the next frame every tick) by a queue
    that the script's own loop pumps, one 1/60 s step per call and a yield through a MessageChannel in between, which has none of
    setTimeout's 4 ms floor. Math.random is seeded, so the run is the same every time. */

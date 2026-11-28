@@ -97,7 +97,7 @@ test("budget: the ending, with the hand close-up, 序章 完, the credits and �
   within(frames);
 });
 
-/* the whole game by key events only, from 进入小镇 to 序章 完: about 45 s in Node */
+/* the whole game by key events only, from 新游戏 to 序章 完: about 45 s in Node */
 test("budget: a scripted player plays the whole game, from a new game to 序章 完", { timeout: 240000 }, async () => {
   const { frames, get } = await play("full");
   const st = get("ZT").state();
