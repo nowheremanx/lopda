@@ -44,8 +44,13 @@ var PZ = (function () {
     }
     var H = Math.max(PIC_H, Math.ceil(h / k - 1e-9), topRows + PIC_H);
     var botRows = Math.max(0, Math.ceil((h - (photoTop + PIC_H * k)) / k - 1e-9));
+    /* Whole art columns only. On a 386 px stage at k = 3 the 384 px photo leaves 2 px, which is less than one
+       3 px column: it cannot be split 1/1, so the photo sits flush at the canvas's left edge (2 px of paper on the
+       right). Shifting it by a fraction of a pixel would undo the whole-pixel promise, and moving it one column
+       would cut a column off the picture. */
+    var x0 = Math.floor((W - PIC_W) / 2);
     return { w: w, h: h, top: top, bottom: bottom, k: k, W: W, H: H, cssW: W * k, cssH: H * k,
-      x0: Math.floor((W - PIC_W) / 2), y0: topRows, topRows: topRows, botRows: botRows,
+      x0: x0, y0: topRows, topRows: topRows, botRows: botRows,
       padTop: padTop, padBottom: padBottom, photoTop: photoTop, photoBottom: photoTop + PIC_H * k,
       picW: PIC_W, picH: PIC_H };
   }

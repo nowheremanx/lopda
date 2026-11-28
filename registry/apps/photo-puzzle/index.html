@@ -45,11 +45,17 @@
   body.game #hdr { justify-content: center; }   /* the status sits centred over the photo */
   /* Safari's bars can leave 348 x 323: the bands go a size down so the photo keeps two whole pixels a side */
   @media (max-height: 345px) {
-    #hdr { font-size: 14px; padding: 3px 8px 1px; }
+    #hdr { font-size: 14px; padding: 2px 8px 1px; }
     #hdr b { font-size: 16px; }
-    #panel { padding-left: 8px; padding-right: 8px; }
+    #panel { padding: 2px 8px 0; }
     #msg { font-size: 13px; line-height: 1.3; }
-    #ft { font-size: 12px; padding: 2px 8px 3px; }
+    #ft { font-size: 12px; padding: 2px 8px 2px; }
+  }
+  /* English lessons wrap to more lines than the Chinese; on the small stages the game screens take the caption a
+     size down (13 px is sdk/UI.md's secondary size) so a long caption never costs the photo a whole scale. The menu
+     sheets keep 15 px: their layout does not depend on the caption's height. */
+  @media (max-height: 380px) {
+    body.game #msg { font-size: 13px; line-height: 1.3; }
   }
   #fuse { position: fixed; inset: 0; z-index: 10; pointer-events: none; display: none; }
   #fuse.on { display: block; }
@@ -122,8 +128,13 @@ var PZ = (function () {
     }
     var H = Math.max(PIC_H, Math.ceil(h / k - 1e-9), topRows + PIC_H);
     var botRows = Math.max(0, Math.ceil((h - (photoTop + PIC_H * k)) / k - 1e-9));
+    /* Whole art columns only. On a 386 px stage at k = 3 the 384 px photo leaves 2 px, which is less than one
+       3 px column: it cannot be split 1/1, so the photo sits flush at the canvas's left edge (2 px of paper on the
+       right). Shifting it by a fraction of a pixel would undo the whole-pixel promise, and moving it one column
+       would cut a column off the picture. */
+    var x0 = Math.floor((W - PIC_W) / 2);
     return { w: w, h: h, top: top, bottom: bottom, k: k, W: W, H: H, cssW: W * k, cssH: H * k,
-      x0: Math.floor((W - PIC_W) / 2), y0: topRows, topRows: topRows, botRows: botRows,
+      x0: x0, y0: topRows, topRows: topRows, botRows: botRows,
       padTop: padTop, padBottom: padBottom, photoTop: photoTop, photoBottom: photoTop + PIC_H * k,
       picW: PIC_W, picH: PIC_H };
   }
@@ -295,7 +306,7 @@ var Solver = (function () {
       kPlay: "D-pad slide  A peek  START menu  SELECT hint", kMenu: "Arrows pick  A ok  B back",
       kLesson: "D-pad slide  SELECT hint  START leave", kLessonDone: "A next  START leave", kSolved: "A continue", kWon: "Arrows pick  A ok  B main menu", kLost: "Arrows pick  A ok  B main menu", kDemo: "START leave",
       lessonDone: "Done!", lessonN: "Lesson {n}",
-      lesson1: "The arrows push the piece next to the gap into it. The arrow marks the first move: push tile 5 up, then tile 8 left. Press SELECT to see it again.",
+      lesson1: "The arrows push the piece beside the gap into it. Push 5 up, then 8 left; SELECT shows the arrow.",
       lesson2: "Bring tile 1 to the top-left corner. Each number sits in its tile's top-left corner; SELECT shows the arrow again.",
       lesson3: "The last two in a row: put tile 3 under tile 2, then turn them in together.",
       lesson4: "Once a row is done, leave it alone. The last two rows go column by column. Just watch.",

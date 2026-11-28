@@ -17,6 +17,7 @@ const PZ = ctx.PZ;
 const SIZES = [
   [331, 359, "iPhone SE with the chin pad"],
   [346, 518, "iPhone 14/15/16 with the chin pad"],
+  [386, 606, "iPhone Pro Max with the chin pad (the real largest)"],
   [386, 650, "a tall stage"],
   [348, 323, "Safari with its bars"],
   [386, 738, "iPhone Pro Max without the pad"],
@@ -89,6 +90,34 @@ test("photo-puzzle layout: a menu covers the stage from edge to edge", () => {
     assert.equal(L.padTop, 0, "the header keeps the top edge");
     assert.equal(L.padBottom, 0, "the footer keeps the bottom edge");
     assert.ok(L.photoTop >= 30 && L.photoBottom <= h - 20 + 1, "the photo is between them");
+  }
+});
+
+test("photo-puzzle layout: the English lesson's caption keeps the board at 2x", () => {
+  /* The real band at 331 x 359 after the game screen's caption went to 13 px: header 29, three lines of caption
+     and the footer 80.7. The board stays 2x, so a 3x3 tile is 85 px, not the 42.7 px of the 1x fallback. */
+  const three = PZ.fit(331, 359, 29, 80.7);
+  assert.equal(three.k, 2, "a three-line English caption keeps 2x");
+  assert.ok(128 * three.k / 3 >= 44, "a 3x3 tile is a thumb target at 2x");
+  /* The old five-line, 15 px English caption measured top 29, bottom 131: that is the documented 1x fallback for a
+     caption too tall to leave the photo 224 px. It still covers the stage and keeps the whole photo. */
+  const five = PZ.fit(331, 359, 29, 131);
+  assert.equal(five.k, 1, "the old five-line band is the 1x fallback");
+  assert.ok(five.cssW >= 331 && five.cssH >= 359, "the canvas still covers the stage");
+  assert.ok(five.x0 >= 0 && five.x0 + five.picW <= five.W && five.y0 + five.picH <= five.H, "the photo stays whole");
+  /* Safari's 348 x 323 stage: the tightened three-line band (header 19, caption and footer 70.7) also keeps 2x. */
+  assert.equal(PZ.fit(348, 323, 19, 70.7).k, 2, "the short stage keeps 2x for a three-line caption");
+});
+
+test("photo-puzzle layout: a 386-wide stage keeps the whole 384 px photo", () => {
+  for (const h of [606, 650, 738]) {
+    const L = PZ.fit(386, h, 29, 46);
+    assert.equal(L.k, 3);
+    /* the 2 px left over cannot be split into whole 3 px columns (see layout.js): the photo is flush left with
+       the paper on the right, and never loses a column to the stage edge */
+    assert.equal(L.x0, 0);
+    assert.ok((L.x0 + L.picW) * L.k <= 386, "the photo's last column is on the stage");
+    assert.ok(L.cssW >= 386 && L.cssH >= h, "the canvas covers the stage");
   }
 });
 
