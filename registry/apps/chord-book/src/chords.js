@@ -224,22 +224,29 @@ var Chords = (function () {
     }
     return { n: n, barre: null };
   }
-  /* The barre a shape's own fingers show (1.4.1): the lowest fret where finger 1 holds two or more sounding strings,
-     spanning the first and the last of them. A string under that span that is open, muted or lower than the barre means
-     the finger cannot be lying across it, so there is no barre. Hand-written shapes know their fingering; fingerCount
-     guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
+  /* The barre a shape's own fingers show (1.4.1): the lowest fret where one finger 1-4 holds two or more sounding
+     strings, spanning the first and the last of them. A string under that span that is open, muted or lower than the
+     barre means the finger cannot be lying across it, so there is no barre at that fret. Finger 1 is the usual index
+     barre; C9 x32333 is barred by the ring finger across G-B-E (1.4.4). Hand-written shapes know their fingering;
+     fingerCount guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
   function barreFromFingers(frets, fingers) {
-    var held = [], best = Infinity, i, j, a = -1, z = -1;
-    for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === 1) held.push(i);
-    for (i = 0; i < held.length; i++) {
-      var f = frets[held[i]], n = 0;
-      for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
-      if (n >= 2 && f < best) best = f;
+    var best = null, k, i, j, a, z, ok;
+    for (k = 1; k <= 4; k++) {
+      var held = [];
+      for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === k) held.push(i);
+      if (held.length < 2) continue;
+      for (i = 0; i < held.length; i++) {
+        var f = frets[held[i]], n = 0;
+        for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
+        if (n < 2 || (best && f >= best.fret)) continue;
+        a = -1; z = -1;
+        for (j = 0; j < 6; j++) if (frets[j] === f && fingers[j] === k) { if (a < 0) a = j; z = j; }
+        ok = true;
+        for (j = a; j <= z; j++) if (frets[j] < f) ok = false;
+        if (ok) best = { fret: f, from: a, to: z, finger: k };
+      }
     }
-    if (best === Infinity) return null;
-    for (i = 0; i < 6; i++) if (frets[i] === best && fingers[i] === 1) { if (a < 0) a = i; z = i; }
-    for (i = a; i <= z; i++) if (frets[i] < best) return null;
-    return { fret: best, from: a, to: z };
+    return best;
   }
   /* fingers for a computed voicing: index on the barre, then the other notes by fret and string */
   function assignFingers(frets) {

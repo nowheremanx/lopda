@@ -785,3 +785,122 @@ test("chord-book 1.4.3: the footer's mute button turns the guitar off and back t
     assert.deepEqual(errors, []);
   }
 });
+
+test("chord-book 1.4.4: a combination with no voicing is refused, and an old save that held one starts on C", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, p.locator("#roots button", { hasText: /^Ab$/ }));
+  await tap(p, p.locator("#quals button", { hasText: "属九" }));
+  await tap(p, p.locator("#basses button", { hasText: /^B$/ }));
+  assert.equal(await text(p, "#ptitle"), "Ab9/B", "the picker reads the combination");
+  await tap(p, "#pok");
+  assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")), "the picker stays open");
+  assert.equal(await text(p, "#msg"), "这个和弦没有按法");
+  assert.equal(await text(p, "#cname"), "C", "the main screen keeps the chord it had");
+  /* the finder is not opened either: the picker is still there, with the same words */
+  await tap(p, "#tofind");
+  assert.ok(!(await p.locator("#finder").evaluate((e) => e.classList.contains("open"))), "no finder for a chord with no voicing");
+  assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
+  assert.equal(await text(p, "#msg"), "这个和弦没有按法");
+  /* tapping another root clears the sentence and reads the new combination */
+  await tap(p, p.locator("#roots button", { hasText: /^C$/ }));
+  assert.equal(await text(p, "#msg"), "", "the old refusal does not linger");
+  assert.equal(await text(p, "#ptitle"), "C9/B");
+  await tap(p, "#pback");
+  assert.equal(await text(p, "#cname"), "C");
+  /* a typed name takes the same road */
+  await tap(p, "#chord");
+  await p.locator("#q").fill("Ebm9/G");
+  await tap(p, "#qgo");
+  assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
+  assert.equal(await text(p, "#msg"), "这个和弦没有按法");
+  assert.equal(await text(p, "#cname"), "C");
+  await tap(p, "#pback");
+
+  /* a save from before the guard: Ab9/B was the chord in view; the rest of the save is kept */
+  const old = await open(t, { saved: { v: 1, cur: { root: 8, q: "9", bass: 11, i: 0 }, sort: "pos", view: "neck", vol: 1, lastVol: 1, recent: ["Ab9/B", "C"] } });
+  assert.equal(await text(old.p, "#cname"), "C", "an old save with no-voicing chord falls back to C");
+  assert.match(await text(old.p, "#line"), /^x32010 · /);
+  assert.equal(await text(old.p, "#view"), "指板", "the saved view survives");
+  assert.equal(await old.p.evaluate(() => window.Guitar.level()), 1, "the saved volume survives");
+  await tap(old.p, "#chord");
+  assert.ok(await old.p.locator("#sorts button", { hasText: "按把位" }).evaluate((b) => b.classList.contains("sel")), "the saved order survives");
+  assert.equal(await text(old.p, "#recent"), "Ab9/BC", "the saved recent chords survive");
+  await tap(old.p, "#pback");
+  assert.deepEqual(old.errors, []);
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.4: a recent chip with no voicing is refused, and ↑ down on the main screen is too", { skip, timeout: 60000 }, async (t) => {
+  /* a saved Recent may hold a combination the book cannot voice */
+  const rec = await open(t, { saved: { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: ["Ab9/B", "C"] } });
+  await tap(rec.p, "#chord");
+  await tap(rec.p, rec.p.locator("#recent button", { hasText: /^Ab9\/B$/ }));
+  assert.ok(await rec.p.locator("#picker").evaluate((e) => e.classList.contains("open")), "the picker stays open");
+  assert.equal(await text(rec.p, "#msg"), "这个和弦没有按法");
+  assert.equal(await text(rec.p, "#cname"), "C", "the main screen keeps C");
+  assert.deepEqual(rec.errors, []);
+
+  /* the main screen's quality step: Eb9/G down is Ebm9/G, which has no voicing; the chord stays, only err sounds */
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, p.locator("#roots button", { hasText: /^Eb$/ }));
+  await tap(p, p.locator("#quals button", { hasText: "属九" }));
+  await tap(p, p.locator("#basses button", { hasText: /^G$/ }));
+  assert.equal(await text(p, "#ptitle"), "Eb9/G");
+  await tap(p, "#pok");
+  assert.equal(await text(p, "#cname"), "Eb9/G");
+  const before = await text(p, "#line");
+  await p.evaluate(() => { window.__log = []; window.__press("down"); });
+  await p.waitForTimeout(80);
+  assert.equal(await text(p, "#cname"), "Eb9/G", "the chord does not change");
+  assert.equal(await text(p, "#line"), before, "the voicing line does not change");
+  assert.deepEqual(await p.evaluate(() => window.__log), ["err"], "refused with the error sound, no message row on the main screen");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.4: a guessed finder voicing draws no ring-finger barre", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, "#tofind");
+  /* C x32010 -> x12222: A 1, D 2, G 2, B 2, high E 2 */
+  await tap(p, p.locator("#frets button").nth(1));
+  await tap(p, p.locator("#frets button").nth(9));
+  await tap(p, p.locator("#frets button").nth(10));
+  await tap(p, p.locator("#frets button").nth(11));
+  assert.equal(await text(p, "#fname"), "F#m7/Bb");
+  await tap(p, "#fsee");
+  assert.equal(await text(p, "#cname"), "F#m7/Bb");
+  /* a temporary shape is fingered by fingerCount: no bar at fret 2 between the B and high E strings */
+  const px = await p.locator("#pic").evaluate((c) => Array.from(c.getContext("2d").getImageData(83, 41, 1, 1).data));
+  assert.deepEqual(px, [163, 173, 126, 255], "paper, not ink: the guessed shape has no barre");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.4: a chord opened from a progression keeps the key's spelling, with the book's name beside it", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await p.locator("#q").fill("Abdim7");
+  await tap(p, "#qgo");
+  assert.equal(await text(p, "#cname"), "Abdim7");
+  await tap(p, "#prog");
+  await tap(p, p.locator("#glist .chips button", { hasText: /^G#dim7$/ }));
+  assert.equal(await text(p, "#cname"), "G#dim7", "the key's spelling in the header");
+  assert.equal(await text(p, "#qname"), "减七 · Abdim7", "the book's own name in the quality line");
+  /* the improv view names the scale's root the key's way too */
+  await tap(p, "#view"); await tap(p, "#view"); await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "即兴");
+  assert.equal(await text(p, "#cname"), "G#dim7");
+  assert.equal(await text(p, "#qname"), "G# 全半减音阶");
+  await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "框图");
+  /* a normal pick clears it */
+  await tap(p, "#chord");
+  await tap(p, p.locator("#roots button", { hasText: /^C$/ }));
+  await tap(p, p.locator("#quals button", { hasText: "大三" }));
+  await tap(p, "#pok");
+  assert.equal(await text(p, "#cname"), "C");
+  assert.equal(await text(p, "#qname"), "大三", "the alias note is gone");
+  assert.deepEqual(errors, []);
+});
+
