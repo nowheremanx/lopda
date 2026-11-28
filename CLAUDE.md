@@ -23,6 +23,8 @@ runtime/        the PWA: index.html, core.js (shared LP object: utils, views, so
                 ai.js (the AI lines: a fixed table of five providers' chat completions (OpenRouter, DeepSeek, Kimi, Qwen, SiliconFlow), streamed with the user's own key, each key sent only to its own provider; decisions.md sections 34 and 61),
                 ailines.js (the AI lines' document v:2: several keys like SIM cards, on/off, a default and one line per use, the upgrade from the single key; pure functions),
                 sensors.js (tilt, shake, heading and the microphone's level and pitch for apps, the audio session; shared with sdk/dev.html),
+                gamepad.js (Bluetooth controllers, remotes and keyboards as the chin pad's keys through LP.setButton, only while the chin pad shows;
+                default keys per kind, press-to-bind on Settings -> 手柄, `data/users/local/gamepad` {v:1, maps, keys}; decisions.md section 78),
                 lenses.js (which physical camera lenses a phone has, pure functions), finder.js (the viewfinder's look: luma, the Bayer dither,
                 exposure and contrast; shared by the camera, the snap viewfinder, the reader and sdk/dev.html), textsel.js (the text selection shared by the reader and the dictionary entry page), negative.js (the negative PNG and its lpDa chunk, pure functions), exif.js (a single print's APP1 Exif segment, with a GPS IFD when the print has a place, pure functions),
                 acoustic.js (the 4-FSK acoustic modem, M2: byte/symbol mapping, preamble, phase-continuous synth and
@@ -66,7 +68,7 @@ tools/          check-app.mjs, build-index.mjs (also stamps each app's released/
                 gen-lunar.py (one-off generator of the lunar table, needs PyEphem); gen-ecdict.mjs (one-off, ECDICT csv ->
                 vendor/ecdict/) with stardict-write.mjs (StarDict + dictzip writer, also used by tests); lao-zhang-sim.mjs
                 (矿工老张's auto-player: solo haul, target headroom and whole-run difficulty, also used by the tests)
-tests/          node:test suite (no deps): tools, strings, PAD shim, app save documents, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules, petplay, lao-zhang;
+tests/          node:test suite (no deps): tools, strings, PAD shim, gamepad, app save documents, sensors, speech, platform store, backup, lo-game, negative, develop, notetext, zip, repo rules, petplay, lao-zhang;
                 runtime-shots.mjs (before/after screenshots of the runtime), hko-compare.mjs (lunar table vs the HKO tables, manual)
 events/         the events page (index.html, linked from the landing page): two ways in (a script on the phone, an app for the store
                 with a coding agent), challenge cards and, once an event ends,
@@ -117,7 +119,7 @@ README.md (English, the homepage) README.zh.md (Chinese) LICENSE NOTICE LICENSIN
   device as one `lopda-backup-YYYYMMDD.zip` through backup.js, every check before a restore replaces everything, the old data
   written back if a write fails; `data/users/local/backup-meta` {last}; decisions.md section 24; app saves are listed and
   cleared on their own page (decisions.md section 43); the main page is a short menu,
-  the permissions list, backup, the darkroom key (暗房钥匙: `data/users/local/darkroom-key`, `LP.darkroomKey` for built-ins only, never through PAD; keys are only ever added, in the backup and kept on restore; decisions.md section 40), the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 39).
+  the permissions list, backup, the controller page (手柄: gamepad.js, decisions.md section 78), the darkroom key (暗房钥匙: `data/users/local/darkroom-key`, `LP.darkroomKey` for built-ins only, never through PAD; keys are only ever added, in the backup and kept on restore; decisions.md section 40), the share page (a QR code drawn on the device) and About have pages of their own; decisions.md section 39).
   Paint and the calculator are community apps (`registry/apps/paint`, `calculator`), installed on first start
   (`PREINSTALL` in store.js; their files are in sw.js SHELL). The LCD fonts ship in runtime/fonts/ (OFL). Each registers with
   `LP.builtin({id, label, icon, view, open, ...hooks})`; the home screen draws them in the stored order of
