@@ -190,12 +190,12 @@
   /* one string on its own, at the pitch it sounds in this voicing; strings tapped one after another ring together (at
      most 8), so the intervals between them can be heard as melody and as harmony */
   function playString(x) {
-    if (!Guitar.play([x.midi], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+    if (!Guitar.play([x.midi], 0, true) && Guitar.level()) sfx("tap");
   }
   function strum(arp) {
     var v = current().v;
     if (!v) return;
-    if (!Guitar.play(notesOf(v), arp ? 0.18 : 0.012)) sfx(Guitar.level() ? "tap" : "err");
+    if (!Guitar.play(notesOf(v), arp ? 0.18 : 0.012) && Guitar.level()) sfx("tap");
   }
 
   /* the diagram: in every view a tap plays the one note under the finger (string and fret, played or not), ringing with
@@ -206,7 +206,7 @@
     if (!v || !r.width) return;
     var bx = (e.clientX - r.left) * cv.width / r.width, by = (e.clientY - r.top) * cv.height / r.height;
     var hit = set.view === "neck" || set.view === "scale" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
-    if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true)) sfx(Guitar.level() ? "tap" : "err");
+    if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true) && Guitar.level()) sfx("tap");
   }
   (function () {
     var x0 = null, y0 = 0;
@@ -380,7 +380,8 @@
     stopSeq(); Guitar.stop();
     if (again) { buildProgs(); return; }
     var r = gl[n];
-    if (!Guitar.level()) { sfx("err"); return; }
+    /* the switch at Off means silence, not an error (1.4.1) */
+    if (!Guitar.level()) return;
     function at(i) {
       if (!gl || document.hidden) { stopSeq(); return; }
       if (i >= r.chords.length) { stopSeq(); buildProgs(); return; }
@@ -429,8 +430,10 @@
   function buildFinder() {
     var xo = $("xo"); xo.innerHTML = "";
     fs.frets.forEach(function (f, s) {
-      var b = choice(f < 0 ? "x" : f === 0 ? "o" : String(f), f <= 0, function () {
-        fs.frets[s] = fs.frets[s] === 0 ? -1 : 0; sfx("tick"); buildFinder();
+      /* a fretted string has no x or o: the grid below says which fret it holds (1.4.1). Tapping cycles x -> o -> x,
+         and a fretted string goes to x (the grid puts a fret back on a string). */
+      var b = choice(f < 0 ? "x" : f === 0 ? "o" : "·", f <= 0, function () {
+        fs.frets[s] = fs.frets[s] < 0 ? 0 : -1; sfx("tick"); buildFinder();
       }, "xo");
       xo.appendChild(b);
     });
@@ -454,10 +457,19 @@
     }
     $("fsee").disabled = !ids.length;
   }
+  /* Moving the position moves the shape (1.4.1): the frets on screen and the shape move together, so no note can hide
+     outside the five frets and still sound. Open and muted strings stay as they are. A move that would take a fretted
+     note below fret 1 or past MAX_FRET, or the position past 12, is refused. */
   function moveBase(d) {
-    var b = fs.base + d;
+    var b = fs.base + d, next = fs.frets.slice(), i;
     if (b < 1 || b > 12) { sfx("err"); return; }
-    fs.base = b; sfx("tick"); buildFinder();
+    for (i = 0; i < 6; i++) if (fs.frets[i] > 0) {
+      next[i] = fs.frets[i] + d;
+      if (next[i] < 1 || next[i] > Chords.MAX_FRET) { sfx("err"); return; }
+    }
+    fs.frets = next;
+    fs.base = b;
+    sfx("tick"); buildFinder();
   }
   function seeFound() {
     var ids = Chords.identify(fs.frets);
@@ -468,8 +480,9 @@
     var i = l.map(function (v) { return v.frets.join(","); }).indexOf(frets.join(","));
     temp = null;
     if (i < 0) {
-      var fc = Chords.fingerCount(frets);
-      temp = { name: Chords.name(c), v: { frets: frets, fingers: Chords.assignFingers(frets), tier: 0, rank: 0, pos: Chords.position(frets), barre: fc.barre } };
+      var fingers = Chords.assignFingers(frets);
+      temp = { name: Chords.name(c), v: { frets: frets, fingers: fingers, tier: 0, rank: 0,
+        pos: Chords.position(frets), barre: Chords.barreFromFingers(frets, fingers) } };
       i = 0;
     }
     sfx("ok");
@@ -482,7 +495,8 @@
   $("fup").addEventListener("click", function () { moveBase(1); });
   $("fplay").addEventListener("click", function () {
     var n = Chords.midiOf(fs.frets);
-    if (!n.length || !Guitar.play(n, 0.012)) sfx("err");
+    if (!n.length) { if (Guitar.level()) sfx("err"); return; }
+    if (!Guitar.play(n, 0.012) && Guitar.level()) sfx("err");
   });
   $("fsee").addEventListener("click", seeFound);
 

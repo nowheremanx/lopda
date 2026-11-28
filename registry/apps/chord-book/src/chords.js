@@ -223,6 +223,23 @@ var Chords = (function () {
     }
     return { n: n, barre: null };
   }
+  /* The barre a shape's own fingers show (1.4.1): the lowest fret where finger 1 holds two or more sounding strings,
+     spanning the first and the last of them. A string under that span that is open, muted or lower than the barre means
+     the finger cannot be lying across it, so there is no barre. Hand-written shapes know their fingering; fingerCount
+     guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
+  function barreFromFingers(frets, fingers) {
+    var held = [], best = Infinity, i, j, a = -1, z = -1;
+    for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === 1) held.push(i);
+    for (i = 0; i < held.length; i++) {
+      var f = frets[held[i]], n = 0;
+      for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
+      if (n >= 2 && f < best) best = f;
+    }
+    if (best === Infinity) return null;
+    for (i = 0; i < 6; i++) if (frets[i] === best && fingers[i] === 1) { if (a < 0) a = i; z = i; }
+    for (i = a; i <= z; i++) if (frets[i] < best) return null;
+    return { fret: best, from: a, to: z };
+  }
   /* fingers for a computed voicing: index on the barre, then the other notes by fret and string */
   function assignFingers(frets) {
     var fc = fingerCount(frets), out = [0, 0, 0, 0, 0, 0], notes = [], i, f = 1;
@@ -317,7 +334,10 @@ var Chords = (function () {
     });
     list.sort(function (a, b) { return b.rank - a.rank; });
     list = list.slice(0, LIMIT);
-    list.forEach(function (v) { v.pos = position(v.frets); v.barre = fingerCount(v.frets).barre; });
+    list.forEach(function (v) {
+      v.pos = position(v.frets);
+      v.barre = v.tier > 0 ? barreFromFingers(v.frets, v.fingers) : fingerCount(v.frets).barre;
+    });
     CACHE[k] = list;
     return list;
   }
@@ -365,7 +385,8 @@ var Chords = (function () {
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
     parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
-    fingerCount: fingerCount, assignFingers: assignFingers, position: position, midiOf: midiOf, fretText: fretText,
+    fingerCount: fingerCount, assignFingers: assignFingers, barreFromFingers: barreFromFingers, position: position,
+    midiOf: midiOf, fretText: fretText,
     identify: identify
   };
 })();
