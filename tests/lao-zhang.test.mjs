@@ -454,6 +454,12 @@ test("dynamite already in the pack does not use up the shop's one stick", () => 
   assert.equal(state.dynamite, 3);
 });
 
+test("the rock book makes rocks worth ten times: a big rock $100, so it can repay its $150", () => {
+  assert.equal(GM.rockValue("rockL", 0), 10);
+  assert.equal(GM.rockValue("rockL", 1), 100);
+  assert.equal(GM.rockValue("rockS", 1), 20);
+});
+
 test("strength, clover and the rock book expire when the level ends", () => {
   const state = GM.newState();
   state.level = 4;

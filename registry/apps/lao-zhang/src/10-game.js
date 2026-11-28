@@ -80,8 +80,11 @@ GM.recipeCount = function (recipe) {
   return n;
 };
 
+/* the rock book's multiplier: a big rock goes from $10 to $100, so a rocky level repays the $150 book */
+GM.BOOK_MULT = 10;
+
 GM.rockValue = function (type, book) {
-  return GM.ITEMS[type].value * (book ? 3 : 1);
+  return GM.ITEMS[type].value * (book ? GM.BOOK_MULT : 1);
 };
 
 GM.recipeValue = function (n, clover, book) {
