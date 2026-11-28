@@ -133,7 +133,7 @@
       "buttons": true,
       "version": "0.4.5",
       "released": "2026-10-10",
-      "updated": "2026-11-27",
+      "updated": "2026-11-28",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -144,8 +144,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "f3dfd4ad721e3e715c1fbc3f2b2df44d3a68576e051069c1daa3ee7f09f5c60f",
-      "bytes": 314364
+      "sha256": "8c667cdad394a8bc3671a7bf7180fa6cdd0a88a1f59b6d9700f548f5198a7116",
+      "bytes": 314824
     },
     {
       "spec": "lopda/1",

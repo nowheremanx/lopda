@@ -5146,7 +5146,9 @@ function titleLockedText() {
     : saveLocked ? titleText("存档读不出来", "Save unreadable") : "";
 }
 function titleFloor(id) {
-  var n = { floor1: 1, floor2: 2, top: 3 }[id];
+  /* the roof is the map's own place name, not a numbered floor */
+  if (id === "top") return titleText("塔顶", "Summit");
+  var n = { floor1: 1, floor2: 2 }[id];
   if (n) return titleText("第 {n} 层", "Floor {n}", { n: n });
   if (id === "town") return titleText("小镇", "Town");
   if (id === "road") return titleText("山道", "Mountain road");
@@ -5179,12 +5181,13 @@ function titleLayout(n) {
   return { x: 8, y: y, w: 144, h: h, rowH: rowH, note: note,
     ty: function (i) { return y + 4 + note + i * rowH + Math.floor((rowH - 14) / 2); } };
 }
-/* a tap on a row (the row's whole strip, so a finger does not have to hit the letters) or -1 elsewhere */
+/* a tap on a row (the row's whole strip, so a finger does not have to hit the letters):
+   the row index, -1 outside the panel (that closes it), -2 inside the panel but in its padding (that does nothing) */
 function titleTap(n) {
   var L = titleLayout(n), p = game.pointer;
   if (p.x < L.x || p.x >= L.x + L.w || p.y < L.y || p.y >= L.y + L.h) return -1;
   var i = Math.floor((p.y - (L.y + 4 + L.note)) / L.rowH);
-  return i >= 0 && i < n ? i : -1;
+  return i >= 0 && i < n ? i : -2;
 }
 /* a locked label: dark text with the app's dotted strike (the field menu's offText, in the menu's colours) */
 function titleStruck(g, text, x, y, color) {
@@ -5230,7 +5233,9 @@ function titleDrawMenu(g) {
     else g.text(game.t(it.label), L.x + 16, ty, { color: color });
     if (it.status) g.text(game.t(it.status), L.x + L.w - 8, ty, { align: "right", color: on ? g.MID : g.DARK });
   }
-  var hint = titleText("↑↓ 选 · A 确定", "↑↓ select · A ok"), hw = g.measure(hint) + 14;
+  /* compact separators: the full " · " spacing of both keys would be wider than the screen's 160 px */
+  var hint = titleText("↑↓ 选·A 确定·B 返回", "↑↓ select·A ok·B back");
+  var hw = Math.max(156, g.measure(hint) + 6);
   g.window(Math.round(80 - hw / 2), 126, hw, 18);
   g.text(hint, 80, 130, { align: "center" });
 }
@@ -5260,8 +5265,9 @@ var TITLE = scene("title", {
     else if (game.pressed("b")) { titleMenu = false; game.sfx("miss"); return; }
     else if (game.pointer.pressed) {
       var tap = titleTap(items.length);
-      if (tap < 0) { titleMenu = false; game.sfx("miss"); return; }
-      titleSel = tap; pick = tap;
+      /* only a tap outside the panel closes it; one in its padding is ignored */
+      if (tap === -1) { titleMenu = false; game.sfx("miss"); return; }
+      if (tap >= 0) { titleSel = tap; pick = tap; }
     }
     if (pick < 0) return;
     var it = items[pick];
