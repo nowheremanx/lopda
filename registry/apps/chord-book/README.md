@@ -1,10 +1,10 @@
 # 和弦大全 / Chords: notes for maintainers
 
-A guitar chord dictionary for Lo-PDA. This version covers **25 chord qualities plus slash chords, in standard tuning
+A guitar chord dictionary for Lo-PDA. This version covers **28 chord qualities plus slash chords, in standard tuning
 (EADGBE) only, with no capo**; a capo is planned for v2 (section 11), while other tunings and a left-handed layout are
-not planned yet. It has up to 24 voicings each, four pictures of a chord, 26 common progressions with a note on why each
-works, a scale view for improvising, and a finder that names the chord your fingers make. Sound is a plucked string made
-in the app.
+not planned yet. It has 61 hand-written open and slash shapes, up to 24 voicings each, four pictures of a chord,
+28 common progressions with a note on why each works, a scale view for improvising, and a finder that names the chord
+your fingers make. Sound is a plucked string made in the app.
 
 This file says where things are and what must not break. Why things are the way they are is in
 [`docs/design/chord-book.md`](../../../docs/design/chord-book.md) (the design, section 13 for each version's changes) and
@@ -17,7 +17,7 @@ This file says where things are and what must not break. Why things are the way 
 
 | File | What it holds | Pure (no DOM, no PAD) |
 |---|---|---|
-| `src/chords.js` | Note names, the 25 qualities, name parsing and spelling, the hand-written shapes, the voicing generator, fingers, scores, sorting, naming a voicing (`identify`), each string's note and degree | yes |
+| `src/chords.js` | Note names, the 28 qualities, name parsing and spelling, the hand-written shapes, the voicing generator, fingers, scores, sorting, naming a voicing (`identify`), each string's note and degree | yes |
 | `src/draw.js` | The four pictures as tone buffers (0 ink, 1 dark, 2 mid, 3 paper), their hit tests, and `paint` onto a canvas | yes, except `paint` |
 | `src/guitar.js` | The Karplus-Strong string and the strum, with the app's own AudioContext | no |
 | `src/progs.js` | The progressions table and its why-it-works notes; `forChord` finds and spells the ones a chord is in | yes |
@@ -66,7 +66,7 @@ grid at 331, and the cells stay 44 px tall (1.4.5).
 
 ### The progressions screen
 
-26 hand-written progressions (`src/progs.js`), each a card with its key, Roman numerals, a chip per chord (the one you
+28 hand-written progressions (`src/progs.js`), each a card with its key, Roman numerals, a chip per chord (the one you
 came from underlined), a Play button and a note on why it works. The sequence strums one chord a bar, holds a chord for
 its `p.bars[i]` bars and fills the chip that is sounding; a second tap stops it. A chip opens that chord on the main
 screen on the voicing it was played with, and the key's spelling follows.
@@ -90,9 +90,9 @@ filter never leaves an empty screen or does nothing (1.4.5).
   with `Draw.paint` from the previous buffer.
 - **Sound starts on release.** The strum plays on `pointerup` (a long press is the arpeggio), because iPhone only lets
   audio start in a gesture that ends.
-- **A chord with no voicing never opens.** Sixteen root / quality / bass combinations have no voicing: `Ab9/B`, the m9
-  family over some basses (`Ebm9` over G, Bb and B; `Bbm9` over D, F, F# and B), and the 1.4.7 batch's `D7#9/Eb`,
-  `F7#9` over C, C# and Bb, `A7#9/Bb`, `Bb7#9/Eb`, `Ab6/9/B` and `Bbmaj9/C#`. `go()` in app.js checks
+- **A chord with no voicing never opens.** Seventeen root / quality / bass combinations have no voicing: `Ab9/B`, the m9
+  family over some basses (`Ebm9` over G, Bb and B; `Bbm9` over D, F, F# and B), the 1.4.7 batch's `D7#9/Eb`,
+  `F7#9` over C, C# and Bb, `A7#9/Bb`, `Bb7#9/Eb`, `Ab6/9/B` and `Bbmaj9/C#`, and `C7b9/B`. `go()` in app.js checks
   `Chords.voicings(c)` first, plays `err` and leaves the main screen
   alone; the picker's 好, search, recent chips and 在指板上点出和弦 all stay put and say 这个和弦没有按法 / No voicing for
   this chord, and the finder does not open. The main screen's ↑ ↓ 换性质 is refused too, but silently apart from the

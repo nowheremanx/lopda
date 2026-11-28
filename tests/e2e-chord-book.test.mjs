@@ -175,11 +175,11 @@ test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch,
   await tap(p, "#chord");
   await p.locator("#q").fill("Cxyz");
   await tap(p, "#qgo");
-  assert.equal(await text(p, "#msg"), "这个版本只收 25 种和弦（认不出 Cxyz）");
+  assert.equal(await text(p, "#msg"), "这个版本只收 28 种和弦（认不出 Cxyz）");
   assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
   await p.locator("#q").fill("C$&");
   await tap(p, "#qgo");
-  assert.equal(await text(p, "#msg"), "这个版本只收 25 种和弦（认不出 C$&）", "a query is text, not a replacement pattern");
+  assert.equal(await text(p, "#msg"), "这个版本只收 28 种和弦（认不出 C$&）", "a query is text, not a replacement pattern");
   await tap(p, "#pback");
   assert.deepEqual(errors, []);
 
@@ -249,6 +249,32 @@ test("chord-book 1.4.7: the finder names a six-nine and an add11 too", { skip, t
   assert.deepEqual(errors, []);
 });
 
+test("chord-book 1.4.8: group 5 has four rows; C7b9 and Caug7 open on the right chord and shape", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await tap(p, "#chord");
+    await fits(p, "#picker", size, "the picker with four altered dominants");
+    const group5 = await p.evaluate(() => {
+      const h = [...document.querySelectorAll("#quals h3")].find((e) => e.textContent === "变化属七");
+      return [...h.nextElementSibling.querySelectorAll("button")].map((b) => b.querySelector("b").textContent);
+    });
+    assert.deepEqual(group5, ["7#9", "7b9", "7b5", "7#5"], "one row each: aug7 is not a second quality");
+    await p.locator("#q").fill("C7b9");
+    await tap(p, "#qgo");
+    assert.equal(await text(p, "#cname"), "C7b9");
+    assert.equal(await text(p, "#qname"), "属七降九");
+    assert.match(await text(p, "#line"), /^x32320 · 1 \//);
+    /* the same chord under another name: Caug7 is C7#5, and its hand-written shape comes first */
+    await tap(p, "#chord");
+    await p.locator("#q").fill("Caug7");
+    await tap(p, "#qgo");
+    assert.equal(await text(p, "#cname"), "C7#5");
+    assert.equal(await text(p, "#qname"), "属七升五");
+    assert.match(await text(p, "#line"), /^x36350 · 1 \//);
+    assert.deepEqual(errors, []);
+  }
+});
+
 test("chord-book: the finder names the frets, starts from the picked chord and shows the chord it found", { skip, timeout: 60000 }, async (t) => {
   for (const size of [SMALL, LARGE]) {
     const { p, errors } = await open(t, { size });
@@ -273,7 +299,7 @@ test("chord-book: the finder names the frets, starts from the picked chord and s
     await tap(p, p.locator("#frets button").nth(1));
     assert.equal(await text(p, "#fname"), "C13/F", "the new thirteenth is named");
     await tap(p, p.locator("#frets button").nth(3));
-    assert.equal(await text(p, "#fname"), "不是这一版的 25 种和弦");
+    assert.equal(await text(p, "#fname"), "不是这一版的 28 种和弦");
     assert.ok(await p.locator("#fsee").isDisabled());
     await tap(p, "#fback");
     assert.equal(await text(p, "#cname"), "C6");
@@ -333,7 +359,7 @@ test("chord-book 1.4.1: moving an open shape leaves its open and muted strings w
   /* C x32010 one fret up: the three fretted notes move, the muted low E and the two open strings do not */
   await tap(p, "#fup");
   assert.equal(await text(p, "#fpos"), "2 品起");
-  assert.equal(await text(p, "#fname"), "不是这一版的 25 种和弦");
+  assert.equal(await text(p, "#fname"), "不是这一版的 28 种和弦");
   assert.equal(await text(p, "#xo"), "x··o·o", "still two open strings and a muted one");
   const held = await p.evaluate(() => {
     const out = {};
