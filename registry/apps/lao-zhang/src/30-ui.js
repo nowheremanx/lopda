@@ -103,7 +103,8 @@ GM.ui = (function () {
       ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
       : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
       : T.noBest;
-    var items = [{ label: T.menuNew }, { label: T.menuCodex }];
+    /* with a run on record, a new game throws it away (the confirm screen says so): 重新开始; without one, 新游戏 */
+    var items = [{ label: state.run ? T.menuNew : T.menuFresh }, { label: T.menuCodex }];
     if (state.run) items.unshift({ label: T.menuContinue, status: GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) }) });
     return {
       items: items,
@@ -145,18 +146,19 @@ GM.ui = (function () {
       var cells = "";
       for (i = 0; i < GM.ITEM_ORDER.length; i++) {
         var ct = GM.ITEM_ORDER[i];
+        /* the mole's line is long: it takes the whole last row, its picture beside the words */
         var wide = ct === "mole";
-        cells += '<div class="ccell"' + (wide ? ' style="grid-column: span 3"' : "") + '>' +
+        cells += '<div class="ccell' + (wide ? " wide" : "") + '">' +
           '<canvas width="32" height="32" data-item="' + ct + '" aria-hidden="true"></canvas>' +
-          "<b>" + esc(T.codexNames[i]) + "</b>" +
-          "<span" + (wide ? ' style="white-space:normal"' : "") + ">" + esc(codexValue(ct)) + "</span>" +
-          "<em>" + esc(codexWeight(ct)) + "</em></div>";
+          "<div><b>" + esc(T.codexNames[i]) + "</b>" +
+          "<span>" + esc(codexValue(ct)) + "</span>" +
+          "<em>" + esc(codexWeight(ct)) + "</em></div></div>";
       }
+      /* no on-screen back button: B goes back, and the key line under the page already says so */
       return shell("codex",
         "<h1>" + esc(T.codexTitle) + "</h1>" +
         '<p class="small">' + esc(T.codexHint) + "</p>" +
-        '<div class="cgrid">' + cells + "</div>" +
-        '<button type="button" class="primary codexback" data-act="menu">' + esc(T.codexBack) + "</button>",
+        '<div class="cgrid">' + cells + "</div>",
         T.codexFoot);
     }
     if (screen === "clear") {

@@ -40,7 +40,7 @@ for (const lang of ["zh", "en"]) {
     await p.addStyleTag({ content: ".screen{width:331px!important;height:359px!important;border:0!important}" });
     await p.waitForTimeout(1500);
     const f = p.frames().find((x) => x !== p.mainFrame());
-    /* 重新开始 / New game is the selected title button: A starts level 1, whose tip shows in #intro */
+    /* 新游戏 / New game is the selected title button: A starts level 1, whose tip shows in #intro */
     const box = await p.locator(".screen").boundingBox();
     await p.mouse.click(box.x + 165, box.y + 2);
     await p.keyboard.down("x"); await p.waitForTimeout(150); await p.keyboard.up("x");
