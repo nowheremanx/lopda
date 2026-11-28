@@ -60,12 +60,26 @@ async function waitState(frame, fn, arg, timeout = 15000) {
   await frame.waitForFunction(fn, arg, { timeout });
 }
 
-/* place a stone through the canvas, the way a mouse player would (the game maps the border back to the board) */
-async function place(t, frame, x, y) {
+/* the canvas point of a board intersection, in stage CSS pixels */
+async function boardPoint(t, frame, x, y) {
   const s = await state(frame);
   const box = await frame.locator("#c").boundingBox();
-  const k = box.width / s.size;
-  await t.p.mouse.click(box.x + (s.pad + x * s.cell) * k, box.y + (s.pad + y * s.cell) * k);
+  return {
+    x: box.x + (s.bx + s.pad + x * s.cell) * box.width / s.W,
+    y: box.y + (s.by + s.pad + y * s.cell) * box.height / s.H
+  };
+}
+/* place a stone through the canvas, the way a mouse player would (the game maps the border back to the board) */
+async function place(t, frame, x, y) {
+  const p = await boardPoint(t, frame, x, y);
+  await t.p.mouse.click(p.x, p.y);
+}
+/* tap one of the buttons the canvas paints (the bottom bar has no HTML buttons any more) */
+async function tapButton(t, frame, id) {
+  const s = await state(frame), b = s.buttons[id];
+  assert.ok(b, `the ${id} button is painted in the bar`);
+  const box = await frame.locator("#c").boundingBox();
+  await t.p.mouse.click(box.x + (b.x + b.w / 2) * box.width / s.W, box.y + (b.y + b.h / 2) * box.height / s.H);
 }
 
 /* a message from the harness's side, as the dev shim would deliver one (pad-shim accepts it from parent) */
@@ -75,19 +89,19 @@ async function inject(t, data) {
   }, data);
 }
 
-/* the result dock sits below the canvas, inside the app's viewport, and #ov stays hidden */
-async function assertResultDock(frame, title) {
+/* the result is painted in the bottom bar now: the board stays uncovered and the whole canvas still covers the stage */
+async function assertResultBar(frame, title) {
   assert.equal(await frame.evaluate(() => document.getElementById("ov").classList.contains("hide")), true, "the start overlay stays hidden");
-  // the board keeps its whole screen: the canvas and the dock do not overlap, and the dock fits the frame
   const g = await frame.evaluate(() => {
-    const box = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, height: r.height }; };
-    return { canvas: box("c"), dock: box("res"), again: box("again"), vh: innerHeight };
+    const c = document.getElementById("c").getBoundingClientRect(), s = window.__gomoku();
+    return { canvas: { x: c.x, y: c.y, w: c.width, h: c.height }, vw: innerWidth, vh: innerHeight, s };
   });
-  assert.ok(g.dock.top >= g.canvas.bottom - 1, `the result dock starts below the board (${g.dock.top} >= ${g.canvas.bottom})`);
-  assert.ok(g.dock.bottom <= g.vh + 1, "the result dock is not cut off");
-  assert.equal(await frame.textContent("#rt"), title, "the result title is shown");
-  assert.ok((await frame.textContent("#rn")).length > 0, "the note is shown");
-  assert.ok(g.again.height >= 44, "the result button is a 44 px target");
+  assert.ok(Math.abs(g.canvas.x) <= 1 && Math.abs(g.canvas.y) <= 1, "the canvas starts at the stage's corner");
+  assert.ok(Math.abs(g.canvas.w - g.vw) <= 1 && Math.abs(g.canvas.h - g.vh) <= 1, "the canvas covers the stage edge to edge");
+  assert.equal(g.s.result.title, title, "the result title is shown");
+  assert.ok(g.s.result.note.length > 0, "the note is shown");
+  assert.ok(g.s.buttons.again && g.s.buttons.again.h >= 44, "the result button is a 44 px target");
+  assert.ok(g.s.over && g.s.winLine, "the board still holds the winning line");
 }
 
 const BLACK_MOVES = [[7, 7], [6, 7], [8, 7], [5, 7], [4, 7]];
@@ -106,21 +120,44 @@ test("gomoku: the radio match is secondary, and a win keeps the board and its li
   await sleep(200);
   await frame.evaluate(() => window.dispatchEvent(new Event("resize")));
 
-  // (c) the title screen (1.8.0): 开始 is the solid primary, 对战（电波） an outlined second choice beside it
+  // the stage can be sized after the app starts with no resize event: the frame loop refits it (UI.md 13)
+  await p.evaluate(() => {
+    const s = document.querySelector(".screen");
+    s.style.width = "386px";
+    s.style.height = "738px";
+  });
+  await waitState(frame, () => window.__gomoku().W === 386 && window.__gomoku().H === 738, null, 5000);
+  const wideRow = await frame.evaluate(() => {
+    const r = document.getElementById("st").getBoundingClientRect();
+    return { w: r.width, vw: innerWidth };
+  });
+  assert.ok(wideRow.w >= wideRow.vw - 20, "the start row is full-stage wide on a wide screen");
+  await p.evaluate(() => {
+    const s = document.querySelector(".screen");
+    s.style.width = "331px";
+    s.style.height = "359px";
+  });
+  await waitState(frame, () => window.__gomoku().W === 331 && window.__gomoku().H === 359, null, 5000);
+
+  // (c) the title screen (1.8.0): 开始 is the solid primary, 对战（电波） an outlined second choice below it
   await frame.waitForSelector("#lk:not(.hide)");
   const style = await frame.evaluate(() => {
     const read = (id) => {
       const el = document.getElementById(id), r = el.getBoundingClientRect(), c = getComputedStyle(el);
       return { x: r.x, y: r.y, w: r.width, h: r.height, bg: c.backgroundColor, color: c.color, border: c.borderTopColor };
     };
-    return { st: read("st"), lk: read("lk") };
+    const ov = document.getElementById("ov").getBoundingClientRect();
+    return { st: read("st"), lk: read("lk"), ov: { x: ov.x, y: ov.y, w: ov.width, h: ov.height }, vw: innerWidth, vh: innerHeight };
   });
   assert.ok(style.st.h >= 44 && style.lk.h >= 44, "both start buttons are 44 px tall");
+  assert.ok(style.st.w >= style.vw - 20, "each start button is a full-stage-width row");
+  assert.ok(style.lk.y >= style.st.y + style.st.h + 5, "the radio row sits under 开始");
+  assert.ok(style.ov.x === 0 && style.ov.y === 0 && style.ov.w === style.vw && style.ov.h === style.vh,
+    "the title overlay covers the whole stage, not a box");
   assert.notEqual(style.lk.bg, style.st.bg, "the radio button does not use the solid primary fill");
   assert.equal(style.lk.bg, "rgb(163, 173, 126)", "the radio button is paper");
   assert.equal(style.lk.color, "rgb(31, 42, 20)", "the radio button's text is ink");
   assert.equal(style.lk.border, "rgb(31, 42, 20)", "the radio button is outlined in ink");
-  assert.ok(style.lk.x - (style.st.x + style.st.w) >= 8, "the radio button sits clear of 开始, on its right");
 
   // start a solo game and put four black stones in a row, then win with the fifth
   await frame.click("#st");
@@ -129,18 +166,18 @@ test("gomoku: the radio match is secondary, and a win keeps the board and its li
   await place(solo, frame, 5, 7);
   await waitState(frame, () => window.__gomoku().over && window.__gomoku().winLine, null, 5000);
 
-  // (a) the result appears after the beat, as a dock that does not cover the board
-  await frame.waitForSelector("#res:not(.hide)", { timeout: 5000 });
-  await assertResultDock(frame, "你赢了");
+  // (a) the result appears after the beat, painted in the bottom bar, and the board stays uncovered
+  await waitState(frame, () => window.__gomoku().result, null, 5000);
+  await assertResultBar(frame, "你赢了");
 
   // (b) the winning line is still known to the page (and was drawn at endGame)
   const s = await state(frame);
   assert.deepEqual(s.winLine, [5, 7, 9, 7], "the five in a row are reported");
   assert.equal(s.wins >= 1, true, "the win is counted");
 
-  // AGAIN clears the board and the dock
-  await frame.click("#again");
-  await waitState(frame, () => !window.__gomoku().over && document.getElementById("res").classList.contains("hide"));
+  // AGAIN clears the board and the result
+  await tapButton(solo, frame, "again");
+  await waitState(frame, () => !window.__gomoku().over && !window.__gomoku().result);
   assert.equal((await state(frame)).winLine, null, "a new game has no winning line");
 
   assert.deepEqual(solo.errors, [], "no page errors");
@@ -172,12 +209,12 @@ test("gomoku link: a decided match ends in the same dock, not the full-screen ov
   }
 
   await waitState(black.frame, () => window.__gomoku().over && window.__gomoku().winLine, null, 5000);
-  await black.frame.waitForSelector("#res:not(.hide)", { timeout: 5000 });
-  await assertResultDock(black.frame, "你赢了");
+  await waitState(black.frame, () => window.__gomoku().result, null, 5000);
+  await assertResultBar(black.frame, "你赢了");
   const s = await state(black.frame);
   assert.deepEqual(s.winLine, [4, 7, 8, 7], "the match's five in a row are reported");
-  assert.equal(await black.frame.textContent("#again"), "回到菜单", "a match's result goes back to the menu");
-  assert.equal(await black.frame.evaluate(() => document.getElementById("bot").classList.contains("hide")), true, "the link controls stand aside");
+  assert.equal(s.result.label, "回到菜单", "a match's result goes back to the menu");
+  assert.deepEqual(Object.keys(s.buttons), ["again"], "the link controls stand aside for the one result row");
 
   for (const tabi of [one, two]) assert.deepEqual(tabi.errors, [], "no page errors");
 });
