@@ -2,8 +2,10 @@
    levels.js, the tiles and postman in art.js, and the owner-approved input clock in input.js.
    This file is the handheld: the day, the drawing, the menus, the result card and the saves.
 
-   Design for 160x144: the 10x8 board is 160x128, the status bar is the last 16 pixels. */
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+   Design for 160x144: the 10x8 board is 160x128, the status bar is the last 16 pixels.
+   The screen around those 160x144 is the warehouse: a wall calendar above, the week's ledger and the
+   floor below (lo-game 1.5 fill, sdk/UI.md 13). The world and every rule in it keep their size. */
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
@@ -50,10 +52,13 @@ var touchStart = null, touchLast = null, touchCancelled = false, touchIgnored = 
   function primary(e) { return e.isPrimary !== false; }
   function point(e) {
     var r = canvas.getBoundingClientRect();
-    return {
-      x: Math.floor((e.clientX - r.left) * 160 / (r.width || 1)),
-      y: Math.floor((e.clientY - r.top) * 144 / (r.height || 1))
-    };
+    /* With the fill layout the canvas is bigger than the world: divide by the canvas pixel size,
+       then subtract the world's offset. A tap on a band lands on the world's near edge, as
+       game.pointer does. */
+    var st = game.stage, k = st.k || 1;
+    var x = Math.floor((e.clientX - r.left) / k - st.x);
+    var y = Math.floor((e.clientY - r.top) / k - st.y);
+    return { x: Math.max(0, Math.min(159, x)), y: Math.max(0, Math.min(143, y)) };
   }
   canvas.addEventListener("pointerdown", function (e) {
     if (!primary(e)) {
@@ -1110,6 +1115,186 @@ game.scene("play", {
   },
   draw: draw
 });
+
+/* ---------------- the warehouse around the world ----------------
+   lo-game 1.5 calls paintBands on every frame, before the 160 x 144 world is copied in; `s` is the
+   whole stage in canvas pixels. Nothing here can touch the board: the wall calendar and the week
+   ledger read yesterday's save and today's date, the same values the title and the calendar screen
+   show. On tall phones the bands are a wall above and a floor below; on a short one they shrink to
+   the date line, and on a wide stage the extra columns become the ends of the same room. */
+
+/* A 4 x 6 digit: the smallest size a month grid can hold two digits in and still be read at
+   arm's length on the smallest phone. Only the wall calendar uses it. */
+var BAND_DIGITS = {
+  "0": ["1111", "1001", "1001", "1001", "1001", "1111"],
+  "1": ["0110", "0010", "0010", "0010", "0010", "0111"],
+  "2": ["1111", "0001", "1111", "1000", "1000", "1111"],
+  "3": ["1111", "0001", "1111", "0001", "0001", "1111"],
+  "4": ["1001", "1001", "1111", "0001", "0001", "0001"],
+  "5": ["1111", "1000", "1111", "0001", "0001", "1111"],
+  "6": ["1111", "1000", "1111", "1001", "1001", "1111"],
+  "7": ["1111", "0001", "0010", "0010", "0100", "0100"],
+  "8": ["1111", "1001", "1111", "1001", "1001", "1111"],
+  "9": ["1111", "1001", "1111", "0001", "0001", "1111"]
+};
+
+function bandDigits(s, text, x, y, color) {
+  for (var n = 0; n < text.length; n++) {
+    var rows = BAND_DIGITS[text.charAt(n)];
+    if (!rows) continue;
+    for (var yy = 0; yy < 6; yy++) {
+      for (var xx = 0; xx < 4; xx++) {
+        if (rows[yy].charAt(xx) === "1") s.pixel(x + n * 5 + xx, y + yy, color);
+      }
+    }
+  }
+}
+
+function bandDay() { return today || new Date(); }
+
+/* A month, Monday first, like the calendar screen: where the 1st falls and how many rows it needs. */
+function bandMonthShape(d) {
+  var y = d.getFullYear(), m = d.getMonth();
+  return {
+    y: y, m: m,
+    offset: (new Date(y, m, 1).getDay() + 6) % 7,
+    days: calDaysInMonth(y, m),
+    rows: Math.ceil(((new Date(y, m, 1).getDay() + 6) % 7 + calDaysInMonth(y, m)) / 7)
+  };
+}
+
+/* The month at cell pitch 11 x 7: a wide gap keeps neighbouring days apart, a filled cell for
+   today, a dark cell for a day with a result. Returns the grid's size so the panel can centre it. */
+function drawBandMonth(s, x, y, shape) {
+  var gridW = 7 * 11 - 1, gridH = shape.rows * 7 - 1;
+  var d = bandDay(), todayHere = shape.m === d.getMonth() && shape.y === d.getFullYear();
+  for (var day = 1; day <= shape.days; day++) {
+    var idx = shape.offset + day - 1;
+    var cx = x + (idx % 7) * 11, cy = y + ((idx / 7) | 0) * 7;
+    var key = calKey(shape.y, shape.m, day);
+    var rec = saved.days[key];
+    var isToday = todayHere && day === d.getDate();
+    if (isToday) s.rect(cx, cy, 9, 6, s.INK);
+    else if (rec) s.rect(cx, cy, 9, 6, s.DARK);
+    bandDigits(s, String(day), cx + (day > 9 ? 0 : 3), cy, isToday || rec ? s.PAPER : s.INK);
+  }
+  return { w: gridW, h: gridH };
+}
+
+/* The wall calendar: paper card, month row when the sky is tall, the grid and the day's label. */
+function drawBandCalendar(s, top, sky) {
+  var d = bandDay(), shape = bandMonthShape(d), header = sky >= 62;
+  var gridW = 7 * 11 - 1, gridH = shape.rows * 7 - 1;
+  var label = dateLabel(d), labelW = s.measure(label);
+  var colW = Math.max(44, labelW);
+  var pw = gridW + 8 + colW + 8, ph = gridH + (header ? 14 : 0) + 4;
+  if (pw > s.width - 4) { colW = Math.max(30, s.width - 4 - gridW - 16); pw = gridW + 8 + colW + 8; }
+  var px = Math.floor((s.width - pw) / 2), py = top + Math.floor((sky - ph) / 2);
+  if (py < top) py = top;
+  s.rect(px + 1, py + 1, pw, ph, s.DARK);       /* a shadow, so the card sits off the wall */
+  s.rect(px, py, pw, ph, s.PAPER);
+  s.frame(px, py, pw, ph, s.INK);
+  var gy = py + 2 + (header ? 14 : 0);
+  if (header) {
+    var month = game.lang === "en" ? MONTH_EN[shape.m] + " " + shape.y : shape.y + " 年 " + (shape.m + 1) + " 月";
+    s.text(month, px + pw / 2, py + 1, { align: "center", color: s.INK });
+    s.rect(px + 4, py + 14, pw - 8, 1, s.MID);
+  }
+  drawBandMonth(s, px + 5, gy, shape);
+  s.text(label, px + 5 + gridW + 6, gy + Math.floor((gridH - 12) / 2), { color: s.INK });
+}
+
+/* The floor: boards below the world, with a lit seam where the screen ends. */
+function drawBandFloor(s, y, foot, calm) {
+  if (foot <= 0) return;
+  s.rect(0, y, s.width, foot, s.DARK);
+  s.rect(0, y, s.width, 1, s.MID);
+  if (!calm) {
+    for (var row = y + 5; row < y + foot; row += 6) s.dither(0, row, s.width, 1, s.INK, 1);
+    for (var x = 12; x < s.width; x += 34) s.rect(x, y + 2, 1, Math.min(3, foot - 2), s.INK);
+  }
+}
+
+/* The wall: dark boards, beams and a grain, flat on a pause screen. */
+function drawBandWall(s, top, calm) {
+  if (top <= 0) return;
+  s.rect(0, 0, s.width, top, s.INK);
+  if (calm) {
+    if (top > 2) s.rect(0, top - 1, s.width, 1, s.DARK);
+    return;
+  }
+  for (var y = 8; y < top; y += 11) s.dither(0, y, s.width, 1, s.DARK, 1);
+  for (var x = 14; x < s.width; x += 43) s.rect(x, 0, 1, top, s.DARK);
+  if (top > 5) s.rect(0, top - 1, s.width, 1, s.DARK);
+}
+
+/* The extra columns of a stage that is too short for the world's width: the room carries on. */
+function drawBandSides(s, st) {
+  var y = st.y;
+  if (st.x > 0) {
+    s.rect(0, y, st.x, st.worldH, s.INK);
+    for (var lx = 3; lx < st.x; lx += 9) s.dither(lx, y, 1, st.worldH, s.DARK, 1);
+    s.rect(st.x - 1, y, 1, st.worldH, s.DARK);
+  }
+  if (st.x + st.worldW < st.w) {
+    var rx = st.x + st.worldW, rw = st.w - rx;
+    s.rect(rx, y, rw, st.worldH, s.INK);
+    for (var rx2 = rx + 3; rx2 < st.w; rx2 += 9) s.dither(rx2, y, 1, st.worldH, s.DARK, 1);
+    s.rect(rx, y, 1, st.worldH, s.DARK);
+  }
+}
+
+/* The ledger on the floor: the solved week, the same strip the result card drops a stamp onto. */
+function drawBandLedger(s, ground, foot) {
+  var cardH = 24, streak = foot >= 40;
+  var groupH = cardH + (streak ? 14 : 0);
+  var top = ground + Math.max(1, Math.floor((foot - groupH) / 2));
+  var x = Math.floor((s.width - 118) / 2);
+  s.rect(x + 1, top + 1, 118, cardH, s.INK);
+  s.rect(x, top, 118, cardH, s.PAPER);
+  s.frame(x, top, 118, cardH, s.INK);
+  drawTallyStrip(s, x + 4, top + 2);
+  if (streak) {
+    s.text(T({ zh: "连续 {k} 天", en: "Streak {k}" }, { k: streakCount() }), s.width / 2,
+      top + cardH + 1, { align: "center", color: s.PAPER });
+  }
+  return top + groupH;
+}
+
+/* Two crates at the ends of a tall floor, out of the ledger's way. */
+function drawBandCrates(s, ground, foot) {
+  if (foot < 54 || s.width < 150) return;
+  var y = ground + foot - 18;
+  s.sprite(ART.box, 2, y);
+  s.sprite(ART.box, s.width - 18, y);
+}
+
+function paintBands(s, st) {
+  var sky = st.y, ground = st.y + st.worldH, foot = st.h - ground;
+  var calm = ui !== "play" && ui !== "title";
+  s.clear(s.INK);
+  if (ui === "loading") { s.clear(s.PAPER); return; }
+  if (ui === "title") {
+    /* the title picture is a warehouse at night: carry its ceiling and floor past the world */
+    drawBandWall(s, sky, false);
+    drawBandFloor(s, ground, foot, false);
+    drawBandCrates(s, ground, foot);
+  } else if (calm) {
+    drawBandWall(s, sky, true);
+    drawBandFloor(s, ground, foot, true);
+  } else {
+    drawBandWall(s, sky, false);
+    drawBandFloor(s, ground, foot, false);
+    if (sky >= 45) drawBandCalendar(s, 0, sky);
+    else if (sky >= 14) {
+      var label = dateLabel(bandDay());
+      s.text(label, s.width / 2, Math.floor((sky - 12) / 2), { align: "center", color: s.PAPER });
+    }
+    if (foot >= 24) drawBandLedger(s, ground, foot);
+    drawBandCrates(s, ground, foot);
+  }
+  drawBandSides(s, st);
+}
 
 /* ---------------- drawing ---------------- */
 
