@@ -80,8 +80,11 @@ GM.recipeCount = function (recipe) {
   return n;
 };
 
+/* the rock book's multiplier: a big rock goes from $10 to $100, so a rocky level repays the $150 book */
+GM.BOOK_MULT = 10;
+
 GM.rockValue = function (type, book) {
-  return GM.ITEMS[type].value * (book ? 3 : 1);
+  return GM.ITEMS[type].value * (book ? GM.BOOK_MULT : 1);
 };
 
 GM.recipeValue = function (n, clover, book) {
@@ -151,6 +154,7 @@ GM.newState = function () {
     runMsg: "",
     menuCursor: 0,
     pauseCursor: 0,
+    endCursor: 0,         /* the over and victory menus: 0 play on, 1 title */
     confirmCursor: 0,
     wonOnce: false,
     jingleId: 0,
@@ -176,6 +180,7 @@ GM.startRun = function (state, seed) {
 GM.startLevel = function (state, n) {
   state.level = n;
   state.target = GM.targetFor(n);
+  state.levelBank = state.bank;     /* the cash this level started with: the scoreboard's gauge and the carts count from it */
   state.time = GM.LEVEL_TIME;
   state.jingleId = (state.jingleId || 0) + 1;
   state.lastSec = GM.LEVEL_TIME;
