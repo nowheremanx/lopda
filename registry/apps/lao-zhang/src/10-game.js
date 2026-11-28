@@ -151,6 +151,7 @@ GM.newState = function () {
     runMsg: "",
     menuCursor: 0,
     pauseCursor: 0,
+    endCursor: 0,         /* the over and victory menus: 0 play on, 1 title */
     confirmCursor: 0,
     wonOnce: false,
     jingleId: 0,

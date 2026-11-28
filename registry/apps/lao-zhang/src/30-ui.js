@@ -211,8 +211,10 @@ GM.ui = (function () {
         '<p class="big">' + esc(GM.fmt(T.overShort, { d: GM.money(short) })) + "</p>" +
         '<p class="small">' + esc(GM.fmt(T.clearLine, { b: GM.money(state.bank), t: GM.money(state.target) })) + "</p>" +
         '<p class="small">' + esc(T.overRun) + "</p>" +
-        '<button type="button" class="primary" data-act="retry">' + esc(T.retry) + "</button>" +
-        '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
+        '<div class="menu">' +
+          row(state.endCursor !== 1, "retry", T.retry, "", false) +
+          row(state.endCursor === 1, "title", T.toTitle, "", false) +
+        "</div>",
         T.footOver);
     }
     if (screen === "victory") {
@@ -221,8 +223,10 @@ GM.ui = (function () {
         "<h1>" + esc(T.victory) + "</h1>" +
         "<p>" + esc(T.victoryLine) + "</p>" +
         '<p class="big">' + esc(GM.fmt(T.shopCash, { b: GM.money(state.bank) })) + "</p>" + rec +
-        '<button type="button" class="primary" data-act="endless">' + esc(T.keep) + "</button>" +
-        '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
+        '<div class="menu">' +
+          row(state.endCursor !== 1, "endless", T.keep, "", false) +
+          row(state.endCursor === 1, "title", T.toTitle, "", false) +
+        "</div>",
         T.footVictory);
     }
     return "";
@@ -585,14 +589,20 @@ GM.ui = (function () {
       } else if (btn === "b" || btn === "start") shopNext();
       return;
     }
-    if (s === "over") {
-      if (btn === "a" || btn === "start") startRun();
-      else if (btn === "b") { GM.toTitle(state); enter("title"); }
-      return;
-    }
-    if (s === "victory") {
-      if (btn === "a" || btn === "start") openShop();
-      else if (btn === "b") { GM.toTitle(state); enter("title"); }
+    /* the end screens are a two-row menu like the pause menu: up and down move, A takes the chosen row,
+       START takes the first (play on), B goes to the title */
+    if (s === "over" || s === "victory") {
+      if (btn === "up" || btn === "down") {
+        state.endCursor = state.endCursor === 1 ? 0 : 1;
+        sfx("move");
+        enter(s);
+      } else if (btn === "b" || (btn === "a" && state.endCursor === 1)) {
+        state.endCursor = 0;
+        GM.toTitle(state); enter("title");
+      } else if (btn === "a" || btn === "start") {
+        state.endCursor = 0;
+        if (s === "over") startRun(); else openShop();
+      }
     }
   }
 
