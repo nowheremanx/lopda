@@ -68,9 +68,9 @@
         "2222220333022222",
         "2222220333022222"
       ],
-      "version": "1.0.2",
+      "version": "1.1.0",
       "released": "2026-11-26",
-      "updated": "2026-11-26",
+      "updated": "2026-11-28",
       "description": "第一人称迷宫射击：空间站失联了，带着铆钉枪一层层往下，找门卡、躲光弹、关掉核心。",
       "i18n": {
         "en": {
@@ -81,8 +81,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lost-deck/index.html",
-      "sha256": "701e2628e7232546f949f403e6558d94bf18fb55e4062aeb4b5c1466e9b5927c",
-      "bytes": 170341
+      "sha256": "0c452d90b3b63bef84456cf2067e396b9ee910f63e9dcd96cbe786981073a599",
+      "bytes": 178662
     },
     {
       "spec": "lopda/1",

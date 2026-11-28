@@ -4,9 +4,68 @@
 (function () {
   "use strict";
   var LD = window.LD, R = LD.R;
-  var game = LoGame.create({ width: 160, height: 160, lang: "zh" });
+  /* the 160 x 160 screen is the whole game; on a phone lo-game's fill canvas grows around it (sdk/UI.md 13)
+     and paintBands fills the extra stage with the station, never paper */
+  var game = LoGame.create({ width: 160, height: 160, lang: "zh", fill: true, bands: paintBands });
   var T = game.t, g = game.g;
   var W = 160, VH = R.VH;
+
+  /* ---------------- the bands around the world ----------------
+     Levels, maps, hit tests and the HUD keep the 160 x 160 screen. The rows above it are the station's sky,
+     the rows below its deck; when Safari's bars leave a short stage the canvas fits by height and the extra
+     columns at the sides are hull. Fixed stars, so the sky looks the same every run and in screenshots. */
+  var bandStars = [];
+  (function () {
+    var seed = 0x6c6f7374;   /* "lost" */
+    function next() {
+      seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+      return seed / 4294967296;
+    }
+    for (var i = 0; i < 150; i++) bandStars.push({ u: next(), v: next(), t: i % 9 === 0 ? 3 : i % 3 === 0 ? 2 : 1 });
+  })();
+  function paintBands(s, i) {
+    var w = i.w, h = i.h, sky = i.y, ground = i.y + i.worldH, floor = h - ground, n, st, x, y;
+    s.clear(0);
+    if (sky > 0) {
+      for (n = 0; n < bandStars.length; n++) {
+        st = bandStars[n];
+        x = Math.floor(st.u * w);
+        y = Math.floor(st.v * sky);
+        if (x >= 0 && x < w) s.pixel(x, y, st.t);
+      }
+      /* the station's moon, only where the sky is tall enough for it */
+      if (sky >= 30) {
+        var mx = Math.floor(w * 0.78), my = Math.floor(sky * 0.5), mr = Math.min(10, Math.floor(sky / 5));
+        s.circle(mx, my, mr, 2, true);
+        s.pixel(mx - 3, my - 2, 0); s.pixel(mx + 2, my + 3, 0); s.pixel(mx + 4, my - 4, 0);
+      }
+      if (sky > 2) s.dither(0, sky - 2, w, 2, 1, 1);
+      s.rect(0, sky - 1, w, 1, 1);
+    }
+    if (floor > 0) {
+      /* the deck below the screen: a lit edge, seams every few rows, rivets */
+      s.rect(0, ground, w, floor, 0);
+      s.rect(0, ground, w, 1, 2);
+      for (y = ground + 5; y < h; y += 7) s.dither(0, y, w, 1, 1, 1);
+      for (x = 5; x < w; x += 18) {
+        s.rect(x, ground + 2, 2, 2, 1);
+        s.pixel(x + 1, ground + 2, 2);
+      }
+      if (floor > 12) for (x = 14; x < w; x += 36) s.rect(x, ground + 10, 1, Math.min(4, floor - 10), 1);
+    }
+    /* a stage too short for the world's width: the extra columns are hull, not paper */
+    if (i.x > 0) {
+      s.rect(0, 0, i.x, h, 0);
+      s.rect(i.x - 1, 0, 1, h, 1);
+      if (i.x > 3) s.dither(0, 0, 2, h, 1, 1);
+    }
+    if (i.x + i.worldW < w) {
+      var rx = i.x + i.worldW;
+      s.rect(rx, 0, w - rx, h, 0);
+      s.rect(rx, 0, 1, h, 1);
+      if (w - rx > 3) s.dither(w - 2, 0, 2, h, 1, 1);
+    }
+  }
   document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
   function t(zh, en, vars) { return T({ zh: zh, en: en }, vars); }
 

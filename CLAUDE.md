@@ -215,7 +215,7 @@ node --test                                  # the test suite; must pass
   `PAD.sfx({... vibrato: {depth, rate}})` and `PAD.ambience(name, level)` / `PAD.ambience(null)` (runtime 0.13.0+): presets
   `rain waves waterfall wind fire stream`, level 0-1, one at a time under the music, about 1 s fades; music and ambience
   calls are each limited to 4 a second.
-- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.4.0">` block and
+- Games may use `sdk/lo-game.js`: the app keeps an empty `<script data-lo-game="1.5.0">` block and
   `tools/bundle-app.mjs` fills it, plus a `data-lo-font` block with only the glyphs the app uses.
   The checker accepts only unmodified released copies (`sdk/lo-game.versions.json`). When you change
   lo-game.js: bump its VERSION, add the new hash to versions.json, re-run the tool on apps.
