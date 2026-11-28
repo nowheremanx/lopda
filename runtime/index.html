@@ -187,12 +187,12 @@
         <h2 data-i18n="pad.title">手柄</h2>
       </div>
       <div class="settings set-pad-page">
-        <p class="hint" id="set-pad-who"></p>
+        <p class="hint" id="set-pad-who" aria-live="polite"></p>
         <p class="hint" data-i18n="pad.hint">点一个键，再按手柄、遥控器或键盘上你想用的那个键。</p>
         <div class="set-pad-list" id="set-pad-list"></div>
         <p class="hint" id="set-pad-live"></p>
-        <p class="hint" id="set-pad-msg"></p>
-        <p class="hint" data-i18n="pad.keys">键盘上的方向键、X、Z、Enter、Shift 一直都能用。</p>
+        <p class="hint" id="set-pad-msg" role="status" aria-live="polite"></p>
+        <p class="hint" data-i18n="pad.keys">键盘上的方向键、X、Z、Enter、Shift 默认就能用；重新绑定以后，以你的键位为准。</p>
         <button class="btn ghost" id="set-pad-reset" type="button" data-i18n="pad.reset">恢复默认</button>
       </div>
     </section>
