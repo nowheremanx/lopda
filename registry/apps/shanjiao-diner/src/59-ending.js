@@ -16,7 +16,7 @@ game.scene("ending", {
     if (typeof playMusic === "function") playMusic("ending");
   },
   update: function () {
-    if (game.pressed("a") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
       game.sfx("tap");
       /* the finished week stays saved: the title offers 结局 and asks before 新局 */
       bootSave = S;

@@ -529,3 +529,116 @@ test("the night ledger counts down to the feast and, on the seventh night, says 
   g.text = text;
   assert.ok(drawn.some((s) => s === "宴席对上 2/3"), drawn.filter((s) => s.includes("宴")).join(" | "));
 });
+
+test("touch: a tap is the pad's A on every menu, and empty space does nothing", async () => {
+  const { app, listeners } = await bootDiner(3);
+  const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
+  /* pointer() takes game pixels (216 x 240) and scales them to the fake canvas */
+  const tap = async (x, y) => {
+    app.pointer("pointerdown", x, y, 216, 240);
+    await tick(2);
+    app.pointer("pointerup", x, y, 216, 240);
+    await tick(3);
+  };
+  const ctx = (n) => app.ctx.get(n);
+  await tick(10);
+  const game = ctx("game");
+  assert.equal(ctx("TITLE_SEL"), 0);
+  await tap(5, 40);                                   // the sky above the title board
+  await tick(3);
+  assert.equal(ctx("TITLE_SEL"), 0, "empty title space moves nothing");
+  await tap(140, 205);                                // 说明, the second item
+  await tick(40);
+  assert.equal(ctx("TITLE_SEL"), 1, "a title tap selects the tapped item");
+  await tap(108, 120);                                // help: a tap goes back
+  await tick(60);
+  await tap(50, 205);                                 // 开始
+  await tick(120);
+  const S = ctx("S");
+  assert.equal(S.day, 1, "a title tap starts the same game A starts");
+  S.seen.intro = 1; game.pop(true); await tick(5);
+
+  const ap = S.ap;
+  await tap(5, 100);                                  // the room, between panels
+  await tick(3);
+  assert.equal(S.ap, ap, "empty morning space does nothing");
+  await tap(57, 205);                                 // 菜单, the second action
+  await tick(60);
+  assert.ok(!S.flags.prepared, "the morning's tap opened prep, it did not cook");
+
+  await tap(100, 97);                                 // second prep row
+  await tick(3);
+  assert.equal(ctx("PREP_SEL"), 1, "a prep row tap moves the cursor");
+  const dish = ctx("prepList")()[ctx("PREP_SEL")];
+  ctx("PREP_PLAN")[dish] = 1;
+  await tap(108, 226);                                // the footer's A hint: 备好
+  await tick(60);
+  assert.equal(S.flags.prepared, 1, "the footer A tap cooks the plan");
+  assert.equal(S.ap, ap - 1, "cooking spends the action, as A does");
+
+  await tick(40);
+  await tap(91, 205);                                 // 店铺, the third action
+  await tick(60);
+  S.money = 500; S.rep = 5;
+  await tap(100, 152);                                // shop row 2 (加一条长凳)
+  await tick(5);
+  assert.equal(ctx("SHOP_SEL"), 2, "a shop row tap selects the row");
+  assert.ok(S.upgrades.table, "and buys it, as A does");
+
+  (listeners.press || []).forEach((f) => f("b")); await tick(2);
+  (listeners.release || []).forEach((f) => f("b")); await tick(40);
+  await tap(23, 205);                                 // 出门 (the first action) leaves for the forest
+  await tick(60);
+  assert.ok(ctx("trip"), "the morning's first tap opens the forest");
+  game.pop(true); await tick(5);
+
+  game.push("codex", { from: "morning" });
+  await tick(5);
+  await tap(140, 40);                                 // the 山兽 tab
+  await tick(3);
+  assert.equal(ctx("CODEX_TAB"), 2, "a codex tab tap switches category");
+  await tap(100, 80);                                 // second row
+  await tick(3);
+  assert.equal(ctx("CODEX_SEL"), 1, "a codex row tap moves the cursor");
+  game.pop(); await tick(5);
+
+  game.push("battle", { enemy: "boar", from: "forest" });
+  await tick(5);
+  const B = ctx("B");
+  B.heroHp = 10;
+  await tap(150, 205);                                // 包扎, the fourth cell
+  await tick(80);
+  assert.equal(B.sel, 3, "a battle tap picks the tapped cell");
+  assert.ok(B.heroHp > 10, "and acts, as A does");
+  const mode = B.mode;
+  await tap(5, 130);                                  // above the command window
+  await tick(5);
+  assert.equal(B.mode, mode, "empty battle space does nothing");
+  game.pop({ result: "flee", drops: [], money: 0 });
+  await tick(5);
+
+  game.push("service");
+  await tick(5);
+  const SERV = ctx("SERV");
+  S.stock = { mushroom_soup: 3 };
+  const guest = { dish: "mushroom_soup", who: null, want: null, matched: true, state: "wait", seat: 1,
+    patience: 20, maxPatience: 20, x: 152, y: 74, fx: 152, fy: 74, tx: 152, ty: 74, t: 1, eatT: 0, variant: 0 };
+  SERV.tables[1] = guest;
+  SERV.customers.push(guest);
+  await tap(152, 74);                                 // table 2
+  await tick(120);
+  assert.equal(SERV.sel, 1, "a service tap selects that table");
+  assert.equal(guest.state, "eat", "and serves, as A does");
+  SERV.paused = true; SERV.pauseSel = 1;
+  await tap(80, 104);                                 // 继续
+  await tick(3);
+  assert.equal(SERV.paused, false, "the pause box takes a tap");
+  SERV.menuOpen = true;
+  await tap(108, 120);                                // the stock list
+  await tick(3);
+  assert.equal(SERV.menuOpen, false, "the stock list closes on a tap");
+  SERV.sel = 2;
+  await tap(20, 120);                                 // the floor left of the tables
+  await tick(3);
+  assert.equal(SERV.sel, 2, "empty service space does nothing");
+});

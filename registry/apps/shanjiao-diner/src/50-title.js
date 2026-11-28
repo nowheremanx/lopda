@@ -19,6 +19,31 @@ function newGame() {
   game.go("morning");
 }
 
+/* A, START and a tap all come here: the tapped item is in TITLE_SEL first. */
+function titleChoose() {
+  var opts = titleOptions();
+  var id = opts[TITLE_SEL].id;
+  game.sfx("tap");
+  if (id === "continue") {
+    S = bootSave;
+    if (S.phase === "night") game.go("night");
+    else if (S.phase === "ending") game.go("ending");
+    else if (S.phase === "service") game.go("service");
+    else game.go("morning");
+  } else if (id === "new" && bootSave) {
+    /* the only save slot: ask before a new week replaces it */
+    busy = true;
+    game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
+      busy = false;
+      if (c === 0) newGame();
+    });
+  } else if (id === "new") {
+    newGame();
+  } else {
+    game.go("help", { from: "title" });
+  }
+}
+
 game.scene("title", {
   enter: function () {
     TITLE_SEL = 0;
@@ -32,28 +57,11 @@ game.scene("title", {
     if (TITLE_SEL >= opts.length) TITLE_SEL = 0;
     if (game.repeat("left")) { TITLE_SEL = (TITLE_SEL + opts.length - 1) % opts.length; game.sfx("move"); }
     if (game.repeat("right")) { TITLE_SEL = (TITLE_SEL + 1) % opts.length; game.sfx("move"); }
-    if (game.pressed("a") || game.pressed("start")) {
-      var id = opts[TITLE_SEL].id;
-      game.sfx("tap");
-      if (id === "continue") {
-        S = bootSave;
-        if (S.phase === "night") game.go("night");
-        else if (S.phase === "ending") game.go("ending");
-        else if (S.phase === "service") game.go("service");
-        else game.go("morning");
-      } else if (id === "new" && bootSave) {
-        /* the only save slot: ask before a new week replaces it */
-        busy = true;
-        game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
-          busy = false;
-          if (c === 0) newGame();
-        });
-      } else if (id === "new") {
-        newGame();
-      } else {
-        game.go("help", { from: "title" });
-      }
-    }
+    if (game.pressed("a") || game.pressed("start")) { titleChoose(); return; }
+    /* the whole menu window is the target: 32 game px is 49 css px on the
+       smallest phone, and the three cells are 53 game px wide */
+    var hit = tapCell(opts.length, 28, 190, 160, 32);
+    if (hit >= 0) { TITLE_SEL = hit; titleChoose(); }
   },
   draw: function (g) {
     ART.title(g, game.time);
@@ -88,7 +96,7 @@ game.scene("title", {
 game.scene("help", {
   enter: function (args) { this.from = (args && args.from) || "title"; },
   update: function () {
-    if (game.pressed("a") || game.pressed("b") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pointer.pressed) {
       game.sfx("tap");
       game.go(this.from);
     }

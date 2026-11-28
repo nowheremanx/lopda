@@ -65,7 +65,7 @@ game.scene("night", {
   },
   update: function () {
     if (busy) return;
-    if (game.pressed("a") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
       game.sfx("tap");
       if (S.day === 7) {
         if (!S.flags.finalChoice && (S.flags.vip || 0) >= 2 && (S.npc.ahe || 0) >= 4) {

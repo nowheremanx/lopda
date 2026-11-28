@@ -2090,6 +2090,31 @@ ART.plate = function (g, p, x, y) {
  * measured header, a list that scrolls inside its own box, and order tags
  * drawn in the wall band instead of on top of the tables.
  */
+/* Touch.  lo-game's `game.pointer` is in game pixels and `pressed` lasts one
+ * step, so one tap is one action.  A screen keeps its cursor in the same
+ * variable the pad moves: a tap sets it first (the highlight lands on the
+ * tapped item) and then runs what A runs there.  `tapInside` is the only
+ * place that reads the pointer, so a tap on empty space is always a no-op. */
+function tapInside(x, y, w, h) {
+  var p = game.pointer;
+  return !!p.pressed && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
+}
+
+/* a horizontal row of `count` cells: title menu, morning actions, battle grid */
+function tapCell(count, x, y, w, h) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = Math.floor((game.pointer.x - x) * count / w);
+  return i < 0 ? 0 : i >= count ? count - 1 : i;
+}
+
+/* a scrolling list in the UI.list layout: the visible window, its row height,
+ * the scroll the last draw used */
+function tapRow(x, y, w, h, rowH, count, scroll) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = (scroll || 0) + Math.floor((game.pointer.y - y) / rowH);
+  return i >= 0 && i < count ? i : -1;
+}
+
 var UI = (function () {
   var R = {
     W: 216, H: 240,
@@ -2608,6 +2633,31 @@ function newGame() {
   game.go("morning");
 }
 
+/* A, START and a tap all come here: the tapped item is in TITLE_SEL first. */
+function titleChoose() {
+  var opts = titleOptions();
+  var id = opts[TITLE_SEL].id;
+  game.sfx("tap");
+  if (id === "continue") {
+    S = bootSave;
+    if (S.phase === "night") game.go("night");
+    else if (S.phase === "ending") game.go("ending");
+    else if (S.phase === "service") game.go("service");
+    else game.go("morning");
+  } else if (id === "new" && bootSave) {
+    /* the only save slot: ask before a new week replaces it */
+    busy = true;
+    game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
+      busy = false;
+      if (c === 0) newGame();
+    });
+  } else if (id === "new") {
+    newGame();
+  } else {
+    game.go("help", { from: "title" });
+  }
+}
+
 game.scene("title", {
   enter: function () {
     TITLE_SEL = 0;
@@ -2621,28 +2671,11 @@ game.scene("title", {
     if (TITLE_SEL >= opts.length) TITLE_SEL = 0;
     if (game.repeat("left")) { TITLE_SEL = (TITLE_SEL + opts.length - 1) % opts.length; game.sfx("move"); }
     if (game.repeat("right")) { TITLE_SEL = (TITLE_SEL + 1) % opts.length; game.sfx("move"); }
-    if (game.pressed("a") || game.pressed("start")) {
-      var id = opts[TITLE_SEL].id;
-      game.sfx("tap");
-      if (id === "continue") {
-        S = bootSave;
-        if (S.phase === "night") game.go("night");
-        else if (S.phase === "ending") game.go("ending");
-        else if (S.phase === "service") game.go("service");
-        else game.go("morning");
-      } else if (id === "new" && bootSave) {
-        /* the only save slot: ask before a new week replaces it */
-        busy = true;
-        game.choose(["开新局"], { title: "旧存档会被覆盖。开新局？", cancel: true }).then(function (c) {
-          busy = false;
-          if (c === 0) newGame();
-        });
-      } else if (id === "new") {
-        newGame();
-      } else {
-        game.go("help", { from: "title" });
-      }
-    }
+    if (game.pressed("a") || game.pressed("start")) { titleChoose(); return; }
+    /* the whole menu window is the target: 32 game px is 49 css px on the
+       smallest phone, and the three cells are 53 game px wide */
+    var hit = tapCell(opts.length, 28, 190, 160, 32);
+    if (hit >= 0) { TITLE_SEL = hit; titleChoose(); }
   },
   draw: function (g) {
     ART.title(g, game.time);
@@ -2677,7 +2710,7 @@ game.scene("title", {
 game.scene("help", {
   enter: function (args) { this.from = (args && args.from) || "title"; },
   update: function () {
-    if (game.pressed("a") || game.pressed("b") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pointer.pressed) {
       game.sfx("tap");
       game.go(this.from);
     }
@@ -2799,6 +2832,9 @@ game.scene("morning", {
     if (game.repeat("right")) { MORNING_SEL = (MORNING_SEL + 1) % acts.length; game.sfx("move"); }
     // up/down still move the same row on a one-row bar
     if (game.pressed("a")) morningAct(MORNING_SEL);
+    /* the action bar: 30 game px tall (44 css px at 331 px wide) */
+    var hit = tapCell(acts.length, 6, 190, 204, 30);
+    if (hit >= 0) { MORNING_SEL = hit; morningAct(hit); }
     if (game.pressed("b")) game.go("help", { from: "morning" });
     if (game.pressed("start")) {
       game.sfx("tap");
@@ -2891,7 +2927,12 @@ game.scene("prep", {
       if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
       else game.sfx("err");
     }
-    if (game.pressed("a")) prepConfirm();
+    /* A tap picks a row.  A is 「备好」 for the whole menu, not a row action,
+       so the confirm sits on the footer's A hint; a tap there is A, as it
+       reads, and a tap on a dish only moves the cursor. */
+    var tapped = tapRow(8, 82, 200, 75, 15, list.length, PREP_SCROLL);
+    if (tapped >= 0) { PREP_SEL = tapped; game.sfx("move"); return; }
+    if (game.pressed("a") || tapInside(0, 216, 216, 24)) prepConfirm();
     if (game.pressed("b")) { game.sfx("tap"); game.go("morning"); }
     if (game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },
@@ -3447,9 +3488,17 @@ game.scene("battle", {
       if (game.repeat("up")) { B.sel ^= 2; game.sfx("move"); }
       if (game.repeat("down")) { B.sel ^= 2; game.sfx("move"); }
       if (game.pressed("a")) playerAction(B.sel);
+      else {
+        /* the 2x2 grid: the command window is 46 px tall, split into halves */
+        var p = game.pointer, cell = -1;
+        if (p.pressed && p.x >= 4 && p.x < 212 && p.y >= 176 && p.y < 222) {
+          cell = (p.y < 199 ? 0 : 2) + (p.x < 106 ? 0 : 1);
+        }
+        if (cell >= 0) { B.sel = cell; playerAction(cell); }
+      }
       if (game.pressed("b")) playerAction(4);
     } else if (B.mode === "end") {
-      if (game.pressed("a") || game.pressed("b")) {
+      if (game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
         game.sfx("tap");
         game.pop({ result: B.result, drops: B.drops, money: B.money });
       }
@@ -3528,6 +3577,20 @@ function tablePos(i) {
 function seatPos(i) {
   var p = tablePos(i);
   return { x: p[0] + 16, y: p[1] - 20 };
+}
+
+/* A table is one touch target: its order tag above (y - 44) down to the
+ * action bar (the second row's feet are under it), 58 px wide.  The two rows
+ * are split at y 120, where the lower row's order tag starts. */
+function tapSeat() {
+  var p = game.pointer;
+  if (!p.pressed) return -1;
+  for (var i = 0; i < SERV.seats; i++) {
+    var tp = tablePos(i), top = tp[1] < 130 ? 44 : 120;
+    var bottom = tp[1] < 130 ? 120 : 194;
+    if (p.x >= tp[0] - 6 && p.x < tp[0] + 52 && p.y >= top && p.y < bottom) return i;
+  }
+  return -1;
 }
 function dishPool() {
   // A passing customer does not order the feast dish; it is cooked for the
@@ -3895,12 +3958,21 @@ game.scene("service", {
       if (game.pressed("a")) {
         if (SERV.pauseSel === 0) { SERV.paused = false; game.sfx("tap"); }
         else { game.sfx("tap"); finishService(true); }
+      } else {
+        /* the pause box's two rows (98 and 118, 20 px apart) */
+        var pr = tapRow(48, 94, 120, 42, 20, 2, 0);
+        if (pr >= 0) {
+          SERV.pauseSel = pr;
+          if (pr === 0) { SERV.paused = false; game.sfx("tap"); }
+          else { game.sfx("tap"); finishService(true); }
+        }
       }
       if (game.pressed("start")) { SERV.paused = false; game.sfx("tap"); }
       return;
     }
     if (SERV.menuOpen) {
-      if (game.pressed("b") || game.pressed("a") || game.pressed("start")) { SERV.menuOpen = false; game.sfx("tap"); }
+      /* the stock list is a modal with one way out: tap anywhere on it */
+      if (game.pressed("b") || game.pressed("a") || game.pressed("start") || tapInside(20, 52, 176, 128)) { SERV.menuOpen = false; game.sfx("tap"); }
       return;
     }
     if (game.pressed("start")) { SERV.paused = true; SERV.pauseSel = 0; game.sfx("tap"); return; }
@@ -3909,6 +3981,10 @@ game.scene("service", {
     if (game.repeat("left")) { SERV.sel = (SERV.sel + SERV.seats - 1) % SERV.seats; game.sfx("move"); }
     if (game.repeat("right")) { SERV.sel = (SERV.sel + 1) % SERV.seats; game.sfx("move"); }
     if (game.pressed("a")) serveSeat(SERV.sel);
+    else {
+      var seat = tapSeat();
+      if (seat >= 0) { SERV.sel = seat; serveSeat(seat); }
+    }
     // story
     if (SERV.storyQueue.length) {
       var st = SERV.storyQueue.shift();
@@ -4148,7 +4224,7 @@ game.scene("night", {
   },
   update: function () {
     if (busy) return;
-    if (game.pressed("a") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
       game.sfx("tap");
       if (S.day === 7) {
         if (!S.flags.finalChoice && (S.flags.vip || 0) >= 2 && (S.npc.ahe || 0) >= 4) {
@@ -4264,6 +4340,18 @@ function shopStatus(id) {
   return "可买";
 }
 
+/* A and a tap on a row do the same: buy the selected upgrade. */
+function shopBuy() {
+  var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
+  if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
+  if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+  if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
+  if (buyUpgrade(id)) {
+    game.sfx("ok");
+    sayToast("买下了「" + u.name + "」");
+  }
+}
+
 game.scene("shop", {
   enter: function () {
     SHOP_SEL = 0;
@@ -4275,16 +4363,11 @@ game.scene("shop", {
     if (busy) return;
     if (game.repeat("up")) { SHOP_SEL = (SHOP_SEL + DATA.UPGRADE_ORDER.length - 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
     if (game.repeat("down")) { SHOP_SEL = (SHOP_SEL + 1) % DATA.UPGRADE_ORDER.length; game.sfx("move"); }
-    if (game.pressed("a")) {
-      var id = DATA.UPGRADE_ORDER[SHOP_SEL], u = DATA.UPGRADES[id];
-      if (hasUpgrade(id)) { game.sfx("err"); SHOP_MSG = "这个已经有了。"; SHOP_MSG_UNTIL = game.time + 2; return; }
-      if (S.rep < u.rep) { game.sfx("err"); SHOP_MSG = "名声还不够，需要 " + u.rep + "。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
-      if (S.money < u.cost) { game.sfx("err"); SHOP_MSG = "钱不够，还差 " + (u.cost - S.money) + " 文。"; SHOP_MSG_UNTIL = game.time + 2.4; return; }
-      if (buyUpgrade(id)) {
-        game.sfx("ok");
-        sayToast("买下了「" + u.name + "」");
-      }
-    }
+    if (game.pressed("a")) shopBuy();
+    /* the list is not scrolling (5 rows of 16 in an 80 px window): tap a row
+       to move the cursor there and buy, exactly as A does */
+    var hit = tapRow(8, 112, 200, 80, 16, DATA.UPGRADE_ORDER.length, 0);
+    if (hit >= 0) { SHOP_SEL = hit; shopBuy(); }
     if (game.pressed("b") || game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },
   draw: function (g) {
@@ -4564,7 +4647,7 @@ game.scene("ending", {
     if (typeof playMusic === "function") playMusic("ending");
   },
   update: function () {
-    if (game.pressed("a") || game.pressed("start")) {
+    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
       game.sfx("tap");
       /* the finished week stays saved: the title offers 结局 and asks before 新局 */
       bootSave = S;
@@ -4679,6 +4762,17 @@ game.scene("codex", {
       CODEX_SCROLL = 0;
       game.sfx("move");
     }
+    /* the tab strip (10 + 50 each) switches category, like ← → */
+    var tab = tapCell(CODEX_TABS.length, 10, 32, 200, 20);
+    if (tab >= 0) {
+      if (tab !== CODEX_TAB) {
+        CODEX_TAB = tab;
+        CODEX_SEL = 0;
+        CODEX_SCROLL = 0;
+        game.sfx("move");
+      }
+      return;
+    }
     if (game.repeat("up")) {
       CODEX_SEL = (CODEX_SEL + list.length - 1) % list.length;
       game.sfx("move");
@@ -4687,6 +4781,9 @@ game.scene("codex", {
       CODEX_SEL = (CODEX_SEL + 1) % list.length;
       game.sfx("move");
     }
+    /* the list window: a tap moves the cursor to that row */
+    var row = tapRow(8, 58, 200, 90, 15, list.length, CODEX_SCROLL);
+    if (row >= 0) { CODEX_SEL = row; game.sfx("move"); }
     if (game.pressed("b") || game.pressed("start")) {
       game.sfx("tap");
       if (CODEX_FROM) game.pop();

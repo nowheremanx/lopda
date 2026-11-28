@@ -12,6 +12,20 @@ function seatPos(i) {
   var p = tablePos(i);
   return { x: p[0] + 16, y: p[1] - 20 };
 }
+
+/* A table is one touch target: its order tag above (y - 44) down to the
+ * action bar (the second row's feet are under it), 58 px wide.  The two rows
+ * are split at y 120, where the lower row's order tag starts. */
+function tapSeat() {
+  var p = game.pointer;
+  if (!p.pressed) return -1;
+  for (var i = 0; i < SERV.seats; i++) {
+    var tp = tablePos(i), top = tp[1] < 130 ? 44 : 120;
+    var bottom = tp[1] < 130 ? 120 : 194;
+    if (p.x >= tp[0] - 6 && p.x < tp[0] + 52 && p.y >= top && p.y < bottom) return i;
+  }
+  return -1;
+}
 function dishPool() {
   // A passing customer does not order the feast dish; it is cooked for the
   // mountain god's table.  On the seventh night the three named dishes are
@@ -378,12 +392,21 @@ game.scene("service", {
       if (game.pressed("a")) {
         if (SERV.pauseSel === 0) { SERV.paused = false; game.sfx("tap"); }
         else { game.sfx("tap"); finishService(true); }
+      } else {
+        /* the pause box's two rows (98 and 118, 20 px apart) */
+        var pr = tapRow(48, 94, 120, 42, 20, 2, 0);
+        if (pr >= 0) {
+          SERV.pauseSel = pr;
+          if (pr === 0) { SERV.paused = false; game.sfx("tap"); }
+          else { game.sfx("tap"); finishService(true); }
+        }
       }
       if (game.pressed("start")) { SERV.paused = false; game.sfx("tap"); }
       return;
     }
     if (SERV.menuOpen) {
-      if (game.pressed("b") || game.pressed("a") || game.pressed("start")) { SERV.menuOpen = false; game.sfx("tap"); }
+      /* the stock list is a modal with one way out: tap anywhere on it */
+      if (game.pressed("b") || game.pressed("a") || game.pressed("start") || tapInside(20, 52, 176, 128)) { SERV.menuOpen = false; game.sfx("tap"); }
       return;
     }
     if (game.pressed("start")) { SERV.paused = true; SERV.pauseSel = 0; game.sfx("tap"); return; }
@@ -392,6 +415,10 @@ game.scene("service", {
     if (game.repeat("left")) { SERV.sel = (SERV.sel + SERV.seats - 1) % SERV.seats; game.sfx("move"); }
     if (game.repeat("right")) { SERV.sel = (SERV.sel + 1) % SERV.seats; game.sfx("move"); }
     if (game.pressed("a")) serveSeat(SERV.sel);
+    else {
+      var seat = tapSeat();
+      if (seat >= 0) { SERV.sel = seat; serveSeat(seat); }
+    }
     // story
     if (SERV.storyQueue.length) {
       var st = SERV.storyQueue.shift();

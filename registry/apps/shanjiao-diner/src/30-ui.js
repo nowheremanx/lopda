@@ -10,6 +10,31 @@
  * measured header, a list that scrolls inside its own box, and order tags
  * drawn in the wall band instead of on top of the tables.
  */
+/* Touch.  lo-game's `game.pointer` is in game pixels and `pressed` lasts one
+ * step, so one tap is one action.  A screen keeps its cursor in the same
+ * variable the pad moves: a tap sets it first (the highlight lands on the
+ * tapped item) and then runs what A runs there.  `tapInside` is the only
+ * place that reads the pointer, so a tap on empty space is always a no-op. */
+function tapInside(x, y, w, h) {
+  var p = game.pointer;
+  return !!p.pressed && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
+}
+
+/* a horizontal row of `count` cells: title menu, morning actions, battle grid */
+function tapCell(count, x, y, w, h) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = Math.floor((game.pointer.x - x) * count / w);
+  return i < 0 ? 0 : i >= count ? count - 1 : i;
+}
+
+/* a scrolling list in the UI.list layout: the visible window, its row height,
+ * the scroll the last draw used */
+function tapRow(x, y, w, h, rowH, count, scroll) {
+  if (!tapInside(x, y, w, h)) return -1;
+  var i = (scroll || 0) + Math.floor((game.pointer.y - y) / rowH);
+  return i >= 0 && i < count ? i : -1;
+}
+
 var UI = (function () {
   var R = {
     W: 216, H: 240,

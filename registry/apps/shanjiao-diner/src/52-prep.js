@@ -65,7 +65,12 @@ game.scene("prep", {
       if ((PREP_PLAN[id] || 0) < room) { PREP_PLAN[id] = (PREP_PLAN[id] || 0) + 1; game.sfx("tick"); }
       else game.sfx("err");
     }
-    if (game.pressed("a")) prepConfirm();
+    /* A tap picks a row.  A is 「备好」 for the whole menu, not a row action,
+       so the confirm sits on the footer's A hint; a tap there is A, as it
+       reads, and a tap on a dish only moves the cursor. */
+    var tapped = tapRow(8, 82, 200, 75, 15, list.length, PREP_SCROLL);
+    if (tapped >= 0) { PREP_SEL = tapped; game.sfx("move"); return; }
+    if (game.pressed("a") || tapInside(0, 216, 216, 24)) prepConfirm();
     if (game.pressed("b")) { game.sfx("tap"); game.go("morning"); }
     if (game.pressed("start")) { game.sfx("tap"); game.go("morning"); }
   },
