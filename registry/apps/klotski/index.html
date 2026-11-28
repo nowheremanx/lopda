@@ -8,13 +8,13 @@
      lo-game.js. MIT License. -->
 </head>
 <body>
-<script data-lo-game="1.4.0">
+<script data-lo-game="1.5.0">
 /*
- * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.5.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.5.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -25,7 +25,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -123,6 +123,38 @@ var LoGame = (function () {
     };
   }
 
+  /* Layout of a fill screen (1.5.0): the world keeps its size, the canvas around it covers the stage.
+     Returns {w, h, k, x, y}: canvas columns and rows, CSS pixels a canvas pixel, and where the world sits.
+     The caller works in CSS pixels from the stage's getBoundingClientRect (fractional on an iPhone). */
+  function fillLayout(stageW, stageH, worldW, worldH) {
+    var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
+    if (stageW > 0 && stageH > 0) {
+      k = stageW / worldW;
+      ch = Math.ceil(stageH / k);
+      if (ch < worldH) {
+        /* a stage too short for the world's width: fit by height and grow wider at the sides */
+        k = stageH / worldH;
+        cw = Math.max(worldW, Math.ceil(stageW / k));
+        ch = worldH;
+        x = Math.floor((cw - worldW) / 2);
+      } else {
+        /* the world's width fills the stage; the rows over it become scenery */
+        cw = worldW;
+        y = Math.floor((ch - worldH) / 2);
+      }
+    }
+    return { w: cw, h: ch, k: k, x: x, y: y };
+  }
+  /* The contain layout the framework has always used with fill off: the world stays whole, paper around it.
+     Returns {w, h, k} with the CSS size rounded, as the canvas style has always been set. */
+  function containLayout(stageW, stageH, worldW, worldH, dpr) {
+    dpr = dpr || 1;
+    var best = Math.min(stageW / worldW, stageH / worldH), k = Math.floor(best * dpr) / dpr;
+    if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+    k = Math.max(0.5, k);
+    return { w: Math.round(worldW * k), h: Math.round(worldH * k), k: k };
+  }
+
   /* ---------------- the game ---------------- */
   function create(opt) {
     opt = opt || {};
@@ -152,19 +184,41 @@ var LoGame = (function () {
     parent.appendChild(canvas);
     var ctx = canvas.getContext("2d");
     var image = ctx.createImageData(W, H);
+    var fill = !!opt.fill, bands = typeof opt.bands === "function" ? opt.bands : null;
+    var lay = { w: W, h: H, k: 1, x: 0, y: 0 };
+    var stageInfo = { w: W, h: H, k: 1, x: 0, y: 0, worldW: W, worldH: H };
+    var stageBuf = null, bandSurface = null, stageImage = null, lastFitW = -1, lastFitH = -1;
     function fit() {
+      if (fill) { fitFill(); return; }
       var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
-      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
-      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
-      k = Math.max(0.5, k);
-      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
-      game.scale = k;
+      var c = containLayout(aw, ah, W, H, window.devicePixelRatio || 1);
+      canvas.style.width = c.w + "px"; canvas.style.height = c.h + "px";
+      game.scale = c.k;
+      game.stage = { w: W, h: H, k: c.k, x: 0, y: 0 };
+    }
+    /* the stage's own box, fractional: the layout that leaves no paper at the sides, top or bottom */
+    function fitFill() {
+      var r = parent.getBoundingClientRect ? parent.getBoundingClientRect() : null;
+      var w = r ? r.width : 0, h = r ? r.height : 0;
+      if (!(w > 0) || !(h > 0)) { w = parent.clientWidth || innerWidth; h = parent.clientHeight || innerHeight; }
+      if (w === lastFitW && h === lastFitH && stageBuf) return;
+      lastFitW = w; lastFitH = h;
+      var L = fillLayout(w, h, W, H);
+      lay = L;
+      stageInfo.w = L.w; stageInfo.h = L.h; stageInfo.k = L.k; stageInfo.x = L.x; stageInfo.y = L.y;
+      canvas.width = L.w; canvas.height = L.h;
+      /* exact sizes, not rounded: a rounded width leaves a line of paper down each side on an iPhone */
+      canvas.style.width = (L.w * L.k) + "px"; canvas.style.height = (L.h * L.k) + "px";
+      stageBuf = new Uint8Array(L.w * L.h); stageBuf.fill(PAPER);
+      bandSurface = makeSurface({ buf: stageBuf, w: L.w, h: L.h });
+      stageImage = ctx.createImageData(L.w, L.h);
+      game.scale = L.k;
+      game.stage = { w: L.w, h: L.h, k: L.k, x: L.x, y: L.y };
+      if (stack.length) render();   /* canvas.width cleared it: draw straight away */
     }
 
     /* --- framebuffer and drawing --- */
     var buf = new Uint8Array(W * H);
-    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
-    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
 
     var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
     function fontCtx() {
@@ -212,108 +266,117 @@ var LoGame = (function () {
       return lines;
     }
 
-    var g = {
-      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
-      clear: function (c) { buf.fill(c == null ? PAPER : c); },
-      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
-      clip: function (x, y, w, h) {
-        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
-        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
-        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
-      },
-      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
-      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
-      rect: function (x, y, w, h, c) {
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
-        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
-      },
-      frame: function (x, y, w, h, c) {
-        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
-      },
-      line: function (x0, y0, x1, y1, c) {
-        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
-        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
-        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
-      },
-      circle: function (cx, cy, r, c, fill) {
-        cx = Math.round(cx); cy = Math.round(cy);
-        for (var y = -r; y <= r; y++) {
-          var span = Math.round(Math.sqrt(r * r + r - y * y));
-          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
-          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
-        }
-        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
-      },
-      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
-      dither: function (x, y, w, h, c, level) {
-        level = clamp(level == null ? 2 : level, 0, 4);
-        x = Math.round(x); y = Math.round(y);
-        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
-          var px = (x + xx) & 1, py = (y + yy) & 1;
-          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
-          if (on) put(x + xx + ox, y + yy + oy, c);
-        }
-      },
-      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
-      sprite: function (s, x, y, o) {
-        o = o || {};
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
-        for (var yy = 0; yy < h; yy++) {
-          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
-          var sy = o.flipY ? h - 1 - yy : yy;
-          for (var xx = 0; xx < w; xx++) {
-            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
-            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
-            if (v === CLEAR) continue;
-            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+    /* a drawing surface over any tone buffer: the world, and with fill a band canvas the app's `bands`
+       callback paints in stage coordinates. Both get the same methods and clip/origin state. */
+    function makeSurface(t) {
+      var sbuf = t.buf, SW = t.w, SH = t.h;
+      var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = SW, cy1 = SH;
+      function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) sbuf[y * SW + x] = c; }
+      var s = {
+        width: SW, height: SH, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+        clear: function (c) { sbuf.fill(c == null ? PAPER : c); },
+        origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+        clip: function (x, y, w, h) {
+          if (x == null) { cx0 = 0; cy0 = 0; cx1 = SW; cy1 = SH; return; }
+          cx0 = clamp(Math.round(x + ox), 0, SW); cy0 = clamp(Math.round(y + oy), 0, SH);
+          cx1 = clamp(Math.round(x + ox + w), 0, SW); cy1 = clamp(Math.round(y + oy + h), 0, SH);
+        },
+        pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+        get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= SW || y >= SH ? null : sbuf[y * SW + x]; },
+        rect: function (x, y, w, h, c) {
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+          for (var yy = ya; yy < yb; yy++) sbuf.fill(c, yy * SW + xa, yy * SW + Math.max(xa, xb));
+        },
+        frame: function (x, y, w, h, c) {
+          s.rect(x, y, w, 1, c); s.rect(x, y + h - 1, w, 1, c); s.rect(x, y, 1, h, c); s.rect(x + w - 1, y, 1, h, c);
+        },
+        line: function (x0, y0, x1, y1, c) {
+          x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+          var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+          for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+        },
+        circle: function (cx, cy, r, c, fill) {
+          cx = Math.round(cx); cy = Math.round(cy);
+          for (var y = -r; y <= r; y++) {
+            var span = Math.round(Math.sqrt(r * r + r - y * y));
+            if (fill) s.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+            else { s.pixel(cx - span, cy + y, c); s.pixel(cx + span, cy + y, c); }
+          }
+          if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); s.pixel(cx + x, cy - s2, c); s.pixel(cx + x, cy + s2, c); }
+        },
+        /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+        dither: function (x, y, w, h, c, level) {
+          level = clamp(level == null ? 2 : level, 0, 4);
+          x = Math.round(x); y = Math.round(y);
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+            var px = (x + xx) & 1, py = (y + yy) & 1;
+            var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+            if (on) put(x + xx + ox, y + yy + oy, c);
+          }
+        },
+        /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+        sprite: function (sp, x, y, o) {
+          o = o || {};
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var w = sp.w, h = sp.h, px = sp.px, one = o.color, map = o.map;
+          for (var yy = 0; yy < h; yy++) {
+            var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+            var sy = o.flipY ? h - 1 - yy : yy;
+            for (var xx = 0; xx < w; xx++) {
+              var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+              var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+              if (v === CLEAR) continue;
+              sbuf[dy * SW + dx] = one != null ? one : map ? map[v] : v;
+            }
+          }
+        },
+        /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+        text: function (str, x, y, o) {
+          o = o || {};
+          var color = o.color == null ? INK : o.color;
+          var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+          lines.forEach(function (ln) {
+            /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+            var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+            if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+            else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+            Array.from(ln).forEach(function (ch) {
+              var gl = glyph(ch);
+              for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+                if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+                put(xx + i + ox, yy + j + oy, color);
+              }
+              xx += gl.adv;
+            });
+            yy += FONT.line;
+          });
+          return lines.length * FONT.line;
+        },
+        measure: measure,
+        wrap: wrap,
+        lineHeight: FONT.line,
+        /* the standard window: paper inside, ink border with cut corners */
+        window: function (x, y, w, h, o) {
+          o = o || {};
+          s.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+          var c = o.border == null ? INK : o.border;
+          s.rect(x + 1, y, w - 2, 1, c); s.rect(x + 1, y + h - 1, w - 2, 1, c);
+          s.rect(x, y + 1, 1, h - 2, c); s.rect(x + w - 1, y + 1, 1, h - 2, c);
+          if (!o.thin) { s.rect(x + 2, y + 2, w - 4, 1, MID); }
+        },
+        /* a small arrow used by menus and "more" markers */
+        arrow: function (x, y, dir, c) {
+          c = c == null ? INK : c;
+          for (var i = 0; i < 4; i++) {
+            if (dir === "down") s.rect(x + i, y + i, 7 - 2 * i, 1, c);
+            else s.rect(x + i, y + i, 1, 7 - 2 * i, c);
           }
         }
-      },
-      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
-      text: function (str, x, y, o) {
-        o = o || {};
-        var color = o.color == null ? INK : o.color;
-        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
-        lines.forEach(function (ln) {
-          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
-          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
-          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
-          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
-          Array.from(ln).forEach(function (ch) {
-            var gl = glyph(ch);
-            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
-              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
-              put(xx + i + ox, yy + j + oy, color);
-            }
-            xx += gl.adv;
-          });
-          yy += FONT.line;
-        });
-        return lines.length * FONT.line;
-      },
-      measure: measure,
-      wrap: wrap,
-      lineHeight: FONT.line,
-      /* the standard window: paper inside, ink border with cut corners */
-      window: function (x, y, w, h, o) {
-        o = o || {};
-        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
-        var c = o.border == null ? INK : o.border;
-        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
-        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
-        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
-      },
-      /* a small arrow used by menus and "more" markers */
-      arrow: function (x, y, dir, c) {
-        c = c == null ? INK : c;
-        for (var i = 0; i < 4; i++) {
-          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
-          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
-        }
-      }
-    };
+      };
+      return s;
+    }
+    var g = makeSurface({ buf: buf, w: W, h: H });
 
     /* --- palette effects: every frame the indexed buffer goes through this map --- */
     var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
@@ -321,8 +384,23 @@ var LoGame = (function () {
       var map = pal.slice();
       if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
       if (flashT > 0) map = map.map(function (v) { return 3 - v; });
-      var d = image.data, n = W * H;
       if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      if (fill) {
+        if (!stageBuf || !stageImage) return 0;
+        var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
+        for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
+          var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
+          var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
+          sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
+        }
+        ctx.putImageData(stageImage, 0, 0);
+        return n2;
+      }
+      var d = image.data, n = W * H;
       for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
         var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
         var c = RGB[map[v]], o = (y * W + x) * 4;
@@ -342,10 +420,27 @@ var LoGame = (function () {
       addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
     }
     addEventListener("blur", function () { BUTTONS.forEach(up); });
-    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    var pointer = { x: 0, y: 0, stageX: 0, stageY: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
     function toScreen(e) {
       var r = canvas.getBoundingClientRect();
-      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+      if (fill) {
+        /* stage pixels (canvas pixels), then the world inside them; a tap in a band still lands on the near edge */
+        var px = (e.clientX - r.left) / (lay.k || 1), py = (e.clientY - r.top) / (lay.k || 1);
+        pointer.stageX = px; pointer.stageY = py;
+        pointer.x = clamp(Math.floor(px - lay.x), 0, W - 1);
+        pointer.y = clamp(Math.floor(py - lay.y), 0, H - 1);
+        return;
+      }
+      pointer.stageX = (e.clientX - r.left) * W / r.width;
+      pointer.stageY = (e.clientY - r.top) * H / r.height;
+      pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
+    }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
     }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
@@ -379,7 +474,8 @@ var LoGame = (function () {
     function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
 
     var game = {
-      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      VERSION: VERSION, width: W, height: H, stage: { w: W, h: H, k: 1, x: 0, y: 0 },
+      g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
       t: function (text, vars) { return pick(text, LANG, vars); },
       INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
 
@@ -416,8 +512,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -522,7 +618,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -554,13 +650,30 @@ var LoGame = (function () {
       game.time += STEP; game.frame++;
       inputEnd();
     }
+    /* the world into the stage: a plain copy, every frame, so the bands can be painted under it */
+    function compose() {
+      var sb = stageBuf, cw = lay.w, x0 = lay.x, y0 = lay.y;
+      for (var y = 0; y < H; y++) {
+        var src = y * W, dst = (y0 + y) * cw + x0;
+        for (var x = 0; x < W; x++) sb[dst + x] = buf[src + x];
+      }
+    }
     function render() {
+      if (fill) {
+        if (!stageBuf) return;
+        /* the app paints the full stage first: sky above the world, floor below, a HUD if it has one */
+        bandSurface.origin(0, 0); bandSurface.clip();
+        if (bands) bands(bandSurface, stageInfo);
+      }
       g.origin(0, 0); g.clip();
       for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      if (fill) compose();
       present();
     }
     function frame(ts) {
       requestAnimationFrame(frame);
+      /* the stage can settle after the app starts with no resize event (an iPhone's bars): check it every frame */
+      if (fill) fitFill();
       if (!last) last = ts;
       acc += Math.min(0.1, (ts - last) / 1000); last = ts;
       var n = 0;
@@ -580,6 +693,7 @@ var LoGame = (function () {
   return {
     VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
     create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    fillLayout: fillLayout, containLayout: containLayout,
     clamp: clamp, lerp: lerp, approach: approach, t: t
   };
 })();
@@ -689,7 +803,7 @@ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 */
-LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","×":"6:AAAAAiUIUiAAAA==","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","“":"12:AAAkBIBsBsAAAAAAAAAAAAAAAAA=","”":"12:AAbAbAJASAAAAAAAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","↑":"12:AABADgFQBABABABABABABABAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","▼":"12:AAAAf8f8P4P4HwHwDgDgBAAAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","与":"12:AAEAH+EAIAP+ACAC/yACACAcAAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","主":"12:AACABA/+BABABAf8BABABA/+AAA=","久":"12:AAEAEAHwIQQQggBACgEQIIwGAAA=","么":"12:AACACAEQEQIgQghACEEEIafiAAA=","义":"12:AACAREREIIIIEQCgBACgMYwGAAA=","之":"12:AACABA/8AIAQAgBACAMATAg+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","书":"12:AACICEf4CICI/+CCCCCCCMCAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","事":"12:AABA/+JIJIf8BE/+BEf8BAHAAAA=","二":"12:AAAAf8AAAAAAAAAAAAAA/+AAAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","什":"12:AAEQEQIQIQb+oQIQIQIQIQIQAAA=","仍":"12:AAL8JERERIxORCRCRCSCSCUMAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","以":"12:AAAISIRIRIQIQISQUQYoREGCAAA=","们":"12:AAKeJCQCSCyCSCSCSCSCSCSOAAA=","件":"12:AAKQKQT+UQwQQQX+QQQQQQQQAAA=","伏":"12:AAEUESIQL+YQooIoIoJEJEKCAAA=","优":"12:AAIoIkQgX+wgRQRQRQSSSSUeAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","传":"12:AAIQL8QgQg3+RAT8QERIQwQIAAA=","似":"12:AAIkKUSUSEyESISoTUSUQiRCAAA=","但":"12:AAL8KESESEz8SESESET8QAX+AAA=","位":"12:AAIgIQX+QAyESERERIRIQQX+AAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","余":"12:AADgEQII32BABAf8BAJIxGDAAAA=","作":"12:AAJAJAR+Sg0gQ+QgQgQ+QgQgAAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","佳":"12:AAIQL8QQQQ3+QAQQT8QQQQX+AAA=","便":"12:AAL+IQT+SSz+SST+RQQgRQWOAAA=","做":"12:AAKQKQXeSkyUSUXUVUVIVUXiAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","儿":"12:AAEQEQEQEQEQEQEQIQISQSgeAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","八":"12:AAEQEQEQEQEQIIIIIIQEQEgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","兵":"12:AAAYPgIAP8IQIQIQ/+AAIIwGAAA=","典":"12:AACgf8SkSkf8SkSk/+AAIIwGAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","冤":"12:AA/+oCPwQQ/8REREf8CwEq4+AAA=","决":"12:AAggQgT8AkAkAkX+QgRQiIsGAAA=","几":"12:AAPwIQIQIQIQIQIQIQQSQSgeAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","刀":"12:AAf+CCCCCCCCCCCCECECICwcAAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","切":"12:AAT+QiQiciwiQiQiUiZCRCCMAAA=","列":"12:AA/CISISPSRSZSlSCSCCECYOAAA=","初":"12:AAT+Ii8iEiIiKiciqiJCJCKMAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","前":"12:AAIIEQ/+AAfURUfURUfURETMAAA=","办":"12:AACACAf4CISMSKiKEIEIIIwwAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","勇":"12:AAf4CQf8REf8RERE/+CCMCwcAAA=","勾":"12:AAIAP+ICSCiCECESISfqACAMAAA=","十":"12:AABABABABA/+BABABABABABAAAA=","半":"12:AABAREJIBAf8BABA/+BABABAAAA=","华":"12:AAEgImY4rgIiIeBA/+BABABAAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","占":"12:AABABAB+BABABAf8QEQEQEf8AAA=","卡":"12:AABABAB8BABA/+BABQBIBEBAAAA=","却":"12:AAEAEefSESES/SISSSSWlQ5QAAA=","原":"12:AAf+QgX8UEX8UEX8QgUkUipiAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","参":"12:AAEAIIf0CA/+EQLIw2PAAYfgAAA=","双":"12:AA++CiiiiiiiiiUUUUIIUUiiAAA=","反":"12:AAA8fAQAQAf8UESIRQQgTYsGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","变":"12:AABA/+EQUUkSEQf8IIEQDg8eAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","可":"12:AA/+AEAEPkIkIkIkPkAEAEAcAAA=","右":"12:AACACA/+EAEAIAP8YEoEIEP8AAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","同":"12:AA/+gCv6gCnykSkSkSnygCgOAAA=","名":"12:AACAD8EEaIBQAgH+8CECECH+AAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","向":"12:AACAEA/+gCnykSkSkSnygCgOAAA=","员":"12:AAP4IIP4AAf8QERERECgMYwGAAA=","呼":"12:AAAO7woQqSpUoQr+oQ4QAQBwAAA=","命":"12:AABACgMY32AAe8SkSkSkesAgAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","哪":"12:AAHu6qqqvqqsqqvqqq6uEoJoAAA=","四":"12:AA/+kSkSkSkSkSoewCgCgC/+AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","困":"12:AA/+gChChCv6jilSpKhCgC/+AAA=","圈":"12:AA/+lSv6iC/+kSvq0mlikK/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","块":"12:AAQgQgT84kQkQkX+YgxQCIMGAAA=","堵":"12:AAQgT6Qk4oX+QgR8bE18BEB8AAA=","塞":"12:AABA/+kSf8EQ/+IIREv6BA/+AAA=","填":"12:AAIQL+IQ98JEJ8JENEz+BECCAAA=","墙":"12:AAQQT+RU4QX+QAT+aCy6CqD+AAA=","声":"12:AABA/+BAf8AAf8REf8QAQAgAAAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","复":"12:AAQAf+oEP8IEP8CAH8cIDw8OAAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","够":"12:AAIQPeRihUdIVwVeVidUBIGwAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","天":"12:AAf8BABABA/+BACgCgEQIIwGAAA=","太":"12:AABABABA/+BACgCgEQEQKIxGAAA=","央":"12:AABABAf8RERERE/+CgEQIIwGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","如":"12:AAIAI++iSiSiiikiUiIiU+iAAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","守":"12:AABA/+gCgSAQ/+AQIQEQAQBwAAA=","安":"12:AABA/+gCCACA/+EIIIEQDg8eAAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","实":"12:AABA/+gCoiEgQgIg/+BQGI4GAAA=","容":"12:AABA/+kSZMCgMYwGP4IIIIP4AAA=","宽":"12:AABA/+kSf8EQP4IIJIJICi8+AAA=","将":"12:AAIeLiokYYLgIEb+oEJEIkIMAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","少":"12:AABABAJIJERChCBIAQBgGA4AAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","尽":"12:AAP8IEIEP8IIIITEgyAAGABwAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","层":"12:AAf+QCQCf+QAX8QAf+SAUEv6AAA=","峰":"12:AAIQIeqiqcrqq8qIq++IB+AIAAA=","左":"12:AACACA/+CAEAEAL+IQQQgQH+AAA=","巧":"12:AAD+8gIgJAJ+ICICMCwCACAMAAA=","己":"12:AAf8AEAEAEAEf8QAQAQCQCP+AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","布":"12:AACA/+EAIgQgv8IkIkIkIsAgAAA=","师":"12:AAL+oQoQr+qSqSqSKSKWQQgQAAA=","常":"12:AAJI/+gCv6IIP4BAf8RERMBAAAA=","平":"12:AAf8BAREJIBA/+BABABABABAAAA=","年":"12:AAIAP+QgggP8IgIg/+AgAgAgAAA=","并":"12:AAIIEQ/+EQEQEQ/+EQEQIQwQAAA=","序":"12:AAAgf+QAX8QIRQf+QiQkQgjgAAA=","底":"12:AAAgf+QEX4UQUQX+UQUIVKmmAAA=","度":"12:AAAgf+SIf+SIT4QAX8SIRwuOAAA=","建":"12:AA4gL8Qkn+4kL8ogr8QgYgn+AAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","式":"12:AAAUAS/+AQAQ/QEQEIEKHG4CAAA=","当":"12:AABAREJIBAf8AEAEf8AEAEf8AAA=","录":"12:AAf8AEf8AE/+BAREJoDQNIzGAAA=","往":"12:AAIgQQn+IQQQwQT8QQQQQQX+AAA=","径":"12:AAL8QEgIIQRo2GR8QQQQQQT+AAA=","很":"12:AAL8SEj8KESEz8SSSUSISkTCAAA=","循":"12:AAL+SIj+KIS+yiS+SiS+SiU+AAA=","必":"12:AACABIBIEIUQUUUilCGKMIz4AAA=","思":"12:AAf8REf8REREf8AAVEUikKD4AAA=","急":"12:AAHwIQf8AEf8AEf8BAUkUKj6AAA=","总":"12:AAIIEQf8QEQEf8AAVEUikKD4AAA=","想":"12:AAI++iI+ciq+IiI+FAUkUKj6AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","懂":"12:AAJEL+pEsQr+pUJ8JUL+IQL+AAA=","戏":"12:AAAo8kEgk+XgUkIoIQUSUqhGAAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","战":"12:AAIUISOQIeJwIS+UiIiKiW+iAAA=","所":"12:AAGGY4QgegS+SkekQkQkQkhEAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","才":"12:AAAQAQ/+AQAwBQCQMQwQAQBwAAA=","打":"12:AAJ+II8IIIIIMI4IIIIIII44AAA=","技":"12:AAQQQQ7+QQQQb8yESERIQw3OAAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","抬":"12:AAQgQg5ESEX6YCz8SESESEz8AAA=","拆":"12:AAQMTw6ASAT+aIyYSMSKSI0IAAA=","拖":"12:AAJAJ++QKWJaJyPS5WJQJCY+AAA=","拥":"12:AAT+SS6ST+SSaSz+SSSSSS0WAAA=","择":"12:AAT+SC5EQ4TGYQx8QQT+QQwQAAA=","拿":"12:AADgMY32AAP4IIf8BA/+BAHAAAA=","指":"12:AASCSM7wSCR+YAz+SCT+SCz+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挑":"12:AAQoQo6qRsQoYoxsSqQoRK2OAAA=","挡":"12:AAQQSS5UQQT+YCwCT+QCQCz+AAA=","挥":"12:AAT+SC4gT+RAaQz+QQT+QQwQAAA=","挪":"12:AAXuSq6qXqSsaq3qSqSuSo1oAAA=","换":"12:AAQgQ45IT8SUaUyUX+QoRE2CAAA=","排":"12:AAQoQo7uQoQobuwoQoTuQowoAAA=","推":"12:AARQRI7+WIT+aIyIT+SISIz+AAA=","提":"12:AAT8SE78SET8YA3+RQReSw0OAAA=","插":"12:AAQMRw4QT+QQZQyWSSTWSSz+AAA=","撤":"12:AARIXo6OUqXScq3qUqXkUq1yAAA=","操":"12:AAR8RE58TuSqbuwQT+Q4RUySAAA=","改":"12:AAAg8gE+FEGk8kgogokQoozGAAA=","放":"12:AAQgIg++REQkekSoSoSQSonGAAA=","数":"12:AAlQWQ/eMkWUlUIU/UJIOUxiAAA=","整":"12:AAEQ/+VUfUOIVU/+BAJ8JA/+AAA=","斜":"12:AAMESkgU8EJEIk8GIcrkoEIEAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","旁":"12:AABA/+EQ/+gCBA/+CAH8IEwYAAA=","旋":"12:AARAR+9AR+SScQVeVQlQlwOOAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","易":"12:AAf8QEf8QEf8IAP+SSiSEiJMAAA=","星":"12:AAf8QEf8QEf8RAf8hAf8BA/+AAA=","昨":"12:AABA5Ap+qgsg4+ogogo+4gAgAAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","曹":"12:AACg/+Cgf8Skf8Skf8IIIIP4AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","木":"12:AABABA/+FQFQFQJIJIREhCBAAAA=","本":"12:AABABA/+FQFQFQJIJIX0hCBAAAA=","束":"12:AABA/+BAf8REREf8FQJIxGBAAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","枉":"12:AAL+IQ8QIQIQb+cQoQIQIQL+AAA=","果":"12:AAf8REf8REf8BA/+FQJIxGBAAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","样":"12:AAJEIo/+IQIQZ8cQoQL+IQIQAAA=","格":"12:AAIgI89EKoIQYobGt8JEJEJ8AAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","桥":"12:AAIMJw8QL+IodEamokIkJEKEAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","楚":"12:AAII++ccqqII/+BCJAJ8XAg+AAA=","楼":"12:AAKSJU/+I4JUaScgr+IkI4LGAAA=","横":"12:AAIoJ88oL+IQZ8dUp8JUJ8LGAAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","歌":"12:AA/QqQqe6iCq/IqIqI6UCUGiAAA=","止":"12:AABABABAJAJ8JAJAJAJAJA/+AAA=","正":"12:AA/+BABABAJAJ8JAJAJAJA/+AAA=","步":"12:AABAJ8JAJA/+BAJExIAQBgeAAAA=","死":"12:AA/+IgIgOiSkS4qgEgEiIiweAAA=","段":"12:AAGcYUQUeURmeAQ+Qi+UQIR2AAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","比":"12:AAgggggigk+4gggggggimi4eAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","洞":"12:AAn+UCF6kCV6FKFKVKV6kCkGAAA=","活":"12:AAQMLwAQgQX+AQAQT8SEiEj8AAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","清":"12:AAQQL8AQj8QQH+CET8SEj8iEAAA=","游":"12:AAkQSQPekgUcHEFIV+VIlIrYAAA=","滑":"12:AAT8KEDkikX+ECD8SET8iEiMAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","灵":"12:AAf8AEP8AEf8BAJERICgMYwGAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","然":"12:AAQUeST8qQEQUoJEyCAAUkiSAAA=","片":"12:AAIQIQIQP+IAIAP4IIQIQIgIAAA=","牌":"12:AAUgV+VSf+RSR+coVIX+UIkIAAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","环":"12:AAD+8IIQIQI09SKSIQMQwQAQAAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","生":"12:AARARAf8RAhABAf8BABABA/+AAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","留":"12:AAG+4SgSii9GAAf8REf8REf8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","盘":"12:AABAP8JEIk/+JEQsAAf8Sk/+AAA=","目":"12:AAf8QEQEf8QEQEQEf8QEQEf8AAA=","相":"12:AAJ+JC/CJ+JCdCbCp+JCJCJ+AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","眼":"12:AA78qEr86EqEr86SqUqI6kDCAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","示":"12:AAf8AAAA/+BABAJIJERChCHAAAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","秀":"12:AAf8BA/+FQJIxGf4EIEOICwcAAA=","种":"12:AAEQ4QL+KS+SKSb+cQoQIQIQAAA=","移":"12:AAEQ4+LCIk8YLgY+bCskIYLgAAA=","程":"12:AAF85EJEJ88AL+YQd8oQIQL+AAA=","空":"12:AABA/+gCEQIIwGf8BABABA/+AAA=","穿":"12:AABA/+kSIIf8IQQQf+CQMQwwAAA=","窄":"12:AABA/+kSYMEAH+KAz8CAD8CAAAA=","立":"12:AACABA/+AAIIIIEIEQEQAg/+AAA=","竖":"12:AAF+lCkkkYlmEABAf8IIEQ/+AAA=","笔":"12:AAQge+lIB8eAD8eAD++ACCB+AAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","筛":"12:AAQge+lIAAL+oQr+qSKSSWgQAAA=","简":"12:AAQge+lIX8AEX0UUX0UUX0QMAAA=","算":"12:AAQge+lIf8QEf8QEf8EQ/+IQAAA=","系":"12:AAAcfgCIMwDAME/6BAJIxGHAAAA=","纪":"12:AAT8QEgEoEwET8iA6ACCKCx+AAA=","线":"12:AAIUISQelw4QIeRw8SAMMazmAAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","结":"12:AAIQIQT+kQ4QJ8QA98BENEx8AAA=","绕":"12:AAQgQmj4okwaTmgA7+AoJK2OAAA=","给":"12:AAQQQohEqCx8QAj+6CCCKCz+AAA=","统":"12:AAQgX+hApEyEX6hI5IBIKK0OAAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","维":"12:AARQRIj+qI3+SIiI7+CIKIz+AAA=","缺":"12:AAQQeQp8IUIU+UJ+qQqQqo/GAAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","美":"12:AAEQ/+BAf8BA/+BA/+CgMYwGAAA=","羲":"12:AAEQ/+BA/+IU/+cQrUeICaOmAAA=","羽":"12:AA++CCiiSSKKCCGGKKyyCCMMAAA=","翅":"12:AATuQi6qRmQi5mqqoiRmoAn+AAA=","翼":"12:AA++SSKKyyP4JIf8JI/+IIwGAAA=","考":"12:AACEfoCQ/+BAH8MA38AEAEA4AAA=","而":"12:AA/+BACA/+kSkSkSkSkSkSgGAAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","脚":"12:AA5OpKv65KpKv65KqKqusovYAAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","节":"12:AAEQ/+EQAAf8CECECECYCACAAAA=","若":"12:AAEQ/+EQCA/+EAIAf8oEIEP8AAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","著":"12:AAEQ/+EQCCf0CI/+IEf8oEP8AAA=","虚":"12:AAB8BAf+RCR4XCR+RQVUTYv+AAA=","虽":"12:AAP4IIP4BAf8REREf8BABE/6AAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","表":"12:AABAf8BAf8BA/+CgEi4ULIMGAAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","要":"12:AA/+Cgf8Skf8CA/+EIMQDg8eAAA=","角":"12:AAIAPwQQ/8REf8REf8REREhMAAA=","解":"12:AAI+OSSS/mVAfUVefkVeVElEAAA=","计":"12:AAQQIQAQAQz+QQQQQQUQYQQQAAA=","让":"12:AAQQIQAQAQ4eIQIQIQKQMQL+AAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","设":"12:AAh4RIBIBI2OQAT8SERIYwXOAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","课":"12:AAT+KSD+CSz+QQT+Q4RUaSQQAAA=","调":"12:AAj+SSC6CSy6SCS6SqW6aCUGAAA=","谱":"12:AAiEX+BIDM3+QAT8SEX8aET8AAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","起":"12:AAE8eEEEEE+8EgUiWiUesAj+AAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","车":"12:AACA/+EAJARAf8BABA/+BABAAAA=","转":"12:AAIQ98QQoQr+8gJ8ME4oIQIIAAA=","轮":"12:AAIQ8oREqCpA9EJINw5CJCI+AAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","近":"12:AAgMTwCACAz+SISISIUIoAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","远":"12:AAj8QAAAH+xIRISISKUOoAn+AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","退":"12:AAj8SED8CEz8SiSUSoTGoAn+AAA=","送":"12:AAhEQoD+AQwQT+QQQoTGoAn+AAA=","适":"12:AAgMTwAQH+wQT8SESET8oAn+AAA=","逆":"12:AAhEQoH+AQySSST+QQQgpAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","通":"12:AAj8QoAQD+yST+SST+SSoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","遥":"12:AAT+ICCkj+QQD+4QJSJ+UAj+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","邻":"12:AAEeKSRSg0IUES/yBSScMQDQAAA=","部":"12:AAEefSASRUKU/yASfSRcRQfQAAA=","都":"12:AAIe9SKSMU/UISfSxSfcRQfQAAA=","释":"12:AAH+6CJEs4bG8QJ8cQb+oQIQAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","量":"12:AAf8QEf8QE/+REf8REf8BA/+AAA=","针":"12:AAQQcQgQ8QT+QQ8QQQUQYQQQAAA=","铺":"12:AAQUb+gQ7+SST+6ST+SSaSSWAAA=","销":"12:AASSZUgQ7+SCT+6CT+SCaCSGAAA=","锁":"12:AASSZUgQ7+SCSS6SSSQoZESCAAA=","错":"12:AARIb8hI5IX+QA78SET8aET8AAA=","键":"12:AAQIe+iK7+UKW+6IS+WIbIU+AAA=","长":"12:AAIIIQIgLAIA/+JAIgIQKIMGAAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","闭":"12:AAn+QCAigiv6gihiiisihigOAAA=","问":"12:AAn+QCACnykSkSkSnygCgCgOAAA=","闯":"12:AAn+QCHygSkSn6gKvqgKhygGAAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","防":"12:AA4goQv+pAxAp8pEpE6EiEkYAAA=","阶":"12:AA4QoopEuCxEpEpEpE5EhEiEAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","难":"12:AAAo8oF+nIV+VIJIJ+VIVIh+AAA=","雨":"12:AA/+BABA/+hCpSlKhCpSlKhCAAA=","需":"12:AAf8BA/+hCtaAA/+CA/+kSkWAAA=","面":"12:AA/+BACA/+kSnykSkSnykS/+AAA=","页":"12:AA/+BAf8QERERERERECgMYwGAAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","顺":"12:AAi+qIq+qiqqqqqqqqqIqUiiAAA=","须":"12:AAL+QQj+CCKSSSiSCSIoREiCAAA=","飞":"12:AA/wASAUAYAUASAQAQAKAKAEAAA=","马":"12:AAf4AIIIIIIIP+ACAC/yACAcAAA=","齐":"12:AABA/+IIEQDgMYwGIIIIIIQIAAA=","（":"12:AAAEAIAIAQAQAQAQAQAIAIAEAAA=","）":"12:AAQAIAIAEAEAEAEAEAIAIAQAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA=","；":"12:AAAAAAMAMAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+LoGame.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","×":"6:AAAAAiUIUiAAAA==","—":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","“":"12:AAAkBIBsBsAAAAAAAAAAAAAAAAA=","”":"12:AAbAbAJASAAAAAAAAAAAAAAAAAA=","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","←":"12:AAAAAAAAIAQA/+QAIAAAAAAAAAA=","↑":"12:AABADgFQBABABABABABABABAAAA=","→":"12:AAAAAAAAAIAE/+AEAIAAAAAAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","▼":"12:AAAAf8f8P4P4HwHwDgDgBAAAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","与":"12:AAEAH+EAIAP+ACAC/yACACAcAAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","为":"12:AARAJABA/+BCBSCKCKECICwMAAA=","主":"12:AACABA/+BABABAf8BABABA/+AAA=","久":"12:AAEAEAHwIQQQggBACgEQIIwGAAA=","么":"12:AACACAEQEQIgQghACEEEIafiAAA=","义":"12:AACAREREIIIIEQCgBACgMYwGAAA=","之":"12:AACABA/8AIAQAgBACAMATAg+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","书":"12:AACICEf4CICI/+CCCCCCCMCAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","事":"12:AABA/+JIJIf8BE/+BEf8BAHAAAA=","二":"12:AAAAf8AAAAAAAAAAAAAA/+AAAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","人":"12:AABABABABACgCgEQEQIIQEgCAAA=","什":"12:AAEQEQIQIQb+oQIQIQIQIQIQAAA=","仍":"12:AAL8JERERIxORCRCRCSCSCUMAAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","以":"12:AAAISIRIRIQIQISQUQYoREGCAAA=","们":"12:AAKeJCQCSCyCSCSCSCSCSCSOAAA=","件":"12:AAKQKQT+UQwQQQX+QQQQQQQQAAA=","伏":"12:AAEUESIQL+YQooIoIoJEJEKCAAA=","优":"12:AAIoIkQgX+wgRQRQRQSSSSUeAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","传":"12:AAIQL8QgQg3+RAT8QERIQwQIAAA=","似":"12:AAIkKUSUSEyESISoTUSUQiRCAAA=","但":"12:AAL8KESESEz8SESESET8QAX+AAA=","位":"12:AAIgIQX+QAyESERERIRIQQX+AAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","余":"12:AADgEQII32BABAf8BAJIxGDAAAA=","作":"12:AAJAJAR+Sg0gQ+QgQgQ+QgQgAAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","佳":"12:AAIQL8QQQQ3+QAQQT8QQQQX+AAA=","便":"12:AAL+IQT+SSz+SST+RQQgRQWOAAA=","做":"12:AAKQKQXeSkyUSUXUVUVIVUXiAAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","儿":"12:AAEQEQEQEQEQEQEQIQISQSgeAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","全":"12:AABACgMYwGP4BABAf8BABA/+AAA=","八":"12:AAEQEQEQEQEQIIIIIIQEQEgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","兵":"12:AAAYPgIAP8IQIQIQ/+AAIIwGAAA=","典":"12:AACgf8SkSkf8SkSk/+AAIIwGAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","冤":"12:AA/+oCPwQQ/8REREf8CwEq4+AAA=","决":"12:AAggQgT8AkAkAkX+QgRQiIsGAAA=","几":"12:AAPwIQIQIQIQIQIQIQQSQSgeAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","刀":"12:AAf+CCCCCCCCCCCCECECICwcAAA=","分":"12:AAEQEQIIIIQEv6CICIEIIIwwAAA=","切":"12:AAT+QiQiciwiQiQiUiZCRCCMAAA=","列":"12:AA/CISISPSRSZSlSCSCCECYOAAA=","初":"12:AAT+Ii8iEiIiKiciqiJCJCKMAAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","前":"12:AAIIEQ/+AAfURUfURUfURETMAAA=","办":"12:AACACAf4CISMSKiKEIEIIIwwAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","勇":"12:AAf4CQf8REf8RERE/+CCMCwcAAA=","勾":"12:AAIAP+ICSCiCECESISfqACAMAAA=","十":"12:AABABABABA/+BABABABABABAAAA=","半":"12:AABAREJIBAf8BABA/+BABABAAAA=","华":"12:AAEgImY4rgIiIeBA/+BABABAAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","占":"12:AABABAB+BABABAf8QEQEQEf8AAA=","卡":"12:AABABAB8BABA/+BABQBIBEBAAAA=","却":"12:AAEAEefSESES/SISSSSWlQ5QAAA=","原":"12:AAf+QgX8UEX8UEX8QgUkUipiAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","参":"12:AAEAIIf0CA/+EQLIw2PAAYfgAAA=","双":"12:AA++CiiiiiiiiiUUUUIIUUiiAAA=","反":"12:AAA8fAQAQAf8UESIRQQgTYsGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","变":"12:AABA/+EQUUkSEQf8IIEQDg8eAAA=","口":"12:AAAAf8QEQEQEQEQEQEQEf8AAAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","可":"12:AA/+AEAEPkIkIkIkPkAEAEAcAAA=","右":"12:AACACA/+EAEAIAP8YEoEIEP8AAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","同":"12:AA/+gCv6gCnykSkSkSnygCgOAAA=","名":"12:AACAD8EEaIBQAgH+8CECECH+AAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","向":"12:AACAEA/+gCnykSkSkSnygCgOAAA=","员":"12:AAP4IIP4AAf8QERERECgMYwGAAA=","呼":"12:AAAO7woQqSpUoQr+oQ4QAQBwAAA=","命":"12:AABACgMY32AAe8SkSkSkesAgAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","哪":"12:AAHu6qqqvqqsqqvqqq6uEoJoAAA=","四":"12:AA/+kSkSkSkSkSoewCgCgC/+AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","困":"12:AA/+gChChCv6jilSpKhCgC/+AAA=","圈":"12:AA/+lSv6iC/+kSvq0mlikK/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","块":"12:AAQgQgT84kQkQkX+YgxQCIMGAAA=","堵":"12:AAQgT6Qk4oX+QgR8bE18BEB8AAA=","塞":"12:AABA/+kSf8EQ/+IIREv6BA/+AAA=","填":"12:AAIQL+IQ98JEJ8JENEz+BECCAAA=","墙":"12:AAQQT+RU4QX+QAT+aCy6CqD+AAA=","声":"12:AABA/+BAf8AAf8REf8QAQAgAAAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","复":"12:AAQAf+oEP8IEP8CAH8cIDw8OAAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","够":"12:AAIQPeRihUdIVwVeVidUBIGwAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","天":"12:AAf8BABABA/+BACgCgEQIIwGAAA=","太":"12:AABABABA/+BACgCgEQEQKIxGAAA=","央":"12:AABABAf8RERERE/+CgEQIIwGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","好":"12:AAJ8IE8IUQUQX+kQUQIQUQhwAAA=","如":"12:AAIAI++iSiSiiikiUiIiU+iAAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","学":"12:AASEJI/+gCv6AQBg/+BABAHAAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","守":"12:AABA/+gCgSAQ/+AQIQEQAQBwAAA=","安":"12:AABA/+gCCACA/+EIIIEQDg8eAAA=","完":"12:AABA/+gCv6AAAA/+EQEQISweAAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","实":"12:AABA/+gCoiEgQgIg/+BQGI4GAAA=","容":"12:AABA/+kSZMCgMYwGP4IIIIP4AAA=","宽":"12:AABA/+kSf8EQP4IIJIJICi8+AAA=","将":"12:AAIeLiokYYLgIEb+oEJEIkIMAAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","少":"12:AABABAJIJERChCBIAQBgGA4AAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","尽":"12:AAP8IEIEP8IIIITEgyAAGABwAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","层":"12:AAf+QCQCf+QAX8QAf+SAUEv6AAA=","峰":"12:AAIQIeqiqcrqq8qIq++IB+AIAAA=","左":"12:AACACA/+CAEAEAL+IQQQgQH+AAA=","巧":"12:AAD+8gIgJAJ+ICICMCwCACAMAAA=","己":"12:AAf8AEAEAEAEf8QAQAQCQCP+AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","布":"12:AACA/+EAIgQgv8IkIkIkIsAgAAA=","师":"12:AAL+oQoQr+qSqSqSKSKWQQgQAAA=","常":"12:AAJI/+gCv6IIP4BAf8RERMBAAAA=","平":"12:AAf8BAREJIBA/+BABABABABAAAA=","年":"12:AAIAP+QgggP8IgIg/+AgAgAgAAA=","并":"12:AAIIEQ/+EQEQEQ/+EQEQIQwQAAA=","序":"12:AAAgf+QAX8QIRQf+QiQkQgjgAAA=","底":"12:AAAgf+QEX4UQUQX+UQUIVKmmAAA=","度":"12:AAAgf+SIf+SIT4QAX8SIRwuOAAA=","建":"12:AA4gL8Qkn+4kL8ogr8QgYgn+AAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","式":"12:AAAUAS/+AQAQ/QEQEIEKHG4CAAA=","当":"12:AABAREJIBAf8AEAEf8AEAEf8AAA=","录":"12:AAf8AEf8AE/+BAREJoDQNIzGAAA=","往":"12:AAIgQQn+IQQQwQT8QQQQQQX+AAA=","径":"12:AAL8QEgIIQRo2GR8QQQQQQT+AAA=","很":"12:AAL8SEj8KESEz8SSSUSISkTCAAA=","循":"12:AAL+SIj+KIS+yiS+SiS+SiU+AAA=","必":"12:AACABIBIEIUQUUUilCGKMIz4AAA=","思":"12:AAf8REf8REREf8AAVEUikKD4AAA=","急":"12:AAHwIQf8AEf8AEf8BAUkUKj6AAA=","总":"12:AAIIEQf8QEQEf8AAVEUikKD4AAA=","想":"12:AAI++iI+ciq+IiI+FAUkUKj6AAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","懂":"12:AAJEL+pEsQr+pUJ8JUL+IQL+AAA=","戏":"12:AAAo8kEgk+XgUkIoIQUSUqhGAAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","战":"12:AAIUISOQIeJwIS+UiIiKiW+iAAA=","所":"12:AAGGY4QgegS+SkekQkQkQkhEAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","才":"12:AAAQAQ/+AQAwBQCQMQwQAQBwAAA=","打":"12:AAJ+II8IIIIIMI4IIIIIII44AAA=","技":"12:AAQQQQ7+QQQQb8yESERIQw3OAAA=","把":"12:AAT+SS6SSSSSb+yASASCSCx+AAA=","抬":"12:AAQgQg5ESEX6YCz8SESESEz8AAA=","拆":"12:AAQMTw6ASAT+aIyYSMSKSI0IAAA=","拖":"12:AAJAJ++QKWJaJyPS5WJQJCY+AAA=","拥":"12:AAT+SS6ST+SSaSz+SSSSSS0WAAA=","择":"12:AAT+SC5EQ4TGYQx8QQT+QQwQAAA=","拿":"12:AADgMY32AAP4IIf8BA/+BAHAAAA=","指":"12:AASCSM7wSCR+YAz+SCT+SCz+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挑":"12:AAQoQo6qRsQoYoxsSqQoRK2OAAA=","挡":"12:AAQQSS5UQQT+YCwCT+QCQCz+AAA=","挥":"12:AAT+SC4gT+RAaQz+QQT+QQwQAAA=","挪":"12:AAXuSq6qXqSsaq3qSqSuSo1oAAA=","换":"12:AAQgQ45IT8SUaUyUX+QoRE2CAAA=","排":"12:AAQoQo7uQoQobuwoQoTuQowoAAA=","推":"12:AARQRI7+WIT+aIyIT+SISIz+AAA=","提":"12:AAT8SE78SET8YA3+RQReSw0OAAA=","插":"12:AAQMRw4QT+QQZQyWSSTWSSz+AAA=","撤":"12:AARIXo6OUqXScq3qUqXkUq1yAAA=","操":"12:AAR8RE58TuSqbuwQT+Q4RUySAAA=","改":"12:AAAg8gE+FEGk8kgogokQoozGAAA=","放":"12:AAQgIg++REQkekSoSoSQSonGAAA=","数":"12:AAlQWQ/eMkWUlUIU/UJIOUxiAAA=","整":"12:AAEQ/+VUfUOIVU/+BAJ8JA/+AAA=","斜":"12:AAMESkgU8EJEIk8GIcrkoEIEAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","旁":"12:AABA/+EQ/+gCBA/+CAH8IEwYAAA=","旋":"12:AARAR+9AR+SScQVeVQlQlwOOAAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","易":"12:AAf8QEf8QEf8IAP+SSiSEiJMAAA=","星":"12:AAf8QEf8QEf8RAf8hAf8BA/+AAA=","昨":"12:AABA5Ap+qgsg4+ogogo+4gAgAAA=","是":"12:AAf8QEf8QEf8AA/+JAJ8XAg+AAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","曹":"12:AACg/+Cgf8Skf8Skf8IIIIP4AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","木":"12:AABABA/+FQFQFQJIJIREhCBAAAA=","本":"12:AABABA/+FQFQFQJIJIX0hCBAAAA=","束":"12:AABA/+BAf8REREf8FQJIxGBAAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","枉":"12:AAL+IQ8QIQIQb+cQoQIQIQL+AAA=","果":"12:AAf8REf8REf8BA/+FQJIxGBAAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","样":"12:AAJEIo/+IQIQZ8cQoQL+IQIQAAA=","格":"12:AAIgI89EKoIQYobGt8JEJEJ8AAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","桥":"12:AAIMJw8QL+IodEamokIkJEKEAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","楚":"12:AAII++ccqqII/+BCJAJ8XAg+AAA=","楼":"12:AAKSJU/+I4JUaScgr+IkI4LGAAA=","横":"12:AAIoJ88oL+IQZ8dUp8JUJ8LGAAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","歌":"12:AA/QqQqe6iCq/IqIqI6UCUGiAAA=","止":"12:AABABABAJAJ8JAJAJAJAJA/+AAA=","正":"12:AA/+BABABAJAJ8JAJAJAJA/+AAA=","步":"12:AABAJ8JAJA/+BAJExIAQBgeAAAA=","死":"12:AA/+IgIgOiSkS4qgEgEiIiweAAA=","段":"12:AAGcYUQUeURmeAQ+Qi+UQIR2AAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","比":"12:AAgggggigk+4gggggggimi4eAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","法":"12:AAQQIQD8gQQQH+AgREREianiAAA=","洞":"12:AAn+UCF6kCV6FKFKVKV6kCkGAAA=","活":"12:AAQMLwAQgQX+AQAQT8SEiEj8AAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","清":"12:AAQQL8AQj8QQH+CET8SEj8iEAAA=","游":"12:AAkQSQPekgUcHEFIV+VIlIrYAAA=","滑":"12:AAT8KEDkikX+ECD8SET8iEiMAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","演":"12:AAgQX+ECj8QQD8CUT8SUj8mGAAA=","灵":"12:AAf8AEP8AEf8BAJERICgMYwGAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","然":"12:AAQUeST8qQEQUoJEyCAAUkiSAAA=","片":"12:AAIQIQIQP+IAIAP4IIQIQIgIAAA=","牌":"12:AAUgV+VSf+RSR+coVIX+UIkIAAA=","玩":"12:AAD84AQAQAX+5IRIRIaKyKEOAAA=","环":"12:AAD+8IIQIQI09SKSIQMQwQAQAAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","生":"12:AARARAf8RAhABAf8BABABA/+AAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","留":"12:AAG+4SgSii9GAAf8REf8REf8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","盘":"12:AABAP8JEIk/+JEQsAAf8Sk/+AAA=","目":"12:AAf8QEQEf8QEQEQEf8QEQEf8AAA=","相":"12:AAJ+JC/CJ+JCdCbCp+JCJCJ+AAA=","看":"12:AAf8BAf8CA/+IEf8oEP8IEP8AAA=","眼":"12:AA78qEr86EqEr86SqUqI6kDCAAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","示":"12:AAf8AAAA/+BABAJIJERChCHAAAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","秀":"12:AAf8BA/+FQJIxGf4EIEOICwcAAA=","种":"12:AAEQ4QL+KS+SKSb+cQoQIQIQAAA=","移":"12:AAEQ4+LCIk8YLgY+bCskIYLgAAA=","程":"12:AAF85EJEJ88AL+YQd8oQIQL+AAA=","空":"12:AABA/+gCEQIIwGf8BABABA/+AAA=","穿":"12:AABA/+kSIIf8IQQQf+CQMQwwAAA=","窄":"12:AABA/+kSYMEAH+KAz8CAD8CAAAA=","立":"12:AACABA/+AAIIIIEIEQEQAg/+AAA=","竖":"12:AAF+lCkkkYlmEABAf8IIEQ/+AAA=","笔":"12:AAQge+lIB8eAD8eAD++ACCB+AAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","筛":"12:AAQge+lIAAL+oQr+qSKSSWgQAAA=","简":"12:AAQge+lIX8AEX0UUX0UUX0QMAAA=","算":"12:AAQge+lIf8QEf8QEf8EQ/+IQAAA=","系":"12:AAAcfgCIMwDAME/6BAJIxGHAAAA=","纪":"12:AAT8QEgEoEwET8iA6ACCKCx+AAA=","线":"12:AAIUISQelw4QIeRw8SAMMazmAAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","结":"12:AAIQIQT+kQ4QJ8QA98BENEx8AAA=","绕":"12:AAQgQmj4okwaTmgA7+AoJK2OAAA=","给":"12:AAQQQohEqCx8QAj+6CCCKCz+AAA=","统":"12:AAQgX+hApEyEX6hI5IBIKK0OAAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","维":"12:AARQRIj+qI3+SIiI7+CIKIz+AAA=","缺":"12:AAQQeQp8IUIU+UJ+qQqQqo/GAAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","美":"12:AAEQ/+BAf8BA/+BA/+CgMYwGAAA=","羲":"12:AAEQ/+BA/+IU/+cQrUeICaOmAAA=","羽":"12:AA++CCiiSSKKCCGGKKyyCCMMAAA=","翅":"12:AATuQi6qRmQi5mqqoiRmoAn+AAA=","翼":"12:AA++SSKKyyP4JIf8JI/+IIwGAAA=","考":"12:AACEfoCQ/+BAH8MA38AEAEA4AAA=","而":"12:AA/+BACA/+kSkSkSkSkSkSgGAAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","脚":"12:AA5OpKv65KpKv65KqKqusovYAAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","节":"12:AAEQ/+EQAAf8CECECECYCACAAAA=","若":"12:AAEQ/+EQCA/+EAIAf8oEIEP8AAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","著":"12:AAEQ/+EQCCf0CI/+IEf8oEP8AAA=","虚":"12:AAB8BAf+RCR4XCR+RQVUTYv+AAA=","虽":"12:AAP4IIP4BAf8REREf8BABE/6AAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","表":"12:AABAf8BAf8BA/+CgEi4ULIMGAAA=","被":"12:AAgQT+6SKQT+XC6iWUSISUViAAA=","要":"12:AA/+Cgf8Skf8CA/+EIMQDg8eAAA=","角":"12:AAIAPwQQ/8REf8REf8REREhMAAA=","解":"12:AAI+OSSS/mVAfUVefkVeVElEAAA=","计":"12:AAQQIQAQAQz+QQQQQQUQYQQQAAA=","让":"12:AAQQIQAQAQ4eIQIQIQKQMQL+AAA=","记":"12:AAj8QEAEAEwET8SASAWCaCR+AAA=","设":"12:AAh4RIBIBI2OQAT8SERIYwXOAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","课":"12:AAT+KSD+CSz+QQT+Q4RUaSQQAAA=","调":"12:AAj+SSC6CSy6SCS6SqW6aCUGAAA=","谱":"12:AAiEX+BIDM3+QAT8SEX8aET8AAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","起":"12:AAE8eEEEEE+8EgUiWiUesAj+AAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","车":"12:AACA/+EAJARAf8BABA/+BABAAAA=","转":"12:AAIQ98QQoQr+8gJ8ME4oIQIIAAA=","轮":"12:AAIQ8oREqCpA9EJINw5CJCI+AAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","近":"12:AAgMTwCACAz+SISISIUIoAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","远":"12:AAj8QAAAH+xIRISISKUOoAn+AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","退":"12:AAj8SED8CEz8SiSUSoTGoAn+AAA=","送":"12:AAhEQoD+AQwQT+QQQoTGoAn+AAA=","适":"12:AAgMTwAQH+wQT8SESET8oAn+AAA=","逆":"12:AAhEQoH+AQySSST+QQQgpAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","通":"12:AAj8QoAQD+yST+SST+SSoAn+AAA=","道":"12:AAhIX+AgD8yET8SESET8oAn+AAA=","遥":"12:AAT+ICCkj+QQD+4QJSJ+UAj+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","邻":"12:AAEeKSRSg0IUES/yBSScMQDQAAA=","部":"12:AAEefSASRUKU/yASfSRcRQfQAAA=","都":"12:AAIe9SKSMU/UISfSxSfcRQfQAAA=","释":"12:AAH+6CJEs4bG8QJ8cQb+oQIQAAA=","里":"12:AAf8REREf8REREf8BAf8BA/+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","量":"12:AAf8QEf8QE/+REf8REf8BA/+AAA=","针":"12:AAQQcQgQ8QT+QQ8QQQUQYQQQAAA=","铺":"12:AAQUb+gQ7+SST+6ST+SSaSSWAAA=","销":"12:AASSZUgQ7+SCT+6CT+SCaCSGAAA=","锁":"12:AASSZUgQ7+SCSS6SSSQoZESCAAA=","错":"12:AARIb8hI5IX+QA78SET8aET8AAA=","键":"12:AAQIe+iK7+UKW+6IS+WIbIU+AAA=","长":"12:AAIIIQIgLAIA/+JAIgIQKIMGAAA=","门":"12:AAn+QCACgCgCgCgCgCgCgCgOAAA=","闭":"12:AAn+QCAigiv6gihiiisihigOAAA=","问":"12:AAn+QCACnykSkSkSnygCgCgOAAA=","闯":"12:AAn+QCHygSkSn6gKvqgKhygGAAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","防":"12:AA4goQv+pAxAp8pEpE6EiEkYAAA=","阶":"12:AA4QoopEuCxEpEpEpE5EhEiEAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","难":"12:AAAo8oF+nIV+VIJIJ+VIVIh+AAA=","雨":"12:AA/+BABA/+hCpSlKhCpSlKhCAAA=","需":"12:AAf8BA/+hCtaAA/+CA/+kSkWAAA=","面":"12:AA/+BACA/+kSnykSkSnykS/+AAA=","页":"12:AA/+BAf8QERERERERECgMYwGAAA=","顶":"12:AA7+QQT+SCSSSSSSSSQoREyCAAA=","顺":"12:AAi+qIq+qiqqqqqqqqqIqUiiAAA=","须":"12:AAL+QQj+CCKSSSiSCSIoREiCAAA=","飞":"12:AA/wASAUAYAUASAQAQAKAKAEAAA=","马":"12:AAf4AIIIIIIIP+ACAC/yACAcAAA=","齐":"12:AABA/+IIEQDgMYwGIIIIIIQIAAA=","（":"12:AAAEAIAIAQAQAQAQAQAIAIAEAAA=","）":"12:AAQAIAIAEAEAEAEAEAIAIAQAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA=","；":"12:AAAAAAMAMAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
 </script>
 <script data-src="src/rules.js">
 /* 华容道 / Klotski: the board rules, with no DOM and no lo-game so the tests and the app share one copy.
@@ -1435,7 +1549,7 @@ var KLOTSKI_TITLE_ART = (function () {
 /* 华容道 / Klotski for Lo-PDA. The rules and solver are separate pure files; this is the handheld:
    the title, the open level list, the board, the master-class lessons, the records and the pages.
    Screen 160x200: 20 px header, the 4x5 board (120x150) at y=22, 28 px of hints. */
-var game = LoGame.create({ width: 160, height: 200, lang: "zh" });
+var game = LoGame.create({ width: 160, height: 200, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
@@ -1444,22 +1558,144 @@ var HEAD = 20, BOARD_TOP = 22, BOARD_ROOM = 150, FOOT = 174;
 var EXIT_SLIDE = 0.55, EXIT_WIPE = 0.35;
 var ROW_H = 27, LIST_ROWS = 5;
 
+/* ---------------- the table around the board (sdk/UI.md 13) ----------------
+   The world keeps its 160 x 200 size, its board and every hit test. On a phone lo-game's fill canvas
+   grows a wooden table around it, so a fixed board never sits in paper bars. Pause, the dialogs and
+   the lists get flat lacquer and no props: their bands must not look like the board is still playable. */
+function bandCalm() {
+  var top = game.top ? game.top() : null;
+  if (top === levelsScene || top === lessonsScene || top === pagesScene) return true;
+  return top === tableScene && !!table && (table.ui === "menu" || table.ui === "confirm" || table.ui === "card");
+}
+/* fixed grain, so every frame and every screenshot looks the same */
+function bandWood(s, w, h) {
+  var y, x, off;
+  s.clear(s.DARK);
+  for (y = 3; y < h; y += 7) {
+    off = (y * 13) % 23;
+    for (x = -off; x < w; x += 29) {
+      s.rect(x, y, 7, 1, s.INK);
+      s.rect(x + 12, y + 3, 3, 1, s.MID);
+    }
+  }
+  for (y = 26; y < h; y += 47) {
+    s.rect(0, y, w, 1, s.INK);
+    for (x = 4; x < w; x += 31) s.rect(x, y + 1, 9, 1, s.MID);
+  }
+}
+/* a cup and a rolled scroll on the table above the board */
+function bandCup(s, x, y) {
+  s.rect(x, y, 10, 6, s.PAPER);
+  s.rect(x, y, 10, 1, s.MID);
+  s.rect(x + 10, y + 2, 2, 2, s.PAPER);
+  s.rect(x + 1, y + 6, 8, 1, s.INK);
+  s.rect(x + 2, y + 7, 8, 1, s.MID);
+  s.pixel(x + 2, y - 3, s.MID);
+  s.pixel(x + 4, y - 5, s.MID);
+  s.pixel(x + 7, y - 2, s.MID);
+}
+function bandScroll(s, x, y) {
+  s.rect(x, y, 26, 6, s.PAPER);
+  s.rect(x, y, 2, 6, s.INK);
+  s.rect(x + 24, y, 2, 6, s.INK);
+  s.rect(x + 4, y + 2, 18, 1, s.MID);
+  s.rect(x + 4, y + 4, 12, 1, s.MID);
+}
+/* a hanging lantern for the tall bands above the board, and a tea bowl on the near edge */
+function bandLantern(s, x, y) {
+  s.rect(x, 0, 1, y, s.MID);
+  s.rect(x - 4, y, 9, 2, s.INK);
+  s.rect(x - 5, y + 2, 11, 9, s.PAPER);
+  s.rect(x - 5, y + 2, 11, 1, s.MID);
+  s.rect(x - 5, y + 5, 11, 1, s.MID);
+  s.rect(x - 5, y + 8, 11, 1, s.MID);
+  s.rect(x - 4, y + 11, 9, 2, s.INK);
+  s.rect(x, y + 13, 1, 4, s.MID);
+  s.rect(x - 1, y + 17, 3, 1, s.MID);
+}
+function bandBowl(s, x, y) {
+  s.rect(x, y, 16, 4, s.PAPER);
+  s.rect(x, y, 16, 1, s.INK);
+  s.rect(x + 2, y + 4, 12, 1, s.MID);
+  s.rect(x + 4, y + 5, 8, 1, s.MID);
+  s.line(x + 18, y + 1, x + 25, y - 2, s.MID);
+  s.line(x + 19, y + 2, x + 27, y + 1, s.MID);
+}
+/* the tray's drawer in the near edge of the table, below the board */
+function bandDrawer(s, x, y) {
+  s.frame(x, y, 64, 11, s.INK);
+  s.rect(x + 2, y + 2, 60, 1, s.MID);
+  s.rect(x + 28, y + 5, 8, 2, s.MID);
+  s.pixel(x + 31, y + 5, s.INK);
+}
+function paintBands(s, st) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var calm = bandCalm(), topBand = y0, botBand = h - (y0 + wh);
+  var leftBand = x0, rightBand = w - (x0 + ww);
+  if (calm) s.clear(s.DARK);
+  else bandWood(s, w, h);
+  /* a lit bevel on the top and left, a shadow on the bottom and right: the paper board sits in the tray */
+  s.rect(x0 - 2, y0 - 2, ww + 4, 2, s.MID);
+  s.rect(x0 - 2, y0 - 2, 2, wh + 4, s.MID);
+  s.rect(x0 - 2, y0 + wh, ww + 4, 2, s.INK);
+  s.rect(x0 + ww, y0 - 2, 2, wh + 4, s.INK);
+  if (calm) return;
+  if (topBand >= 18) {
+    bandCup(s, x0 + 22, Math.max(2, topBand - 13));
+    bandScroll(s, x0 + ww - 48, Math.max(2, topBand - 13));
+    if (topBand >= 34) bandLantern(s, x0 + Math.floor(ww / 2), 6);
+  }
+  if (botBand >= 18) {
+    bandDrawer(s, x0 + Math.floor((ww - 64) / 2), y0 + wh + 4);
+    if (botBand >= 34) bandBowl(s, x0 + 14, y0 + wh + 7);
+  }
+  /* the side planks, with a nail at each end, when Safari's short stage makes the canvas wider */
+  if (leftBand >= 10) {
+    s.rect(x0 - 7, 0, 1, h, s.INK);
+    s.rect(x0 - 8, y0 + 16, 2, 2, s.MID);
+    s.rect(x0 - 8, y0 + wh - 18, 2, 2, s.MID);
+  }
+  if (rightBand >= 10) {
+    s.rect(x0 + ww + 6, 0, 1, h, s.INK);
+    s.rect(x0 + ww + 6, y0 + 16, 2, 2, s.MID);
+    s.rect(x0 + ww + 6, y0 + wh - 18, 2, 2, s.MID);
+  }
+}
+
 /* ---------------- pointer: lo-game keeps only the latest point in a tick, so a quick down+up can
-   lose where the finger started. These listeners keep both ends, for taps and for drags. ---------------- */
+   lose where the finger started. These listeners keep both ends, for taps and for drags.
+   Under fill the canvas is larger than the world: the mapping goes through game.stage (canvas pixels,
+   then the world inside them) and a press that starts in a band is dropped, so a table tap never
+   chooses a row or moves a piece (LO-GAME.md 2.1). PT is the app's only direct pointer read. ---------------- */
 var PT = (function () {
-  var st = { down: false, x0: 0, y0: 0, x: 0, y: 0, up: false, cancel: false, at: 0 };
+  var st = { down: false, inside: true, x0: 0, y0: 0, x: 0, y: 0, up: false, cancel: false, at: 0 };
   var canvas = typeof document !== "undefined" && document.querySelector ? document.querySelector("canvas") : null;
   function point(e) {
     var r = canvas.getBoundingClientRect();
-    var x = Math.floor((e.clientX - r.left) * 160 / (r.width || 1));
-    var y = Math.floor((e.clientY - r.top) * 200 / (r.height || 1));
-    return { x: Math.max(0, Math.min(159, x)), y: Math.max(0, Math.min(199, y)) };
+    var sg = game.stage || { w: 160, h: 200, k: 1, x: 0, y: 0 };
+    var px, py, wx, wy;
+    /* fill off keeps the old exact rect mapping; fill on has extra canvas columns or rows around the world */
+    if (sg.w === 160 && sg.h === 200 && sg.x === 0 && sg.y === 0) {
+      px = (e.clientX - r.left) * 160 / (r.width || 1);
+      py = (e.clientY - r.top) * 200 / (r.height || 1);
+      wx = px; wy = py;
+    } else {
+      var k = sg.k || 1;
+      px = (e.clientX - r.left) / k;
+      py = (e.clientY - r.top) / k;
+      wx = px - sg.x; wy = py - sg.y;
+    }
+    return {
+      x: Math.max(0, Math.min(159, Math.floor(wx))),
+      y: Math.max(0, Math.min(199, Math.floor(wy))),
+      inside: px >= sg.x && px < sg.x + 160 && py >= sg.y && py < sg.y + 200
+    };
   }
   if (canvas && canvas.addEventListener) {
     canvas.addEventListener("pointerdown", function (e) {
       if (e.isPrimary === false) return;
       var p = point(e);
-      st.down = true; st.up = false; st.cancel = false;
+      st.down = true; st.up = false; st.cancel = false; st.inside = p.inside;
       st.x0 = st.x = p.x; st.y0 = st.y = p.y;
       if (e.preventDefault) e.preventDefault();
       if (canvas.setPointerCapture && e.pointerId !== undefined) { try { canvas.setPointerCapture(e.pointerId); } catch (err) {} }
@@ -1481,17 +1717,17 @@ var PT = (function () {
   function take() {
     if (!st.up && !st.cancel) return null;
     var fresh = Date.now() - st.at < 400;
-    var cancelled = st.cancel;
+    var cancelled = st.cancel, inside = st.inside;
     var ev = {
       x0: st.x0, y0: st.y0, x: st.x, y: st.y,
       dx: st.x - st.x0, dy: st.y - st.y0,
       dist: Math.sqrt((st.x - st.x0) * (st.x - st.x0) + (st.y - st.y0) * (st.y - st.y0))
     };
-    st.up = false; st.cancel = false;
-    if (!fresh || cancelled) return null;
+    st.up = false; st.cancel = false; st.inside = true;
+    if (!fresh || cancelled || !inside) return null;
     return ev;
   }
-  function clear() { st.down = false; st.up = false; st.cancel = false; }
+  function clear() { st.down = false; st.up = false; st.cancel = false; st.inside = true; }
   return { take: take, clear: clear };
 })();
 
@@ -2656,8 +2892,9 @@ function drawCard(g) {
 }
 
 /* ---------------- title ---------------- */
-/* the picture fills the top; the four buttons sit in two rows under it */
-var TITLE_ART_X = 18, TITLE_ART_Y = 2, TITLE_MENU_Y = 130, TITLE_ROW = 28;
+/* the picture fills the top; the four buttons sit in two rows under it, the key hint on the footer line */
+var TITLE_ART_X = 18, TITLE_ART_Y = 1, TITLE_MENU_Y = 125, TITLE_ROW = 24, TITLE_BTN_H = 23;
+var TITLE_HINT_Y = 173, TITLE_RULE_Y = 172, TITLE_STATUS_Y = 187;
 var title = { sel: 0, items: [], loading: false };
 function titleItems() {
   return [
@@ -2698,21 +2935,22 @@ var titleScene = {
       bx = 18 + (i % 2) * 62; by = TITLE_MENU_Y + Math.floor(i / 2) * TITLE_ROW;
       if (!loaded) break;
       if (i === title.sel) {
-        g.rect(bx, by, 60, 26, g.INK);
-        g.text(title.items[i].label, bx + 30, by + 7, { align: "center", color: g.PAPER });
+        g.rect(bx, by, 60, TITLE_BTN_H, g.INK);
+        g.text(title.items[i].label, bx + 30, by + 5, { align: "center", color: g.PAPER });
       } else {
-        g.frame(bx, by, 60, 26, g.INK);
-        g.text(title.items[i].label, bx + 30, by + 7, { align: "center", color: g.INK });
+        g.frame(bx, by, 60, TITLE_BTN_H, g.INK);
+        g.text(title.items[i].label, bx + 30, by + 5, { align: "center", color: g.INK });
       }
     }
     if (!loaded) {
       g.text(T({ zh: "读取中…", en: "Loading..." }), 80, 150, { align: "center", color: g.INK });
     }
-    /* the progress line; the old "Arrows  A OK" hint gave its row to the picture */
-    g.rect(0, 186, 160, 1, g.DARK);
-    if (!canSave) g.text(T({ zh: "存档读不出，这次不存", en: "Save unreadable: no saving" }), 80, 187, { align: "center", color: g.INK });
+    /* the key line, then the progress line; both stay inside the 160-wide screen */
+    g.rect(0, TITLE_RULE_Y, 160, 1, g.DARK);
+    g.text(T({ zh: "↑↓←→ 选 · A 好", en: "arrows · A ok" }), 80, TITLE_HINT_Y, { align: "center", color: g.INK });
+    if (!canSave) g.text(T({ zh: "存档读不出，这次不存", en: "Save unreadable: no saving" }), 80, TITLE_STATUS_Y, { align: "center", color: g.INK });
     else g.text(T({ zh: "已通 {a}/{b}　课 {c}/{d}", en: "Cleared {a}/{b}  Lessons {c}/{d}" },
-      { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, 187, { align: "center", color: g.INK });
+      { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, TITLE_STATUS_Y, { align: "center", color: g.INK });
   }
 };
 
