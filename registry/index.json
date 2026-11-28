@@ -121,8 +121,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/whack-a-mole/index.html",
-      "sha256": "b80a2913144a34d3ae94fa2b41694a5cdc105df1c49c84b1d8413a0139544d8a",
-      "bytes": 58692
+      "sha256": "8fd9535fd61e510eae1facd0cc3df21bbac006f77678d90d9e18960dda9c19e4",
+      "bytes": 56859
     },
     {
       "spec": "lopda/1",

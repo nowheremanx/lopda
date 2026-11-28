@@ -1,4 +1,4 @@
-// Whack-a-mole 4.2.0 in the dev harness: bests, levels, thief runs, the dirt tell
+// Whack-a-mole 4.3.0 in the dev harness: bests, levels, thief runs, the dirt tell
 // before a mole rises (window.__mole, tests only), and a 60 s game that still ends at 60 s.
 // Needs Playwright, which the repo does not depend on, so the test skips without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-whack-a-mole.test.mjs
@@ -111,13 +111,13 @@ test("whack-a-mole: every overlay fits or scrolls safely at 331 x 359", { skip, 
     app.style.width = "331px"; app.style.height = "359px";
   });
   await frame.waitForFunction(() => innerWidth === 331 && innerHeight === 359);
+  await sleep(100);
   const measure = () => frame.evaluate(() => {
     const body = document.getElementById("ovbody");
     const ov = document.getElementById("ov").getBoundingClientRect();
     const st = document.getElementById("stage").getBoundingClientRect();
     return { screen: window.__mole().screen, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight,
-      covers: ov.left === st.left && ov.top === st.top && ov.width === st.width && ov.height === st.height,
-      hint: document.getElementById("ovhint").textContent.trim() };
+      covers: ov.left === st.left && ov.top === st.top && ov.width === st.width && ov.height === st.height };
   });
   const measurements = [await measure()];
   await frame.locator("#btns button").first().click();
@@ -133,11 +133,9 @@ test("whack-a-mole: every overlay fits or scrolls safely at 331 x 359", { skip, 
   await p.clock.runFor(31000);
   measurements.push(await measure());
   assert.deepEqual(measurements.map((m) => m.screen), ["title", "levels", "card", "tally"]);
+  assert.equal(measurements[0].screen, "title");
   assert.ok(measurements.every((m) => m.covers), "the overlay is the whole stage on every screen: " + JSON.stringify(measurements));
   assert.ok(measurements.every((m) => m.scrollHeight <= m.clientHeight), JSON.stringify(measurements));
-  assert.equal(measurements[0].hint, "↑↓←→ 选 · A 好", "the title lists only the keys that work there");
-  assert.equal(measurements[1].hint, "↑↓←→ 选 · A 好 · B 返回");
-  assert.equal(measurements[3].hint, "↑↓←→ 选 · A 好 · B 返回");
   console.log("overlay 331x359 scrollHeight/clientHeight:", JSON.stringify(measurements));
 });
 
@@ -318,8 +316,8 @@ test("whack-a-mole: a 60 s game still ends at 60 s", { skip, timeout: 90000 }, a
   assert.deepEqual(errors, []);
 });
 
-/* the sizes UI.md 13 names: the smallest, Safari-short, and the tall phones */
-const STAGES = [[331, 359], [346, 518], [386, 650], [348, 323], [386, 738]];
+/* the sizes UI.md 13 names, plus both no-pad phone heights: the smallest, Safari-short, and the tall phones */
+const STAGES = [[331, 359], [331, 473], [346, 518], [346, 650], [386, 650], [348, 323], [386, 738]];
 
 test("whack-a-mole: the field fills the stage, edge to edge, and the overlay covers the whole stage", { skip, timeout: 90000 }, async (t) => {
   const { p, frame, errors } = await tab(t, { lang: "zh", clock: new Date(2026, 10, 24, 12, 0) });
@@ -348,6 +346,7 @@ test("whack-a-mole: the field fills the stage, edge to edge, and the overlay cov
   await frame.waitForFunction(() => innerWidth === 386 && innerHeight === 738);
   await frame.locator("#btns button").nth(1).click();
   await frame.waitForFunction(() => window.__mole().playing);
+  assert.equal(await frame.evaluate(() => window.__mole().sel), 1, "the touched mode stays the selected row");
   const playing = await frame.evaluate(() => {
     const st = document.getElementById("stage").getBoundingClientRect();
     const c = document.getElementById("c").getBoundingClientRect();
@@ -375,79 +374,38 @@ test("whack-a-mole: the field fills the stage, edge to edge, and the overlay cov
 
 test("whack-a-mole: a tap in the scenery never whacks, a tap on the field does", { skip, timeout: 60000 }, async (t) => {
   const { p, frame, errors } = await tab(t, { lang: "zh", clock: new Date(2026, 10, 24, 12, 0) });
-  await p.evaluate(() => { const a = document.getElementById("app"); a.style.width = "331px"; a.style.height = "359px"; });
-  await frame.waitForFunction(() => innerWidth === 331 && innerHeight === 359);
-  await frame.locator("#btns button").nth(1).click();
-  await frame.waitForFunction(() => window.__mole().playing);
-  const before = await frame.evaluate(() => window.__mole().taps);
+  const size = async (w, h) => {
+    await p.evaluate(([w, h]) => { const a = document.getElementById("app"); a.style.width = w + "px"; a.style.height = h + "px"; }, [w, h]);
+    await frame.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [w, h]);
+    await sleep(150);
+  };
+  const layout = () => frame.evaluate(() => window.__moleLayout(innerWidth, innerHeight));
   const dispatch = (px, py) => frame.evaluate(([px, py]) => {
     const cv = document.getElementById("c"), r = cv.getBoundingClientRect();
     const L = window.__moleLayout(innerWidth, innerHeight);
     const x = r.left + (L.x0 + px) * r.width / L.W, y = r.top + (L.hud + py) * r.height / L.H;
     cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: x, clientY: y, bubbles: true }));
   }, [px, py]);
-  const L = await frame.evaluate(() => window.__moleLayout(innerWidth, innerHeight));
-  assert.ok(L.hud > 0, "there is a sky band to tap");
-  await dispatch(60, -Math.floor(L.hud / 2));           /* the scoreboard band */
-  await dispatch(-Math.max(2, Math.floor(L.x0 / 2)), 60); /* the side column, when the stage is short */
-  await dispatch(60, 159);                               /* the soil band, when there is one */
-  assert.equal(await frame.evaluate(() => window.__mole().taps), before, "scenery taps do not count as whacks");
+  const taps = () => frame.evaluate(() => window.__mole().taps);
+
+  /* a short stage grows side columns; those columns are scenery, not holes */
+  await size(331, 359);
+  await frame.locator("#btns button").nth(1).click();
+  await frame.waitForFunction(() => window.__mole().playing);
+  const before = await taps();
+  let L = await layout();
+  assert.ok(L.x0 > 0, "331 x 359 is fitted by height, with side columns: " + JSON.stringify(L));
+  await dispatch(-Math.floor(L.x0 / 2), 60);
+  assert.equal(await taps(), before, "a tap on a side column does not whack");
+
+  /* the tall stage has a real soil band under the field */
+  await size(386, 738);
+  L = await layout();
+  assert.ok(L.dirt > 0, "386 x 738 has a soil band to tap: " + JSON.stringify(L));
+  await dispatch(60, -Math.floor(L.hud / 2));                    /* the scoreboard band */
+  await dispatch(60, 150 + Math.floor(L.dirt / 2));              /* the soil band */
+  assert.equal(await taps(), before, "sky and soil taps do not whack");
   await dispatch(60, 100);
-  assert.equal(await frame.evaluate(() => window.__mole().taps), before + 1, "a field tap still whacks");
-  assert.deepEqual(errors, []);
-});
-
-test("whack-a-mole: the pad moves an inverted cursor and A/B work the overlay", { skip, timeout: 60000 }, async (t) => {
-  const { frame, errors } = await tab(t, { lang: "zh", clock: new Date(2026, 10, 24, 12, 0) });
-  const key = async (k) => {
-    await frame.evaluate((k) => {
-      dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
-      dispatchEvent(new KeyboardEvent("keyup", { key: k, bubbles: true }));
-    }, k);
-    await sleep(20);
-  };
-  const state = () => frame.evaluate(() => ({ screen: window.__mole().screen, sel: window.__mole().sel, playing: window.__mole().playing,
-    selected: (document.querySelector("#btns button.sel") || {}).textContent || null }));
-
-  let s = await state();
-  assert.deepEqual([s.screen, s.sel, s.selected], ["title", 0, "闯关"], "one thing is selected from the start");
-
-  await key("ArrowRight");
-  assert.equal((await state()).sel, 1);
-  await key("ArrowDown");
-  assert.equal((await state()).sel, 2, "Down reaches the full-width row");
-  await key("ArrowLeft");
-  assert.equal((await state()).sel, 2, "Left stops at the wide row's only cell");
-  await key("ArrowUp");
-  assert.equal((await state()).sel, 0);
-  s = await state();
-  assert.ok(await frame.evaluate(() => document.querySelector("#btns button.sel").classList.contains("sel")), "the cursor is visibly inverted");
-
-  await key("z");                 /* B on the title: nowhere to go */
-  await sleep(350);
-  assert.equal((await state()).screen, "title");
-  await key("Enter");             /* START does nothing extra */
-  await sleep(350);
-  assert.equal((await state()).screen, "title");
-
-  await key("x");                 /* A: 闯关 */
-  await settled(frame);
-  assert.equal((await state()).screen, "levels");
-  await key("ArrowDown");
-  assert.equal((await state()).sel, 5, "Down moves a row in the level grid, same column");
-  await key("ArrowRight");
-  assert.equal((await state()).sel, 6);
-  await key("z");                 /* B: back to the title */
-  await settled(frame);
-  assert.equal((await state()).screen, "title");
-
-  await key("ArrowRight");
-  await key("x");                 /* A: 60 秒 */
-  await settled(frame);
-  s = await state();
-  assert.equal(s.playing, true);
-  assert.equal(s.screen, "play");
-  await key("z");                 /* B during play is not a pause or an exit */
-  assert.equal((await state()).playing, true);
+  assert.equal(await taps(), before + 1, "a field tap still whacks");
   assert.deepEqual(errors, []);
 });

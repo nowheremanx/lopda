@@ -14,7 +14,6 @@
   #ov { position: absolute; inset: 0; display: flex; flex-direction: column; background: #a3ad7e; text-align: center; overflow: hidden; }
   #ovbody { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; justify-content: safe center; gap: 8px; padding: 10px; box-sizing: border-box; }
   #ov.title-view #ovbody { gap: 4px; }
-  #ovhint { flex: none; margin: 0; padding: 2px 10px 6px; font-size: 13px; line-height: 1.3; color: #4a5a32; }
   #ov h1 { margin: 0; font-size: 26px; letter-spacing: 2px; }
   #op { margin: 0; font-size: 15px; line-height: 1.45; white-space: pre-line; }
   #title-slot { position: relative; width: 160px; height: 160px; flex: none; }
@@ -53,7 +52,6 @@
         <div id="btns"></div>
         <p id="bests"></p>
       </div>
-      <p id="ovhint"></p>
     </div>
     <div id="wipe"></div>
   </div>
@@ -66,9 +64,8 @@
   /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
   var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
   var TXT = {
-    zh: { title: "打地鼠", score: "分 {n}", combo: "连 {n}", time: "{n} 秒", best: "最高 {n}", bestTime: "最长 {n}",
+    zh: { title: "打地鼠",
       mode60: "60 秒", modeEndless: "无尽", modeLevels: "闯关", startLevel: "开始",
-      targetHud: "目标 {n}",
       bests: "60 秒 {s} · 无尽 {t}", noRecords: "还没有记录",
       again: "再来一局", modes: "选模式", record: "新纪录", over: "时间到", boom: "踩雷",
       got: "砸中 {n} 分。", endlessGot: "坚持 {t}，砸中 {s} 分。",
@@ -76,11 +73,9 @@
       bestline: "<br>最高 {n} 分。", bestlineEndless: "<br>最长 {t} · 最高 {s}",
       levelTitle: "第 {n} 关", levelTarget: "目标 {n} 分",
       levelList: "关卡", back: "返回", next: "下一关", levels: "关卡",
-      levelResult: "得分 {s} · {n} 星", newStars: "新纪录：星数增加", levelDone: "过关", levelAgain: "再来",
-      hint: "↑↓←→ 选 · A 好 · B 返回", hintNoBack: "↑↓←→ 选 · A 好" },
-    en: { title: "MOLE BOP", score: "PTS {n}", combo: "CMB {n}", time: "{n} S", best: "TOP {n}", bestTime: "BEST {n}",
+      levelResult: "得分 {s} · {n} 星", newStars: "新纪录：星数增加", levelDone: "过关", levelAgain: "再来" },
+    en: { title: "MOLE BOP",
       mode60: "60s", modeEndless: "ENDLESS", modeLevels: "LEVELS", startLevel: "START",
-      targetHud: "TGT {n}",
       bests: "60s {s} · ENDLESS {t}", noRecords: "No records yet",
       again: "AGAIN", modes: "MODES", record: "NEW RECORD", over: "TIME UP", boom: "BOOM",
       got: "{n} points.", endlessGot: "Lasted {t}, {s} points.",
@@ -89,7 +84,7 @@
       levelTitle: "LEVEL {n}", levelTarget: "TARGET {n} PTS",
       levelList: "LEVELS", back: "BACK", next: "NEXT", levels: "LEVELS",
       levelResult: "SCORE {s} · {n} STARS", newStars: "NEW BEST: MORE STARS", levelDone: "CLEAR",
-      levelAgain: "AGAIN", hint: "arrows · A ok · B back", hintNoBack: "arrows · A ok" }
+      levelAgain: "AGAIN" }
   }[LANG];
   function tx(key, n) { return TXT[key].replace("{n}", n); }
   function tf(key, o) { return TXT[key].replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
@@ -150,6 +145,8 @@
     if (extra >= HUD_MIN + DIRT_MIN + 8) {
       /* a little under half of the spare rows go to the sky, so the field sits low like a real plot */
       hud = Math.max(HUD_MIN + 12, Math.min(88, Math.round(extra * 0.5)));
+      /* never leave a soil band thinner than its roots, even just past the gate */
+      hud = Math.min(hud, extra - DIRT_MIN);
       dirt = extra - hud;
     }
     return { W: cols, H: rows, x0: Math.floor((cols - W) / 2), hud: hud, dirt: dirt, k: k, slim: hud < HUD_MIN, fw: W, fh: H };
@@ -276,18 +273,24 @@
     x += SP.hudMole.width + 3;
     drawDigits(ctx, score, x, y, 2, INK);
     x += digitsWidth(score, 2) + 6;
-    var comboText = "x" + combo;
-    ctx.drawImage(SP.paw, x, y + 2, SP.paw.width * 2, SP.paw.height * 2);
-    x += SP.paw.width * 2 + 2;
-    drawDigits(ctx, comboText, x, y + 5, 1, INK);
-    x += digitsWidth(comboText, 1) + 6;
+    var comboText = "x" + combo, comboW = SP.paw.width * 2 + 2 + digitsWidth(comboText, 1);
     var time = hudTimeText(), tk = time.length > 3 ? 1 : 2, tw = digitsWidth(time, tk);
     var tx = w - 4 - tw, iconX = tx - SP.hudClock.width - 2;
     var best = hudBestText(), bestIcon = MODE === "level" ? SP.hudFlag : SP.crown;
-    /* the record is the first thing to go when the line is tight; the menu shows it too */
-    if (x + bestIcon.width + 2 + digitsWidth(best, 1) + 4 <= iconX) {
+    var bestW = bestIcon.width + 2 + digitsWidth(best, 1), room = iconX - x - 4;
+    /* the record outranks the combo when the one line is tight */
+    if (comboW + 6 + bestW <= room) {
+      ctx.drawImage(SP.paw, x, y + 2, SP.paw.width * 2, SP.paw.height * 2);
+      drawDigits(ctx, comboText, x + SP.paw.width * 2 + 2, y + 5, 1, INK);
+      x += comboW + 6;
       ctx.drawImage(bestIcon, x, y + 2);
       drawDigits(ctx, best, x + bestIcon.width + 2, y + 5, 1, INK);
+    } else if (bestW <= room) {
+      ctx.drawImage(bestIcon, x, y + 2);
+      drawDigits(ctx, best, x + bestIcon.width + 2, y + 5, 1, INK);
+    } else if (comboW <= room) {
+      ctx.drawImage(SP.paw, x, y + 2, SP.paw.width * 2, SP.paw.height * 2);
+      drawDigits(ctx, comboText, x + SP.paw.width * 2 + 2, y + 5, 1, INK);
     }
     var low = playing && Math.ceil(clockLeft) <= 10;
     ctx.drawImage(SP.hudClock, iconX, y + 1);
@@ -348,16 +351,7 @@
     if (L.dirt > 0) paintSoil(ctx, L.W, H, L.dirt);
   }
 
-  var curItems = [], curCols = 2, sel = 0;
-  function gridRows(items, cols) {
-    var rows = [], row = [];
-    items.forEach(function (it, i) {
-      if (it.wide) { if (row.length) { rows.push(row); row = []; } rows.push([i]); }
-      else { row.push(i); if (row.length >= cols) { rows.push(row); row = []; } }
-    });
-    if (row.length) rows.push(row);
-    return rows;
-  }
+  var curItems = [], sel = 0;
   function paintSel() {
     var box = document.getElementById("btns"), i;
     for (i = 0; i < box.children.length; i++) box.children[i].classList.toggle("sel", i === sel);
@@ -371,34 +365,9 @@
     if (it.locked) { PAD.sfx("err"); return; }
     PAD.sfx("tap"); it.fn();
   }
-  function moveSel(dx, dy) {
-    var rows = gridRows(curItems, curCols), r = 0, c = 0, y, x, next;
-    for (y = 0; y < rows.length; y++) for (x = 0; x < rows[y].length; x++) if (rows[y][x] === sel) { r = y; c = x; }
-    if (dx) c = Math.max(0, Math.min(rows[r].length - 1, c + dx));
-    if (dy) { r = Math.max(0, Math.min(rows.length - 1, r + dy)); c = Math.min(c, rows[r].length - 1); }
-    next = rows[r][c];
-    if (next === sel) return;
-    sel = next; paintSel(); PAD.sfx("move");
-  }
-  function pressKey(btn) {
-    if (transitionBusy || screen === "play") return;
-    if (document.getElementById("ov").classList.contains("hide")) return;
-    if (btn === "up") moveSel(0, -1);
-    else if (btn === "down") moveSel(0, 1);
-    else if (btn === "left") moveSel(-1, 0);
-    else if (btn === "right") moveSel(1, 0);
-    else if (btn === "a") choose(sel);
-    else if (btn === "b") {
-      /* B is back: the level card returns to the grid, a tally to the modes, the title has nowhere to go */
-      if (screen === "levels") transition(showTitle);
-      else if (screen === "card") transition(showLevels);
-      else if (screen === "tally") transition(showTitle);
-    }
-  }
-  function setHint(back) { document.getElementById("ovhint").textContent = back ? TXT.hint : TXT.hintNoBack; }
   function setButtons(items) {
     var box = document.getElementById("btns");
-    curItems = items; curCols = items.length && items[0].levelCell ? 5 : 2; sel = 0;
+    curItems = items; sel = 0;
     box.innerHTML = "";
     box.classList.remove("level-grid");
     if (items.length && items[0].levelCell) box.classList.add("level-grid");
@@ -465,7 +434,6 @@
       { label: TXT.modeEndless, fn: function () { transition(function () { start("endless"); }); }, wide: true }
     ]);
     document.getElementById("ov").classList.remove("hide");
-    setHint(false);
     score = 0; combo = 0; setClock(60);
   }
   function showLevels() {
@@ -485,7 +453,6 @@
     items.push({ label: TXT.back, fn: function () { transition(showTitle); }, wide: true });
     setButtons(items);
     document.getElementById("ov").classList.remove("hide");
-    setHint(true);
   }
   function refreshLevelList() { if (screen === "levels") showLevels(); }
   function showLevelCard() {
@@ -505,7 +472,6 @@
       { label: TXT.back, fn: function () { transition(showLevels); }, wide: true }
     ]);
     document.getElementById("ov").classList.remove("hide");
-    setHint(true);
   }
   function showMenu() { transition(showTitle); }
   function resetOverlayHud() { score = 0; combo = 0; setClock(0); }
@@ -859,7 +825,6 @@
       { label: TXT.modes, fn: showMenu }
     ]);
     document.getElementById("ov").classList.remove("hide");
-    setHint(true);
     PAD.sfx(record ? "win" : "lose");
   }
 
@@ -898,7 +863,6 @@
     var col = Math.min(2, Math.floor(x / CW)), row = Math.min(2, Math.floor(y / CH));
     whack(row * 3 + col);
   });
-  if (PAD && PAD.on) PAD.on("press", pressKey);
 
   /* tests only: a read-only snapshot of the nine holes (state, kind, and how long a tell has left);
      the game never reads it, and the copy it returns cannot change anything */
