@@ -460,20 +460,24 @@ test("the play screen fills the phone: the mine stays 320 x 288, the sky always 
   for (const [w, h] of [[331, 359], [346, 518], [386, 606], [900, 500]]) {
     const L = GM.frameLayout(w, h);
     assert.equal(L.sky + GM.BH + L.rock, L.H, `${w}x${h}: the bands and the mine make the canvas`);
-    assert.ok(L.sky >= GM.SKY_MIN && !L.slim, `${w}x${h}: sky ${L.sky} under ${GM.SKY_MIN}`);
+    if (w < 600) assert.ok(L.sky >= GM.SKY_MIN && !L.slim && L.W === GM.BW, `${w}x${h}: sky ${L.sky} under ${GM.SKY_MIN}`);
     assert.ok(L.rock === 0 || L.rock >= GM.ROCK_MIN, `${w}x${h}: a bedrock band of ${L.rock} rows has no room for the carts`);
-    /* the height rounds up: at most part of one row is cut off, never a line of paper left */
-    assert.ok(GM.BW * L.k <= w + 0.01 && L.H * L.k < h + L.k, `${w}x${h}: the canvas runs off the stage`);
-    assert.ok(L.H * L.k >= h - 0.01 || Math.abs(GM.BW * L.k - w) < 0.01, `${w}x${h}: the canvas leaves paper`);
   }
-  /* Safari with its bars: shorter than the handheld's smallest screen; the width still fills, on a slim scoreboard */
-  for (const [w, h] of [[346, 340], [331, 330], [346.5, 352.33]]) {
+  /* Safari with its bars: shorter than the handheld's smallest screen (the owner's iPhone: about 348 x 323) */
+  for (const [w, h] of [[346, 340], [331, 330], [346.5, 352.33], [348, 323], [900, 500]]) {
     const L = GM.frameLayout(w, h);
-    assert.ok(Math.abs(GM.BW * L.k - w) < 0.01, `${w}x${h}: the width must fill`);
-    assert.ok(L.H * L.k >= h - 0.01, `${w}x${h}: paper under the canvas`);
     assert.ok(L.sky >= GM.SKY_SLIM, `${w}x${h}: no room for even the slim scoreboard`);
+    assert.equal(L.sky + GM.BH + L.rock, L.H);
+    assert.ok(L.W >= GM.BW && L.x0 >= 0 && L.x0 + GM.BW <= L.W, `${w}x${h}: the mine sits inside the canvas`);
   }
   assert.equal(GM.frameLayout(346, 340).slim, true);
+  assert.equal(GM.frameLayout(348, 323).W > GM.BW, true, "too short for the slim line: the canvas grows wider");
+  /* every size covers its stage edge to edge, cutting off at most part of one canvas pixel */
+  for (const [w, h] of [[331, 359], [346, 518], [386, 606], [346, 340], [346.5, 352.33], [348, 323], [900, 500], [1400, 300]]) {
+    const L = GM.frameLayout(w, h);
+    assert.ok(L.W * L.k >= w - 0.01 && L.H * L.k >= h - 0.01, `${w}x${h}: paper left beside or under the canvas`);
+    assert.ok(L.W * L.k < w + L.k + 0.01 && L.H * L.k < h + L.k + 0.01, `${w}x${h}: more than a pixel cut off`);
+  }
   assert.equal(GM.frameLayout(331, 359).rock, 0, "the smallest screen has no bedrock band");
   assert.ok(GM.frameLayout(386, 606).rock > 0, "a tall phone gets the carts");
 });

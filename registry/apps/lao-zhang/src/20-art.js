@@ -1048,8 +1048,8 @@ GM.present = function (ctx, buf, sx, sy) {
       u32[y * GM.BW + x] = GM.RGB32[t];
     }
   }
-  /* the mine sits under the sky band (src/22-hud.js); a shake moves the mine, never the scoreboard */
-  ctx.putImageData(GM._img, 0, GM.L ? GM.L.sky : 0);
+  /* the mine sits under the sky band, at its left edge x0 (src/22-hud.js); a shake moves the mine, never the scoreboard */
+  ctx.putImageData(GM._img, GM.L ? GM.L.x0 : 0, GM.L ? GM.L.sky : 0);
 };
 
 GM.spriteCanvas = function (spr) {
