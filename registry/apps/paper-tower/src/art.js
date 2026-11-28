@@ -506,7 +506,8 @@ PT.FRAME = (function () {
     s.line(x0, cy, cx, y1, INK);
   }
 
-  /* the mat beyond the picture's frame: a woven grid of small paper diamonds */
+  /* the mat beyond the picture's frame: a woven grid of small paper diamonds, with one stitch
+     dot in each cell between them so the weave is not just sparse dots */
   function mat(s, w, h) {
     var step = 12, row, x, y;
     for (y = 12, row = 0; y < h - 12; y += step, row++) {
@@ -514,6 +515,7 @@ PT.FRAME = (function () {
         s.pixel(x, y - 1, MID); s.pixel(x - 1, y, MID);
         s.pixel(x + 1, y, MID); s.pixel(x, y + 1, MID);
         s.pixel(x, y, ((row + Math.floor(x / step)) & 1) ? INK : PAPER);
+        s.pixel(x + 6, y + 6, MID);
       }
     }
   }
@@ -559,29 +561,44 @@ PT.FRAME = (function () {
     s.clear(PAPER);
     if (w < 16 || h < 16) return;
 
-    /* on a tall phone the frame is 20 canvas pixels; everything beyond it is the patterned mat */
-    var tall = top >= 28 && bot >= 28;
+    /* the frame is 20 canvas pixels; beyond it is the patterned mat. A tall phone gets it above and
+       below; a landscape stage gets the same frame and weave in its side gutters. */
+    var matMode = Math.max(top, bot, left, right) >= 28;
     var tT = Math.min(FRAME, top), tB = Math.min(FRAME, bot);
     var tL = Math.min(FRAME, left), tR = Math.min(FRAME, right);
-    if (tall) {
+    if (matMode) {
       mat(s, w, h);
       s.rect(x, y, ww, wh, PAPER);
-      s.rect(0, y - tT, w, tT, PAPER);
-      s.rect(0, y1, w, tB, PAPER);
-      if (left > 0) s.rect(x - tL, y, tL, wh, PAPER);
-      if (right > 0) s.rect(x1, y, tR, wh, PAPER);
+      if (tT > 0) s.rect(0, y - tT, w, tT, PAPER);
+      if (tB > 0) s.rect(0, y1, w, tB, PAPER);
+      if (tL > 0) s.rect(x - tL, y, tL, wh, PAPER);
+      if (tR > 0) s.rect(x1, y, tR, wh, PAPER);
     }
 
     /* the leaf's edge: two rules, the outer inked and the inner a lighter page edge */
     s.frame(2, 2, w - 4, h - 4, INK);
     s.frame(4, 4, w - 8, h - 8, MID);
-    /* the stacked page edges inside the leaf's edge */
-    if (tall) { hline(s, 6, w - 6, 6, MID); hline(s, 6, w - 6, 8, MID); hline(s, 6, w - 6, h - 8, MID); hline(s, 6, w - 6, h - 6, MID); }
-    else if (bot >= 30) { hline(s, 14, w - 14, h - 10, MID); hline(s, 14, w - 14, h - 8, MID); }
+    /* the stacked page edges inside the leaf's edge, on whichever sides have room */
+    if (matMode) {
+      if (top >= 10) { hline(s, 6, w - 6, 6, MID); hline(s, 6, w - 6, 8, MID); }
+      if (bot >= 10) { hline(s, 6, w - 6, h - 8, MID); hline(s, 6, w - 6, h - 6, MID); }
+      if (left >= 10) { vline(s, 6, 0, h, MID); vline(s, 8, 0, h, MID); }
+      if (right >= 10) { vline(s, w - 8, 0, h, MID); vline(s, w - 6, 0, h, MID); }
+    } else if (bot >= 30) { hline(s, 14, w - 14, h - 10, MID); hline(s, 14, w - 14, h - 8, MID); }
 
-    /* the four corners fold over, so the frame reads as a page and not a border drawn on a wall */
-    if (top >= 12) { var nt = Math.max(5, Math.min(10, Math.floor(top / 2))); dogear(s, 0, 0, nt, 1, 1); dogear(s, w - 1, 0, nt, -1, 1); }
-    if (bot >= 12) { var nb = Math.max(5, Math.min(10, Math.floor(bot / 2))); dogear(s, 0, h - 1, nb, 1, -1); dogear(s, w - 1, h - 1, nb, -1, -1); }
+    /* the four corners fold over, so the frame reads as a page and not a border drawn on a wall.
+       With a mat, a corner needs a gutter on either of its sides; landscape folds the side corners too. */
+    if (matMode) {
+      var nTL = Math.min(10, Math.max(top, left)), nTR = Math.min(10, Math.max(top, right));
+      var nBL = Math.min(10, Math.max(bot, left)), nBR = Math.min(10, Math.max(bot, right));
+      if (nTL >= 5) dogear(s, 0, 0, nTL, 1, 1);
+      if (nTR >= 5) dogear(s, w - 1, 0, nTR, -1, 1);
+      if (nBL >= 5) dogear(s, 0, h - 1, nBL, 1, -1);
+      if (nBR >= 5) dogear(s, w - 1, h - 1, nBR, -1, -1);
+    } else {
+      if (top >= 12) { var nt = Math.max(5, Math.min(10, Math.floor(top / 2))); dogear(s, 0, 0, nt, 1, 1); dogear(s, w - 1, 0, nt, -1, 1); }
+      if (bot >= 12) { var nb = Math.max(5, Math.min(10, Math.floor(bot / 2))); dogear(s, 0, h - 1, nb, 1, -1); dogear(s, w - 1, h - 1, nb, -1, -1); }
+    }
 
     /* the opening's frame: a dark rule close to the picture, a sewn line in the mat outside it.
        A stage with only a row or two to spare (Safari's bars) still gets the cut edge itself. */
@@ -598,14 +615,14 @@ PT.FRAME = (function () {
     if (left >= 9) dashesV(s, x - 6, top >= 9 ? 0 : y, top >= 9 ? h : y1, INK);
     if (right >= 9) { var rx = x1 + 6; dashesV(s, rx, top >= 9 ? 0 : y, top >= 9 ? h : y1, INK); }
 
-    if (tall) {
+    if (matMode) {
       /* the picture's frame closes with a bold double rule, the same on every side */
       if (tT >= 12) { hline(s, 0, w, y - tT + 3, INK); hline(s, 0, w, y - tT + 1, MID); }
       if (tB >= 12) { hline(s, 0, w, y1 + tB - 3, INK); hline(s, 0, w, y1 + tB - 1, MID); }
-      if (left >= 12) { vline(s, x - tL + 3, y, y1, INK); vline(s, x - tL + 1, y, y1, MID); }
-      if (right >= 12) { vline(s, x1 + tR - 3, y, y1, INK); vline(s, x1 + tR - 1, y, y1, MID); }
-      ornament(s, Math.round(w / 2), y - 12, w);
-      tabs(s, w, y1 + 8, floor, pages, calm);
+      if (tL >= 12) { vline(s, x - tL + 3, 0, h, INK); vline(s, x - tL + 1, 0, h, MID); }
+      if (tR >= 12) { vline(s, x1 + tR - 3, 0, h, INK); vline(s, x1 + tR - 1, 0, h, MID); }
+      if (top >= 16) ornament(s, Math.round(w / 2), y - 12, w);
+      if (bot >= 14) tabs(s, w, y1 + 8, floor, pages, calm);
     }
   }
 

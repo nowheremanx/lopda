@@ -116,6 +116,11 @@ const countRow = (s, y, tone, x0 = 0, x1 = s.width) => {
   for (let x = x0; x < x1; x++) if (frameTone(s, x, y) === tone) n++;
   return n;
 };
+const countCol = (s, x, tone, y0 = 0, y1 = s.height) => {
+  let n = 0;
+  for (let y = y0; y < y1; y++) if (frameTone(s, x, y) === tone) n++;
+  return n;
+};
 
 test("paper-tower frame: tall margins cap the frame and pattern the rest of the mat", () => {
   const FRAME = runScript("registry/apps/paper-tower/src/art.js", { LoGame: { sprites: (t) => t } }).PT.FRAME;
@@ -165,6 +170,38 @@ test("paper-tower frame: tall margins cap the frame and pattern the rest of the 
   /* the whole frame stays paper, ink and mid: no dark fill that could pass for scenery */
   const tones = new Set(s.px);
   assert.deepEqual([...tones].sort(), [0, 2, 3], "the frame uses paper, mid and ink only");
+});
+
+test("paper-tower frame: landscape side gutters wear the same mat, rules and folded corners", () => {
+  const FRAME = runScript("registry/apps/paper-tower/src/art.js", { LoGame: { sprites: (t) => t } }).PT.FRAME;
+  const [sw, sh] = [738, 386];
+  const L = LoGame.fillLayout(sw, sh, W, H);
+  assert.equal(L.y, 0, "a landscape stage fits by height, with no top band");
+  assert.ok(L.x >= 28, "the side gutters are deep enough for the mat");
+  const s = frameSurface(L.w, L.h);
+  FRAME.draw(s, { w: L.w, h: L.h, x: L.x, y: L.y, worldW: W, worldH: H }, { calm: false, floor: 5, pages: 12 });
+
+  /* the weave is in the horizontal gutters too, not just the portrait top and bottom */
+  assert.ok(countRow(s, 12, 2, 2, L.x - 20) > 4, "the left mat has its diamond row");
+  assert.ok(countRow(s, 12, 2, L.x + W + 20, L.w - 2) > 4, "the right mat has its diamond row");
+  assert.ok(countCol(s, 6, 2) > L.h * 0.9, "the left page edge runs down the gutter");
+  assert.ok(countCol(s, L.w - 6, 2) > L.h * 0.9, "the right page edge runs down the gutter");
+
+  /* the same capped side frame: inner rule, dashed seam, bold double outer edge */
+  assert.ok(countCol(s, L.x - 3, 0) > L.h * 0.9, "the inner rule runs beside the picture");
+  const seam = countCol(s, L.x - 6, 0);
+  assert.ok(seam > 50 && seam < L.h * 0.9, `the side seam is dashed (${seam} inked pixels)`);
+  assert.ok(countCol(s, L.x - 17, 0) > L.h * 0.8, "the frame closes at 17 px on the left");
+  assert.ok(countCol(s, L.x + W + 17, 0) > L.h * 0.8, "the frame closes at 17 px on the right");
+
+  /* all four stage corners fold, though there is no top or bottom band */
+  assert.equal(frameTone(s, 0, 0), 2, "top-left folded");
+  assert.equal(frameTone(s, L.w - 1, 0), 2, "top-right folded");
+  assert.equal(frameTone(s, 0, L.h - 1), 2, "bottom-left folded");
+  assert.equal(frameTone(s, L.w - 1, L.h - 1), 2, "bottom-right folded");
+  for (let y = 0; y < L.h; y++) assert.equal(countRow(s, y, 1), 0, `no dark scenery on row ${y}`);
+  const tones = new Set(s.px);
+  assert.deepEqual([...tones].sort(), [0, 2, 3], "the landscape frame uses paper, mid and ink only");
 });
 
 test("paper-tower frame: a thin frame keeps its rules and corners, and still no wall above the status bar", () => {
