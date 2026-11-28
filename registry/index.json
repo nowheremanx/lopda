@@ -131,9 +131,9 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.4",
+      "version": "0.4.5",
       "released": "2026-10-10",
-      "updated": "2026-11-27",
+      "updated": "2026-11-28",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
       "i18n": {
         "en": {
@@ -144,8 +144,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "d391eddf3757b59b7e8b8e22104ee9a73abd4a7ca069089d0a69750c270438e5",
-      "bytes": 308295
+      "sha256": "8c667cdad394a8bc3671a7bf7180fa6cdd0a88a1f59b6d9700f548f5198a7116",
+      "bytes": 314824
     },
     {
       "spec": "lopda/1",

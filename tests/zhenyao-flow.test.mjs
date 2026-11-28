@@ -1,4 +1,4 @@
-// registry/apps/zhenyao-tower: where a loss goes back to. A new game (进入小镇) must not be caught by the save of an older
+// registry/apps/zhenyao-tower: where a loss goes back to. A new game (新游戏) must not be caught by the save of an older
 // run: before this run's first save stone it goes to the title. 继续 resumes from the save on disk, and a stone of this run counts.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -41,7 +41,7 @@ async function lose(z) {
 
 test("a new game that loses before its first save stone goes to the title, not to an older save", async () => {
   const z = await start();
-  await pick(z, 1);                       // the menu lists 继续, 进入小镇, 演武
+  await pick(z, 1);                       // the menu lists 继续, 新游戏, 演武
   await z.run(200);
   assert.equal(z.get("ZT").state().map, "town");
   await lose(z);
@@ -273,20 +273,18 @@ async function titleWith(answer) {
   const get = app.ctx.get;
   const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
   await run(5);
-  /* catch the items the title's menu offers */
-  const game = get("game"), choose = game.choose;
-  let items = null;
-  game.choose = (list, o) => { items = list.slice(); return choose.call(game, list, o); };
-  /* A on the chin pad (PAD.on "press" / "release") */
+  /* A on the chin pad (PAD.on "press" / "release") opens the title's own menu */
   (listeners.press || []).forEach((f) => f("a")); await run(3);
   (listeners.release || []).forEach((f) => f("a")); await run(3);
+  const items = get("titleItems")().map((it) => it.label.zh);
   return { get, run, writes, items };
 }
 
-test("a save the runtime cannot read leaves the title without 进入小镇 and nothing is written", async () => {
+test("a save the runtime cannot read leaves the title without 新游戏 and nothing is written", async () => {
   const z = await titleWith(() => Promise.reject({ code: "corrupt" }));
   assert.equal(z.get("saveLocked"), "corrupt");
-  assert.deepEqual(z.items, ["演武"]);
+  assert.deepEqual(z.items, ["演武", "听曲"]);
+  assert.ok(!z.items.includes("新游戏"));
   /* even a save stone or a cutscene's end writes nothing */
   z.get("writeSeen()");
   assert.equal(z.writes.length, 0);
@@ -296,14 +294,97 @@ test("a progress save from a newer version is kept: no 继续, no new game, no w
   const z = await titleWith((k) => Promise.resolve(k === "progress" ? { v: 2, map: "top" } : null));
   assert.equal(z.get("saveLocked"), "newer");
   assert.equal(z.get("lastSave"), null);
-  assert.deepEqual(z.items, ["演武"]);
+  assert.deepEqual(z.items, ["演武", "听曲"]);
   z.get("writeSeen()");
   assert.equal(z.writes.length, 0);
 });
 
-test("a readable save still offers 继续 and 进入小镇", async () => {
+test("a readable save still offers 继续 and 新游戏, and 继续 says the floor", async () => {
   const z = await titleWith((k) => Promise.resolve(k === "progress"
     ? { v: 1, map: "floor1", x: 6, y: 11, face: "up", hero: { lv: 1 }, flags: { master: 1, entered: {}, opened: {}, beat: {} } } : null));
   assert.equal(z.get("saveLocked"), null);
-  assert.deepEqual(z.items, ["继续", "进入小镇", "演武"]);
+  assert.deepEqual(z.items, ["继续", "新游戏", "演武", "听曲"]);
+  assert.equal(z.get("titleItems()")[0].status, "第 1 层");
+  /* the roof is the map's own name, not a third numbered floor */
+  assert.equal(z.get("titleFloor('floor2')"), "第 2 层");
+  assert.equal(z.get("titleFloor('top')"), "塔顶");
+  assert.equal(z.get("titleFloor('town')"), "小镇");
+});
+
+test("the title menu wraps with Up and Down", async () => {
+  const z = await start();
+  await z.tap("a");
+  assert.equal(z.get("titleSel"), 0);
+  await z.tap("up");
+  assert.equal(z.get("titleSel"), 3, "Up from 继续 wraps to 听曲");
+  await z.tap("down");
+  assert.equal(z.get("titleSel"), 0, "Down from the last row wraps back");
+});
+
+test("START opens the title menu and picks a row", async () => {
+  const z = await start();
+  await z.tap("start");
+  assert.equal(z.get("titleMenu"), true);
+  await z.tap("down");                    // 新游戏
+  await z.tap("start");
+  await z.run(200);
+  assert.equal(z.get("ZT").state().map, "town");
+});
+
+test("a tap on a live title row acts", async () => {
+  const z = await start();
+  await z.tap("a");
+  const L = z.get("titleLayout(4)"), y = L.ty(0) + 6;
+  z.app.pointer("pointerdown", 80, y); z.app.pointer("pointerup", 80, y);
+  await z.run(200);
+  assert.equal(z.get("ZT").state().map, "floor1");
+});
+
+test("the title menu waits until both save documents are read", async () => {
+  let releaseSeen;
+  const seen = new Promise((resolve) => { releaseSeen = resolve; });
+  const { pad, listeners } = padWith((k) => k === "seen" ? seen : Promise.resolve(null));
+  const app = boot(APP, { pad });
+  const get = app.ctx.get;
+  const run = async (n) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
+  const pressA = async () => {
+    (listeners.press || []).forEach((f) => f("a")); await run(3);
+    (listeners.release || []).forEach((f) => f("a")); await run(3);
+  };
+  await run(5);
+  assert.equal(get("savesReady"), false);
+  await pressA();
+  assert.equal(get("titleMenu"), false, "A does nothing while one load is still pending");
+  releaseSeen(null);
+  await run(5);
+  assert.equal(get("savesReady"), true);
+  await pressA();
+  assert.equal(get("titleMenu"), true, "the menu opens once both loads have settled");
+});
+
+/* the title menu is part of the title page: B closes it, a tap on a row selects and acts, a locked row refuses */
+test("the title menu: B closes it, a tap picks a row, and locked 听曲 stays on the title", async () => {
+  const z = await start();
+  await z.tap("a");
+  assert.equal(z.get("titleMenu"), true);
+  await z.tap("b");
+  assert.equal(z.get("titleMenu"), false);
+  await z.tap("a");
+  const L = z.get("titleLayout(4)"), y = L.ty(3) + 6;
+  /* a tap in the panel's own padding is not an outside tap */
+  z.app.pointer("pointerdown", 80, L.y + 1); z.app.pointer("pointerup", 80, L.y + 1);
+  await z.run(6);
+  assert.equal(z.get("titleMenu"), true, "the panel padding keeps the menu open");
+  assert.equal(z.get("titleSel"), 0, "and changes nothing");
+  z.app.pointer("pointerdown", 80, y); z.app.pointer("pointerup", 80, y);
+  await z.run(6);
+  assert.equal(z.get("titleSel"), 3, "the tap selected 听曲");
+  await z.tap("a");                       // locked: it does not open the music room
+  assert.equal(z.get("where"), "title");
+  assert.equal(z.get("titleMenu"), true);
+  /* a tap outside the panel still closes it */
+  z.app.pointer("pointerdown", 80, L.y - 2); z.app.pointer("pointerup", 80, L.y - 2);
+  await z.run(6);
+  assert.equal(z.get("titleMenu"), false);
+  assert.equal(z.get("where"), "title");
 });

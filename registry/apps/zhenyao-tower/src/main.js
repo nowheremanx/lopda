@@ -33,6 +33,11 @@ function scene(name, def) {
    flags: what has happened. master: the first talk is done (the road is open); entered, opened, beat: by map,
    by "map:chest index", by "map:enemy digit". lastSave is a copy of the last "progress" written. */
 var me = null, flags = null, lastSave = null;
+/* savesReady: both documents ("seen" and "progress") have been read or have failed. The title's menu waits for it,
+   so it never opens on half a save (the item list and the floor come from them). */
+var savesReady = false, saveLoads = 0;
+function saveLoaded() { if (++saveLoads >= 2) savesReady = true; }
+function saveFailed(e) { lockSaves(e); saveLoaded(); }
 /* runSave: the last stone of THIS run (null in a new game until the first one), the only place a loss goes back to.
    lastSave is the one on disk, which 继续 on the title loads; an older run's save must not catch a new game's loss */
 var runSave = null;
@@ -48,38 +53,155 @@ function writeSeen() { if (saveLocked) return; game.save("seen", Object.assign({
 Cut.onDone = writeSeen;
 game.load("seen").then(function (s) {
   if (s && typeof s === "object") { Object.assign(Battle.seen(), s); Object.assign(Cut.seen, s); }
-}, lockSaves);
+  saveLoaded();
+}, saveFailed);
 game.load("progress").then(function (p) {
   if (p && p.v === 1 && p.map && p.hero && p.flags) lastSave = p;
   else if (p && typeof p.v === "number" && p.v > 1) saveLocked = "newer";
-}, lockSaves);
+  saveLoaded();
+}, saveFailed);
 
-/* ---------- title ---------- */
+/* ---------- title ----------
+   The 3D tower is the cover; the menu is drawn on this page, in a window under it, not as a lo-game overlay. A or
+   START opens it, Up/Down moves (wrapping, like the field menu), A/START picks, B closes it, a tap picks a row.
+   The rows carry their own state: 继续 the saved floor, 听曲 its lock until the game is cleared. The list is only
+   built once both save documents are in (savesReady), so it can never show half a save. */
+var titleMenu = false, titleSel = 0;
+/* every title string, in both languages: the app is Chinese, but PAD.lang is honoured here as elsewhere */
+function titleText(zh, en, vars) { return game.t({ zh: zh, en: en }, vars); }
+function titleLockedText() {
+  return saveLocked === "newer" ? titleText("存档较新，请更新", "Save is newer")
+    : saveLocked ? titleText("存档读不出来", "Save unreadable") : "";
+}
+function titleFloor(id) {
+  /* the roof is the map's own place name, not a numbered floor */
+  if (id === "top") return titleText("塔顶", "Summit");
+  var n = { floor1: 1, floor2: 2 }[id];
+  if (n) return titleText("第 {n} 层", "Floor {n}", { n: n });
+  if (id === "town") return titleText("小镇", "Town");
+  if (id === "road") return titleText("山道", "Mountain road");
+  return titleText("存档", "Save");
+}
+/* 2 to 4 rows, read every frame so a save that arrives late (or is cleared) shows at once.
+   Over a save that cannot be read there is no new game, as before: 演武 is the safe thing to play. */
+function titleItems() {
+  var items = [], locked = !Cut.seen.cleared;
+  var gallery = { id: "gallery", label: { zh: "演武", en: "Practice" }, status: { zh: "木人", en: "Dummies" } };
+  /* over an unreadable save 演武 is the only way to play, so it is the whole list */
+  if (saveLocked) items.push(gallery);
+  else {
+    if (lastSave) items.push({ id: "continue", label: { zh: "继续", en: "Continue" }, status: titleFloor(lastSave.map) });
+    items.push({ id: "new", label: { zh: "新游戏", en: "New game" },
+      status: lastSave ? { zh: "从头开始", en: "Start over" } : null });
+    items.push(gallery);
+  }
+  items.push({ id: "music", label: { zh: "听曲", en: "Music" }, locked: locked,
+    status: locked ? { zh: "通关后", en: "Clear first" } : null });
+  return items;
+}
+/* the menu's window and rows: bottom-anchored above the hint bar; fewer rows get taller targets.
+   An unreadable save adds one line at the top of the window (the reason there is no 新游戏). */
+var TITLE_ROW_BOTTOM = 124;
+function titleLayout(n) {
+  var rowH = n <= 2 ? 22 : n === 3 ? 18 : 16;
+  var note = saveLocked ? 18 : 0;
+  var h = n * rowH + 8 + note, y = TITLE_ROW_BOTTOM - h;
+  return { x: 8, y: y, w: 144, h: h, rowH: rowH, note: note,
+    ty: function (i) { return y + 4 + note + i * rowH + Math.floor((rowH - 14) / 2); } };
+}
+/* a tap on a row (the row's whole strip, so a finger does not have to hit the letters):
+   the row index, -1 outside the panel (that closes it), -2 inside the panel but in its padding (that does nothing) */
+function titleTap(n) {
+  var L = titleLayout(n), p = game.pointer;
+  if (p.x < L.x || p.x >= L.x + L.w || p.y < L.y || p.y >= L.y + L.h) return -1;
+  var i = Math.floor((p.y - (L.y + 4 + L.note)) / L.rowH);
+  return i >= 0 && i < n ? i : -2;
+}
+/* a locked label: dark text with the app's dotted strike (the field menu's offText, in the menu's colours) */
+function titleStruck(g, text, x, y, color) {
+  g.text(text, x, y, { color: color });
+  var w = g.measure(text);
+  for (var k = 0; k < w; k += 2) g.rect(x + k, y + 6, 1, 1, color);
+}
+function titleOpen(it) {
+  busy = true;
+  if (it.id === "continue") game.go("map", { id: lastSave.map, resume: clone(lastSave) }, { to: LoGame.INK });
+  else if (it.id === "new") game.go("map", { id: "town", intro: true, fresh: true }, { to: LoGame.INK });
+  else if (it.id === "gallery") game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
+  else if (it.id === "music") game.push(musicRoom()).then(function () { busy = false; Snd.music("title"); });
+  else busy = false;
+}
+function titleDrawPlaque(g) {
+  var title = titleText("镇妖塔·序章", "Pagoda: Prologue"), tw = g.measure(title) + 16;
+  g.window(Math.round(80 - tw / 2), 3, tw, 18);
+  g.text(title, 80, 5, { align: "center" });
+}
+function titleDrawPrompt(g) {
+  var err = titleLockedText();
+  var sub = err || titleText("内置 LX-3D 协处理器", "Built-in LX-3D chip");
+  var prompt = !savesReady ? titleText("读取存档…", "Loading save…") : titleText("按 A 开始", "Press A");
+  var w = Math.max(g.measure(sub), g.measure(prompt)) + 18;
+  g.window(Math.round(80 - w / 2), 88, w, 44);
+  g.text(sub, 80, 94, { align: "center", color: err ? g.INK : g.DARK });
+  g.text(prompt, 80, 112, { align: "center" });
+}
+function titleDrawMenu(g) {
+  var items = titleItems(), L = titleLayout(items.length);
+  g.window(L.x, L.y, L.w, L.h);
+  if (saveLocked) g.text(titleLockedText(), 80, L.y + 5, { align: "center", color: g.DARK });
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i], ty = L.ty(i), on = i === titleSel, locked = !!it.locked;
+    var color = on ? g.PAPER : g.INK;
+    if (on) {
+      var bh = Math.min(L.rowH, 16), by = ty - Math.floor((bh - 13) / 2);
+      g.rect(L.x + 2, by, L.w - 4, bh, g.INK);
+      g.arrow(L.x + 5, ty + 3, "right", g.PAPER);
+    }
+    if (locked) titleStruck(g, game.t(it.label), L.x + 16, ty, on ? g.MID : g.DARK);
+    else g.text(game.t(it.label), L.x + 16, ty, { color: color });
+    if (it.status) g.text(game.t(it.status), L.x + L.w - 8, ty, { align: "right", color: on ? g.MID : g.DARK });
+  }
+  /* compact separators: the full " · " spacing of both keys would be wider than the screen's 160 px */
+  var hint = titleText("↑↓ 选·A 确定·B 返回", "↑↓ select·A ok·B back");
+  var hw = Math.max(156, g.measure(hint) + 6);
+  g.window(Math.round(80 - hw / 2), 126, hw, 18);
+  g.text(hint, 80, 130, { align: "center" });
+}
 var TITLE = scene("title", {
-  enter: function () { busy = false; Snd.music("title"); Snd.amb(null); },
+  enter: function () { busy = false; titleMenu = false; titleSel = 0; Snd.music("title"); Snd.amb(null); },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);
-    g.window(14, 82, 132, 52);
-    g.text("镇妖塔·序章", 80, 88, { align: "center" });
-    g.text(saveLocked === "newer" ? "存档较新，请先更新" : saveLocked ? "存档读不出来" : "内置 LX-3D 协处理器", 80, 104, { align: "center", color: g.DARK });
-    /* the menu is an overlay of its own: the prompt would blink through it */
-    if (game.top() === TITLE && Math.floor(game.time * 2) % 2) g.text("按 A 开始", 80, 119, { align: "center" });
+    titleDrawPlaque(g);
+    /* the menu and the prompt belong to this page: while an overlay (the music room) is on top, neither is drawn */
+    if (game.top() === TITLE) {
+      if (titleMenu) titleDrawMenu(g);
+      else titleDrawPrompt(g);
+    }
   },
   update: function () {
-    if (busy || !game.ok()) return;
+    if (busy || !savesReady || game.top() !== TITLE) return;
+    var items = titleItems();
+    if (titleSel >= items.length) titleSel = items.length - 1;
+    if (!titleMenu) {
+      if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) { game.sfx("tap"); titleMenu = true; titleSel = 0; }
+      return;
+    }
+    var d = game.dir(), pick = -1;
+    if (d.y) { titleSel = (titleSel + d.y + items.length) % items.length; game.sfx("move"); }
+    if (game.pressed("a") || game.pressed("start")) pick = titleSel;
+    else if (game.pressed("b")) { titleMenu = false; game.sfx("miss"); return; }
+    else if (game.pointer.pressed) {
+      var tap = titleTap(items.length);
+      /* only a tap outside the panel closes it; one in its padding is ignored */
+      if (tap === -1) { titleMenu = false; game.sfx("miss"); return; }
+      if (tap >= 0) { titleSel = tap; pick = tap; }
+    }
+    if (pick < 0) return;
+    var it = items[pick];
+    if (it.locked) { game.sfx("err"); return; }
     game.sfx("ok");
-    busy = true;
-    /* 听曲 (the music room) once the game has been cleared */
-    var items = (saveLocked ? ["演武"] : lastSave ? ["继续", "进入小镇", "演武"] : ["进入小镇", "演武"]).concat(Cut.seen.cleared ? ["听曲"] : []);
-    game.choose(items, { y: 108 - 14 * items.length }).then(function (i) {
-      busy = false;
-      var pick = items[i];
-      if (pick === "继续") game.go("map", { id: lastSave.map, resume: clone(lastSave) }, { to: LoGame.INK });
-      if (pick === "进入小镇") game.go("map", { id: "town", intro: true, fresh: true }, { to: LoGame.INK });
-      if (pick === "演武") game.go("battle", { ids: ["golem", "wraith", "bronze"], area: "top", hero: galleryHero(), demo: true, back: "title", from: new Uint8Array(R.image.px) }, { fade: false });
-      if (pick === "听曲") { busy = true; game.push(musicRoom()).then(function () { busy = false; Snd.music("title"); }); }
-    });
+    titleOpen(it);
   }
 });
 

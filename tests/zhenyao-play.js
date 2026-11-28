@@ -4,7 +4,7 @@
    (lets pending promises run). Input goes through keyboard events, like a player's.
    PLAY.run(name, onFrame) plays one scene from the title; onFrame(info) is called after every refresh
    that the scene records, with {f, tris, lights}.
-   Scene "full" plays the whole game with key events only: from 进入小镇 on the title to 序章 完. It walks each map
+   Scene "full" plays the whole game with key events only: from 新游戏 on the title to 序章 完. It walks each map
    with a breadth-first search (the master, the stone, the chests, the enemies in order, the way on), taps A through
    every dialogue and fights like the "smart" player of tests/zhenyao-sim.mjs (weak spells, a pill when low,
    defend when the boss gathers, 七级浮屠 when it pays). */
@@ -222,13 +222,14 @@ var PLAY = (function () {
   }
   function fullPolicy(f, sc) {
     var s = where;
-    if (s !== "title") sc.down = false;
-    if (overlay()) {
-      /* the title's menu lists 继续 first when a save exists: one down to 进入小镇 */
-      if (s === "title" && lastSave && !sc.down) { sc.down = true; return ["down"]; }
+    if (overlay()) return tap(f, "a");
+    if (s === "title") {
+      /* A opens the title's own menu, on the page; a save puts 继续 first, 新游戏 second */
+      if (!titleMenu) return tap(f, "a");
+      var want = lastSave && !saveLocked ? 1 : 0;
+      if (titleSel !== want) return tap(f, titleSel < want ? "down" : "up");
       return tap(f, "a");
     }
-    if (s === "title") return tap(f, "a");
     if (s === "credits") { if (ended) sc.done = true; return []; }
     if (s === "battle") return battleDrive(f);
     if (s !== "map" || busy || !hero || !cur) return [];
