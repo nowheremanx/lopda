@@ -165,7 +165,7 @@ var Chords = (function () {
     { id: "m7",    zh: "小七",   en: "minor 7",     iv: [0, 3, 7, 10],     lab: ["R", "b3", "5", "b7"],          opt: [7], group: 1, common: 0.8 },
     { id: "m7b5",  zh: "半减七", en: "half-dim",    iv: [0, 3, 6, 10],     lab: ["R", "b3", "b5", "b7"],         opt: [],  group: 1, common: 0.5 },
     { id: "dim7",  zh: "减七",   en: "dim 7",       iv: [0, 3, 6, 9],      lab: ["R", "b3", "b5", "bb7"],        opt: [],  group: 1, common: 0.5 },
-    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3 },
+    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3, show: "m(maj7)" },
     { id: "sus2",  zh: "挂二",   en: "sus2",        iv: [0, 2, 7],         lab: ["R", "2", "5"],                 opt: [],  group: 2, common: 0.6 },
     { id: "sus4",  zh: "挂四",   en: "sus4",        iv: [0, 5, 7],         lab: ["R", "4", "5"],                 opt: [],  group: 2, common: 0.6 },
     { id: "7sus4", zh: "属七挂四", en: "7sus4",     iv: [0, 5, 7, 10],     lab: ["R", "4", "5", "b7"],           opt: [7], group: 2, common: 0.5 },
@@ -225,7 +225,8 @@ var Chords = (function () {
     if (bass === root) bass = null;
     return { root: root, q: q, bass: bass };
   }
-  function name(c) { return NAMES[c.root] + c.q + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
+  /* the name a player writes: the quality's own spelling where it has one (Am(maj7), not Ammaj7) */
+  function name(c) { var Q = qual(c.q); return NAMES[c.root] + (Q && Q.show ? Q.show : c.q) + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
   function qual(id) { return Object.prototype.hasOwnProperty.call(QI, id) ? QUALS[QI[id]] : null; }
 
   /* the chord's notes and how each is written, bass first when it is not a chord tone */
@@ -868,7 +869,9 @@ var Progs = (function () {
   function mod12(n) { return ((n % 12) + 12) % 12; }
 
   /* ch: [semitones from the key's tonic, quality id, bass in semitones from the tonic (slash chords only)];
-     rn: each chord's Roman numeral; key: "maj" or "min" (the tonic of a minor key is its i) */
+     rn: each chord's Roman numeral; bassStep: the 0-based key degree of a slash bass, so V6 is spelled from the numeral
+     itself; legend: a line under the numerals when it teaches their inversions; key: "maj" or "min" (the tonic of a
+     minor key is its i) */
   var LIST = [
     { id: "pop", key: "maj", zh: "流行四和弦", en: "Pop four",
       ch: [[0, ""], [7, ""], [9, "m"], [5, ""]], rn: ["I", "V", "vi", "IV"],
@@ -909,7 +912,8 @@ var Progs = (function () {
       } },
     { id: "canon", key: "maj", zh: "卡农进行", en: "Canon progression",
       ch: [[0, ""], [7, "", 11], [9, "m"], [4, "m", 7], [5, ""], [0, "", 4], [5, ""], [7, ""]],
-      rn: ["I", "V/7", "vi", "iii/5", "IV", "I/3", "IV", "V"],
+      rn: ["I", "V6", "vi", "iii6", "IV", "I6", "IV", "V"], bassStep: [null, 6, null, 4, null, 2, null, null],
+      legend: { zh: "6 = 第一转位（三音在低音），6/4 = 第二转位（五音在低音）", en: "6 = first inversion (third in the bass), 6/4 = second inversion (fifth in the bass)" },
       why: {
         zh: "低音从主音一级一级往下走（do、ti、la、sol、fa、mi），上面的和弦跟着换；斜线和弦就是为了把低音排成这一条线。这是帕赫贝尔《卡农》（17 世纪，公有领域）的骨架。",
         en: "The bass walks down the scale from the tonic (do, ti, la, sol, fa, mi) while the chords change above it; the slash chords are there to keep that line. It is the frame of Pachelbel's Canon (17th century, public domain)."
@@ -947,8 +951,8 @@ var Progs = (function () {
     { id: "sus", key: "maj", zh: "挂留与解决", en: "Suspensions resolving",
       ch: [[0, "sus2"], [0, "sus4"], [0, ""]], rn: ["Isus2", "Isus4", "I"],
       why: {
-        zh: "挂留和弦没有三音，听不出大小，像悬在半空。挂二的二音、挂四的四音最后都落到三音上，和弦才「落地」。",
-        en: "A sus chord has no 3rd, so it is neither major nor minor and seems to hang. The 2 and the 4 both settle onto the 3rd, and only then does the chord land."
+        zh: "挂留和弦没有三音，听不出大小，像悬在半空。挂二的二音往上、挂四的四音往下，最后都落到三音上，和弦才「落地」。",
+        en: "A sus chord has no 3rd, so it is neither major nor minor and seems to hang. The 2 rises and the 4 falls, both onto the 3rd, and only then does the chord land."
       } },
     { id: "dom-sus", key: "maj", zh: "属七挂四", en: "Dominant sus",
       ch: [[7, "7sus4"], [7, "7"], [0, ""]], rn: ["V7sus4", "V7", "I"],
@@ -957,16 +961,16 @@ var Progs = (function () {
         en: "V7sus4 swaps the leading tone for the tonic, holding the dominant's tension back; the 4 falls to the 3rd (the leading tone), the tension arrives, and then it resolves to I. Two resolutions in a row."
       } },
     { id: "cliche", key: "maj", zh: "半音线（大调）", en: "Line cliché (major)",
-      ch: [[0, ""], [0, "aug"], [0, "6"], [0, "7"], [5, ""]], rn: ["I", "I+", "I6", "I7", "IV"],
+      ch: [[0, ""], [0, "aug"], [0, "6"], [0, "7"], [5, ""]], rn: ["I", "I+", "I(add6)", "I7", "IV"],
       why: {
         zh: "根音不动，只有一个声部从五音半音往上爬（C 调里 G、G#、A、Bb），一条线把四个和弦串起来；最后 Bb 落到 IV 的三音 A。常用来做过门。",
         en: "The root stays while one voice climbs from the 5th in half steps (in C: G, G#, A, Bb), threading four chords on one line; the Bb then falls to the A of IV. A favourite way into a new section."
       } },
     { id: "minor-cliche", key: "min", zh: "半音线（小调）", en: "Line cliché (minor)",
-      ch: [[0, "m"], [0, "mmaj7"], [0, "m7"], [0, "m6"]], rn: ["i", "i(maj7)", "i7", "i6"],
+      ch: [[0, "m"], [0, "mmaj7"], [0, "m7"], [0, "m6"]], rn: ["i", "i(maj7)", "i7", "i(add6)"],
       why: {
-        zh: "根音上面的那个声部半音往下走（A 小调里 A、G#、G、F#），和弦名字变了四次，其实只有一个音在动。小大七那一下最紧张，很像电影里的悬疑配乐。",
-        en: "The voice above the root slides down in half steps (in A minor: A, G#, G, F#): four chord names, one moving note. The minor-major 7th is the tense one, the sound of a film's suspense scene."
+        zh: "根音不动，一个声部 G#→G→F# 半音下行（A 小调里）；四个和弦名字变了，其实只有一个音在动。小大七那一下最紧张，很像电影里的悬疑配乐。",
+        en: "The root stays while one voice falls G#-G-F# in half steps (in A minor): four chord names, one moving note. The minor-major 7th is the tense one, the sound of a film's suspense scene."
       } },
     { id: "dim-passing", key: "maj", zh: "减七经过", en: "Passing diminished",
       ch: [[0, ""], [1, "dim7"], [2, "m"], [7, ""]], rn: ["I", "#I°7", "ii", "V"],
@@ -976,9 +980,10 @@ var Progs = (function () {
       } },
     { id: "blues", key: "maj", zh: "十二小节布鲁斯", en: "Twelve-bar blues",
       ch: [[0, "7"], [5, "7"], [0, "7"], [7, "7"], [5, "7"], [0, "7"]], rn: ["I7", "IV7", "I7", "V7", "IV7", "I7"],
+      bars: [4, 2, 2, 1, 1, 2],
       why: {
-        zh: "四小节 I7、两小节 IV7、两小节 I7，然后 V7、IV7、I7 各一或两小节。三个都是属七和弦，按规矩都该解决，布鲁斯偏不解决，这股一直绷着的劲就是它的味道。",
-        en: "Four bars of I7, two of IV7, two of I7, then V7, IV7 and I7 to finish. All three are dominant 7ths that by the rules should resolve, and the blues never lets them: that unrelieved pull is its flavour."
+        zh: "四小节 I7、两小节 IV7、两小节 I7、一小节 V7、一小节 IV7、两小节 I7。三个都是属七和弦，按规矩都该解决，布鲁斯偏不解决，这股一直绷着的劲就是它的味道。",
+        en: "Four bars of I7, two of IV7, two of I7, one of V7, one of IV7 and two of I7. All three are dominant 7ths that by the rules should resolve, and the blues never lets them: that unrelieved pull is its flavour."
       } },
     { id: "power", key: "maj", zh: "强力和弦摇滚", en: "Power-chord rock",
       ch: [[0, "5"], [10, "5"], [5, "5"]], rn: ["I5", "bVII5", "IV5"],
@@ -1054,8 +1059,8 @@ var Progs = (function () {
     var root = letter(tonic, stepOf(rn), c.root) || Chords.NAMES[c.root];
     var out = root + Chords.name({ root: 0, q: c.q, bass: null }).slice(1);
     if (c.bass !== null) {
-      var m = /\/(\d)$/.exec(rn);
-      out += "/" + ((m && letter(tonic, +m[1] - 1, c.bass)) || Chords.NAMES[c.bass]);
+      var step = p.bassStep && p.bassStep[i] != null ? p.bassStep[i] : null;
+      out += "/" + ((step !== null && letter(tonic, step, c.bass)) || Chords.NAMES[c.bass]);
     }
     return out;
   }
@@ -1133,7 +1138,7 @@ var Scales = (function () {
     phrygian:   { zh: "Phrygian", en: "Phrygian", iv: [0, 1, 3, 5, 7, 8, 10], lab: ["R", "b9", "b3", "11", "5", "b13", "b7"],
       why: { zh: "b9 带一点西班牙味。", en: "The b9 gives it a Spanish colour." } },
     locrian:    { zh: "Locrian", en: "Locrian", iv: [0, 1, 3, 5, 6, 8, 10], lab: ["R", "b9", "b3", "11", "b5", "b13", "b7"],
-      why: { zh: "半减七和弦自己的音阶。", en: "The half-diminished chord's own scale." } },
+      why: { zh: "减三和弦的 Locrian（大调 vii°），半减七也用它。", en: "Locrian, the scale of the major key's vii°, also the half-diminished chord's." } },
     locrian2:   { zh: "Locrian #2", en: "Locrian #2", iv: [0, 2, 3, 5, 6, 8, 10], lab: ["R", "9", "b3", "11", "b5", "b13", "b7"],
       why: { zh: "Locrian 把 b9 换成 9，更顺耳。", en: "Locrian with 9 instead of b9: smoother." } },
     whdim:      { zh: "全半减音阶", en: "Whole-half diminished", iv: [0, 2, 3, 5, 6, 8, 9, 11], lab: ["R", "9", "b3", "11", "b5", "b13", "13", "7"],
@@ -1145,7 +1150,7 @@ var Scales = (function () {
     harmmin:    { zh: "和声小调", en: "Harmonic minor", iv: [0, 2, 3, 5, 7, 8, 11], lab: ["R", "9", "b3", "11", "5", "b13", "7"],
       why: { zh: "b13 到 7 隔了一个半全音，有中东味。", en: "The wide gap from b13 to 7 sounds Middle Eastern." } },
     majpent:    { zh: "大调五声", en: "Major pentatonic", iv: [0, 2, 4, 7, 9], lab: ["R", "9", "3", "5", "13"],
-      why: { zh: "大调去掉 4 和 7，五个音都不撞，最不容易弹错。", en: "Major without 4 and 7: nothing clashes, the hardest to get wrong." } },
+      why: { zh: "大调去掉 4 和 7，五个音都不撞，最不容易弹错；maj7 上再把 7 作为和弦音补回来。", en: "Major without 4 and 7: nothing clashes, the hardest to get wrong; on a maj7 the 7 comes back as a chord tone." } },
     minpent:    { zh: "小调五声", en: "Minor pentatonic", iv: [0, 3, 5, 7, 10], lab: ["R", "b3", "11", "5", "b7"],
       why: { zh: "五个音都不撞，摇滚和布鲁斯的即兴多从这里开始。", en: "Five notes, nothing clashes. Rock and blues solos start here." } },
     blues:      { zh: "布鲁斯音阶", en: "Blues scale", iv: [0, 3, 5, 6, 7, 10], lab: ["R", "b3", "11", "b5", "5", "b7"],
@@ -1191,6 +1196,8 @@ var Scales = (function () {
       n.pc = mod12(c.root + v);
       return n;
     });
+    /* the line reads left to right, and a 9 is an extension: it goes last, so the scale's own run stays in pitch order */
+    var line = notes.filter(function (n) { return n.lab !== "9"; }).concat(notes.filter(function (n) { return n.lab === "9"; }));
     /* the avoid notes said in words after the scale's own line: which chord tone each sits a half step over, or for a
        sus4 that the 3 would undo the suspension */
     var zh = [], en = [];
@@ -1203,7 +1210,7 @@ var Scales = (function () {
     });
     var why = { zh: sc.why.zh + (zh.length ? zh.join("，") + "，经过就好，别停在上面。" : ""),
       en: sc.why.en + (en.length ? " " + en.join(", ") + ": pass through, don't hold it." : "") };
-    return { id: pair[0], zh: sc.zh, en: sc.en, why: why, notes: notes };
+    return { id: pair[0], zh: sc.zh, en: sc.en, why: why, notes: notes, line: line };
   }
   /* a chord's scales {list, def, inKey}: def is the one to show first. With ctx {key: tonic pc, minor} it is the first
      seven-note scale whose notes all lie in the key's scale or the chord (inKey true); otherwise, or when none does, 0. */
@@ -1235,25 +1242,25 @@ var Scales = (function () {
   var T = EN ? {
     strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
-    search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
+    search: "C#m7b5, D/F#, Bbmaj7", unknown: "This book has 19 qualities ({q} is not one)", unknownEmpty: "Type a chord name", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
-    listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
+    listen: "Play", noChord: "Not one of this book's 19 qualities", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
-    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k}. "
+    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k} plus this chord's notes. "
   } : {
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
-    search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
+    search: "C#m7b5、D/F#、Bbmaj7", unknown: "这个版本只收 19 种和弦（认不出 {q}）", unknownEmpty: "先输入一个和弦名", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
-    listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
+    listen: "听", noChord: "不是这一版的 19 种和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
     role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
-    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}选的。"
+    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}和这个和弦的音选的。"
   };
-  function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
+  function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.split("{" + v + "}").join(vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
   function sfx(n) { try { PAD.sfx(n); } catch (e) {} }
@@ -1273,7 +1280,20 @@ var Scales = (function () {
     if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
-    if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
+    /* a save from before 1.4.2 may hold Ammaj7: show it as Am(maj7), once */
+    if (Array.isArray(s.recent)) {
+      var seen = {};
+      set.recent = [];
+      s.recent.forEach(function (n) {
+        var c = typeof n === "string" ? Chords.parse(n) : null;
+        if (!c) return;
+        var name = Chords.name(c);
+        if (seen[name]) return;
+        seen[name] = true;
+        set.recent.push(name);
+      });
+      set.recent = set.recent.slice(0, 8);
+    }
   }
   function chord() { return { root: set.cur.root, q: set.cur.q, bass: set.cur.bass }; }
   function list() {
@@ -1353,7 +1373,7 @@ var Scales = (function () {
     line.classList.remove("tight");
     line.classList.add("deg");
     line.innerHTML = "";
-    o.notes.forEach(function (n, i) {
+    o.line.forEach(function (n, i) {
       if (i) line.appendChild(document.createTextNode(" "));
       line.appendChild(el(n.kind === "a" ? "s" : n.kind === "t" ? "span" : "b", "", n.lab));
     });
@@ -1514,7 +1534,7 @@ var Scales = (function () {
       Chords.QUALS.forEach(function (Q) {
         if (Q.group !== gi) return;
         var b = choice("", pick.q === Q.id, function () { pick.q = Q.id; sfx("tick"); buildPicker(); }, "qual");
-        b.appendChild(el("b", "", Q.id || "maj"));
+        b.appendChild(el("b", "", Q.show || Q.id || "maj"));
         b.appendChild(el("span", "", EN ? Q.en : Q.zh));
         grid.appendChild(b);
       });
@@ -1545,8 +1565,8 @@ var Scales = (function () {
   }
   function applyPick() { sfx("ok"); go(pick, 0); closePicker(); }
   function search() {
-    var c = Chords.parse($("q").value);
-    if (!c) { $("msg").textContent = t("unknown"); sfx("err"); return; }
+    var q = $("q").value.trim(), c = Chords.parse(q);
+    if (!c) { $("msg").textContent = q ? t("unknown", { q: q }) : t("unknownEmpty"); sfx("err"); return; }
     $("q").blur();
     pick = c; applyPick();
   }
@@ -1585,6 +1605,8 @@ var Scales = (function () {
       head.appendChild(el("span", "", t(p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName })));
       card.appendChild(head);
       card.appendChild(el("div", "grn", p.rn.join(" - ")));
+      if (p.legend) card.appendChild(el("div", "grn", EN ? p.legend.en : p.legend.zh));
+      if (p.bars) card.appendChild(el("div", "grn", (EN ? "bars: " : "小节：") + p.bars.join(" ")));
       var chips = el("div", "chips grid4");
       r.chords.forEach(function (x, i) {
         var b = choice(r.names[i], seq.card === n && seq.i === i, function () { jumpTo(r, i); });
@@ -1602,7 +1624,8 @@ var Scales = (function () {
     });
   }
   function stopSeq() { clearTimeout(seq.timer); seq = { timer: 0, card: -1, i: -1 }; }
-  /* one strum per chord, a second apart; the chord sounding is filled. A second tap on Play stops it. */
+  /* one strum a bar, a second a bar; a chord holds for its p.bars[i] bars (the twelve-bar blues has four bars of I7),
+     the chord sounding is filled. A second tap on Play stops it. */
   function playProg(n) {
     var again = seq.card === n;
     stopSeq(); Guitar.stop();
@@ -1610,16 +1633,17 @@ var Scales = (function () {
     var r = gl[n];
     /* the switch at Off means silence, not an error (1.4.1) */
     if (!Guitar.level()) return;
-    function at(i) {
+    function at(i, bar) {
       if (!gl || document.hidden) { stopSeq(); return; }
       if (i >= r.chords.length) { stopSeq(); buildProgs(); return; }
       seq.card = n; seq.i = i;
       var v = voicingFor(r, i);
       if (v) Guitar.play(Chords.midiOf(v.frets), 0.012);
       buildProgs();
-      seq.timer = setTimeout(function () { at(i + 1); }, 1000);
+      var bars = (r.p.bars && r.p.bars[i]) || 1;
+      seq.timer = setTimeout(function () { if (bar + 1 < bars) at(i, bar + 1); else at(i + 1, 0); }, 1000);
     }
-    at(0);
+    at(0, 0);
   }
   /* a chord in a progression opens it on the main screen, on the voicing it was played with */
   function jumpTo(r, i) {

@@ -140,6 +140,8 @@ test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch,
   const { p, errors } = await open(t);
   await tap(p, "#chord");
   assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
+  await tap(p, "#qgo");
+  assert.equal(await text(p, "#msg"), "先输入一个和弦名", "an empty search asks for a name");
   await p.locator("#q").fill("c#m7-5");
   await tap(p, "#qgo");
   assert.equal(await text(p, "#cname"), "C#m7b5");
@@ -173,8 +175,11 @@ test("chord-book: a search lands on C#m7b5; voicings turn, sort and view switch,
   await tap(p, "#chord");
   await p.locator("#q").fill("Cxyz");
   await tap(p, "#qgo");
-  assert.equal(await text(p, "#msg"), "认不出这个和弦");
+  assert.equal(await text(p, "#msg"), "这个版本只收 19 种和弦（认不出 Cxyz）");
   assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
+  await p.locator("#q").fill("C$&");
+  await tap(p, "#qgo");
+  assert.equal(await text(p, "#msg"), "这个版本只收 19 种和弦（认不出 C$&）", "a query is text, not a replacement pattern");
   await tap(p, "#pback");
   assert.deepEqual(errors, []);
 
@@ -231,7 +236,7 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
     await tap(p, "#tofind");
     await tap(p, p.locator("#frets button").nth(2));
     await tap(p, p.locator("#frets button").nth(4));
-    assert.equal(await text(p, "#fname"), "不是常见和弦");
+    assert.equal(await text(p, "#fname"), "不是这一版的 19 种和弦");
     assert.ok(await p.locator("#fsee").isDisabled());
     await tap(p, "#fback");
     assert.equal(await text(p, "#cname"), "C6");
@@ -291,7 +296,7 @@ test("chord-book 1.4.1: moving an open shape leaves its open and muted strings w
   /* C x32010 one fret up: the three fretted notes move, the muted low E and the two open strings do not */
   await tap(p, "#fup");
   assert.equal(await text(p, "#fpos"), "2 品起");
-  assert.equal(await text(p, "#fname"), "不是常见和弦");
+  assert.equal(await text(p, "#fname"), "不是这一版的 19 种和弦");
   assert.equal(await text(p, "#xo"), "x··o·o", "still two open strings and a muted one");
   const held = await p.evaluate(() => {
     const out = {};
@@ -453,6 +458,14 @@ test("chord-book: a 1.2.0 save with the degree map switched on opens on the degr
   assert.deepEqual(errors, []);
 });
 
+test("chord-book 1.4.2: an old save's Ammaj7 reads as Am(maj7) in Recent, and only once", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { saved: { v: 1, cur: { root: 9, q: "mmaj7", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: ["Ammaj7", "Am(maj7)", "C"] } });
+  assert.equal(await text(p, "#cname"), "Am(maj7)");
+  await tap(p, "#chord");
+  assert.equal(await text(p, "#recent"), "Am(maj7)C", "the two spellings of one chord are one chip");
+  assert.deepEqual(errors, []);
+});
+
 test("chord-book: 连接 lists C's progressions, plays one a chord a second, and a chord in it opens on the main screen", { skip, timeout: 60000 }, async (t) => {
   for (const size of [SMALL, LARGE]) {
     const { p, errors } = await open(t, { size });
@@ -506,6 +519,36 @@ test("chord-book: 连接 lists C's progressions, plays one a chord a second, and
   assert.deepEqual(errors, []);
 });
 
+test("chord-book 1.4.2: the twelve-bar blues holds each chord its bars", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await p.locator("#q").fill("C7");
+  await tap(p, "#qgo");
+  await tap(p, "#prog");
+  const card = p.locator("#glist .card").filter({ hasText: "十二小节布鲁斯" }).first();
+  assert.equal(await card.locator(".grn").last().textContent(), "小节：4 2 2 1 1 2");
+  await p.evaluate(() => {
+    window.__strums = 0;
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__strums++; return play(notes, gap, ring); };
+  });
+  const gplay = card.locator(".gplay");
+  await tap(p, gplay);
+  /* four bars of I7, a strum a bar: four by 3.5 s, still on I7 */
+  await p.waitForTimeout(3500);
+  assert.ok(await p.evaluate(() => window.__strums) >= 4, "four bars of I7, one strum a bar");
+  assert.equal(await card.locator(".chips .sel").textContent(), "C7");
+  /* the fifth bar starts IV7 */
+  await p.waitForTimeout(1100);
+  assert.ok(await p.evaluate(() => window.__strums) >= 5, "the fifth bar strums");
+  assert.equal(await card.locator(".chips .sel").textContent(), "F7");
+  await tap(p, gplay);
+  const n = await p.evaluate(() => window.__strums);
+  await p.waitForTimeout(1200);
+  assert.equal(await p.evaluate(() => window.__strums), n, "Stop stops the bars too");
+  assert.deepEqual(errors, []);
+});
+
 test("chord-book: the progressions in English, and a slash chord's place in the canon", { skip, timeout: 60000 }, async (t) => {
   const { p, errors } = await open(t, { lang: "en" });
   assert.equal(await text(p, "#prog"), "Progs");
@@ -519,7 +562,7 @@ test("chord-book: the progressions in English, and a slash chord's place in the 
   await tap(p, "#prog");
   const first = p.locator("#glist .card").first();
   assert.equal(await first.locator(".chips").textContent(), "CG/BAmEm/GFC/EFG");
-  assert.equal(await first.locator(".grole").textContent(), "C/E is I/3 here");
+  assert.equal(await first.locator(".grole").textContent(), "C/E is I6 here");
   assert.deepEqual(errors, []);
 });
 
@@ -537,7 +580,7 @@ test("chord-book: the improv view shows the chord's scale by kind; left and righ
     assert.equal(await rows(), before, "the rows around the picture keep their heights");
     await fits(p, "body", size, "the improv view");
     assert.equal(await text(p, "#qname"), "C Ionian（大调） · 1 / 4");
-    assert.equal(await text(p, "#line"), "R 9 3 11 5 13 7");
+    assert.equal(await text(p, "#line"), "R 3 11 5 13 7 9");
     assert.deepEqual(await p.locator("#line b").allTextContents(), ["R", "3", "5"]);
     assert.deepEqual(await p.locator("#line s").allTextContents(), ["11"]);
     assert.equal(await p.locator("#tones .why2 p").first().textContent(), "大调本身，最稳的选择。11 比 3 高半音，经过就好，别停在上面。");
@@ -549,7 +592,7 @@ test("chord-book: the improv view shows the chord's scale by kind; left and righ
     assert.equal(await p.locator("#pwrap .ghost").count(), 0);
     assert.equal(await p.locator("#pic").evaluate((c) => c.style.transform), "");
     assert.equal(await text(p, "#qname"), "C Lydian · 2 / 4");
-    assert.equal(await text(p, "#line"), "R 9 3 #11 5 13 7");
+    assert.equal(await text(p, "#line"), "R 3 #11 5 13 7 9");
     assert.equal(await p.locator("#line s").count(), 0);
     assert.equal(await p.evaluate(() => window.__saves.set.cur.i), 0, "the voicing stays");
     /* the next button and a swipe do the same; left wraps */
@@ -577,17 +620,17 @@ test("chord-book: a chord opened from a progression takes its mode from the key;
   await tap(p, p.locator("#glist .card").first().locator(".chips button").nth(3));
   assert.equal(await text(p, "#cname"), "F");
   assert.equal(await text(p, "#qname"), "F Lydian · 2 / 4");
-  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调选的。/);
+  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调和这个和弦的音选的。/);
   await p.evaluate(() => window.__press("right"));
   assert.doesNotMatch(await p.locator("#tones .why2 p").first().textContent(), /^按/);
   await p.evaluate(() => window.__press("left"));
-  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调选的。/);
+  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 C 大调和这个和弦的音选的。/);
   /* F's own progressions are in F (and keys where F is not the tonic); C is V in F major: Mixolydian, the fourth */
   await tap(p, "#prog");
   const card = p.locator("#glist .card").filter({ hasText: "F 大调" }).filter({ has: p.locator(".chips button", { hasText: /^C$/ }) }).first();
   await tap(p, card.locator(".chips button", { hasText: /^C$/ }).first());
   assert.equal(await text(p, "#cname"), "C");
   assert.match(await text(p, "#qname"), /^C Mixolydian · 4 \/ 4$/);
-  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 F 大调选的。/);
+  assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 F 大调和这个和弦的音选的。/);
   assert.deepEqual(errors, []);
 });

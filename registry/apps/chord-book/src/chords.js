@@ -25,7 +25,7 @@ var Chords = (function () {
     { id: "m7",    zh: "小七",   en: "minor 7",     iv: [0, 3, 7, 10],     lab: ["R", "b3", "5", "b7"],          opt: [7], group: 1, common: 0.8 },
     { id: "m7b5",  zh: "半减七", en: "half-dim",    iv: [0, 3, 6, 10],     lab: ["R", "b3", "b5", "b7"],         opt: [],  group: 1, common: 0.5 },
     { id: "dim7",  zh: "减七",   en: "dim 7",       iv: [0, 3, 6, 9],      lab: ["R", "b3", "b5", "bb7"],        opt: [],  group: 1, common: 0.5 },
-    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3 },
+    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3, show: "m(maj7)" },
     { id: "sus2",  zh: "挂二",   en: "sus2",        iv: [0, 2, 7],         lab: ["R", "2", "5"],                 opt: [],  group: 2, common: 0.6 },
     { id: "sus4",  zh: "挂四",   en: "sus4",        iv: [0, 5, 7],         lab: ["R", "4", "5"],                 opt: [],  group: 2, common: 0.6 },
     { id: "7sus4", zh: "属七挂四", en: "7sus4",     iv: [0, 5, 7, 10],     lab: ["R", "4", "5", "b7"],           opt: [7], group: 2, common: 0.5 },
@@ -85,7 +85,8 @@ var Chords = (function () {
     if (bass === root) bass = null;
     return { root: root, q: q, bass: bass };
   }
-  function name(c) { return NAMES[c.root] + c.q + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
+  /* the name a player writes: the quality's own spelling where it has one (Am(maj7), not Ammaj7) */
+  function name(c) { var Q = qual(c.q); return NAMES[c.root] + (Q && Q.show ? Q.show : c.q) + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
   function qual(id) { return Object.prototype.hasOwnProperty.call(QI, id) ? QUALS[QI[id]] : null; }
 
   /* the chord's notes and how each is written, bass first when it is not a chord tone */
