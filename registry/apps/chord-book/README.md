@@ -29,7 +29,9 @@ ones' globals (`Chords`, `Draw`, `Guitar`, `Progs`, `Scales`).
 
 From top to bottom:
 
-- **Header:** the chord name, which opens the picker; 连接, the progressions; the view button.
+- **Header:** the chord name, which opens the picker; 连接, the progressions; the view button. A chord opened from a
+  progression keeps the key's spelling here (`G#dim7`), and the quality line adds the book's own name (`减七 · Abdim7`);
+  a normal pick, search or recent chip clears the note (1.4.4).
 - **Picture:** one of four views.
 - **Quality line:** the chord quality, or in the improv view the scale's name.
 - **Info line:** the frets, the voicing's number and its position, or in the improv view the scale's degrees.
@@ -43,7 +45,7 @@ The view button cycles through four views. The view is saved as `set.view`.
 
 | `set.view` | Shows | A tap plays | Left / right |
 |---|---|---|---|
-| `box` (框图) | The voicing on 6 strings x 5 frets, fingers in the dots, the root as a square | the note at that string and fret, among the five frets (and the open strings when the box starts at the nut) | voicing |
+| `box` (框图) | The voicing on 6 strings x 5 frets, fingers in the dots, the root as a square, a barre as a bar (finger 1, or a ring finger as in C9 x32333) | the note at that string and fret, among the five frets (and the open strings when the box starts at the nut) | voicing |
 | `neck` (指板) | The voicing on 15 frets, with the chord's notes elsewhere as small dots | the note anywhere on 15 frets | voicing |
 | `map` (度数) | The box's five frets with every place named by its degree | as `box` | voicing |
 | `scale` (即兴) | The chosen scale on 15 frets: root square, chord tone dot, tension ring, avoid cross | as `neck` | scale (both buttons off when there is only one) |
@@ -63,7 +65,15 @@ The finder opened from the picker starts from the pending chord's first voicing,
   with `Draw.paint` from the previous buffer.
 - **Sound starts on release.** The strum plays on `pointerup` (a long press is the arpeggio), because iPhone only lets
   audio start in a gesture that ends.
+- **A chord with no voicing never opens.** Eight root / quality / bass combinations have no voicing (`Ab9/B`, the m9
+  family over some basses). `go()` in app.js checks `Chords.voicings(c)` first, plays `err` and leaves the main screen
+  alone; the picker's 好, search, recent chips and 在指板上点出和弦 all stay put and say 这个和弦没有按法 / No voicing for
+  this chord, and the finder does not open. The main screen's ↑ ↓ 换性质 is refused too, but silently apart from the
+  `err` sound (the main screen has no message row). An old save holding one of them starts on C (1.4.4).
 - **No chin pad.** SELECT exists only as Shift on a computer keyboard. Every key has a button on screen.
+- **Keys are what the code does.** In the picker ← → change the root and ↑ ↓ the quality; the bass row is touch-only.
+  In the finder ← → move the position; its x / o row and 6 x 5 grid are touch-only. Every one of those actions also has
+  a button (the bass row, the grid, the why line, the mute).
 
 ## Data that is ours
 

@@ -89,7 +89,7 @@ test("barres: a hand-written shape draws a barre only where its own fingers bar 
       if (!v.barre) continue;
       barred++;
       for (let i = v.barre.from; i <= v.barre.to; i++) {
-        if (v.frets[i] === v.barre.fret) assert.equal(v.fingers[i], 1, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} under the barre is finger 1`);
+        if (v.frets[i] === v.barre.fret) assert.equal(v.fingers[i], v.barre.finger, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} under the barre is finger ${v.barre.finger}`);
         else assert.ok(v.frets[i] > v.barre.fret, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} inside the barre`);
       }
     }
@@ -103,27 +103,46 @@ test("barres: shapes played with separate fingers draw none; the E shape still b
     assert.equal(first(name).barre, null, `${name} ${C.fretText(first(name).frets)}: no barre`);
   const f = first("F");
   assert.equal(C.fretText(f.frets), "133211");
-  assert.deepEqual({ ...f.barre }, { fret: 1, from: 0, to: 5 });
+  assert.deepEqual({ ...f.barre }, { fret: 1, from: 0, to: 5, finger: 1 });
 });
 
 test("barres: the canonical shapes keep their real barre", () => {
   const canon = {
-    F: ["133211", { fret: 1, from: 0, to: 5 }],
-    Bb: ["x13331", { fret: 1, from: 1, to: 5 }],
-    Bm: ["x24432", { fret: 2, from: 1, to: 5 }],
-    B: ["x24442", { fret: 2, from: 1, to: 5 }],
-    "F#m": ["244222", { fret: 2, from: 0, to: 5 }],
-    "C#m": ["x46654", { fret: 4, from: 1, to: 5 }],
-    Dmaj7: ["xx0222", { fret: 2, from: 3, to: 5 }],
-    A6: ["x02222", { fret: 2, from: 2, to: 5 }],
-    "F/C": ["x33211", { fret: 1, from: 4, to: 5 }],
-    Dm7: ["xx0211", { fret: 1, from: 4, to: 5 }]
+    F: ["133211", { fret: 1, from: 0, to: 5, finger: 1 }],
+    Bb: ["x13331", { fret: 1, from: 1, to: 5, finger: 1 }],
+    Bm: ["x24432", { fret: 2, from: 1, to: 5, finger: 1 }],
+    B: ["x24442", { fret: 2, from: 1, to: 5, finger: 1 }],
+    "F#m": ["244222", { fret: 2, from: 0, to: 5, finger: 1 }],
+    "C#m": ["x46654", { fret: 4, from: 1, to: 5, finger: 1 }],
+    Dmaj7: ["xx0222", { fret: 2, from: 3, to: 5, finger: 1 }],
+    A6: ["x02222", { fret: 2, from: 2, to: 5, finger: 1 }],
+    "F/C": ["x33211", { fret: 1, from: 4, to: 5, finger: 1 }],
+    Dm7: ["xx0211", { fret: 1, from: 4, to: 5, finger: 1 }]
   };
   for (const [name, [frets, want]] of Object.entries(canon)) {
     const v = C.voicings(C.parse(name)).find((x) => C.fretText(x.frets) === frets);
     assert.ok(v, `${name} ${frets} is a voicing`);
     assert.deepEqual({ ...v.barre }, want, `${name} ${frets}`);
   }
+});
+
+test("barres: C9 x32333 is barred by the ring finger across G-B-E, and the box draws it; D/A has none", () => {
+  const c = C.parse("C9"), v = C.voicings(c).find((x) => C.fretText(x.frets) === "x32333");
+  assert.ok(v, "C9 x32333 is a voicing");
+  assert.deepEqual({ ...v.barre }, { fret: 3, from: 3, to: 5, finger: 3 }, "the ring finger lies across the top three strings");
+  const b = D.box(v, c.root), x = 83, y = 58;
+  assert.equal(b.px[y * b.w + x], 0, "ink between the B and high E strings at fret 3 is the barre");
+  const d = C.voicings(C.parse("D/A"))[0];
+  assert.equal(C.fretText(d.frets), "x00232");
+  assert.equal(d.barre, null, "D/A x00232 uses separate fingers");
+});
+
+test("barres: a guessed finder shape is fingered by fingerCount, so x12222 has no barre", () => {
+  const frets = C.fr("x12222"), fingers = C.assignFingers(frets);
+  assert.equal(C.fingerCount(frets).barre, null, "six strings, five notes: no barre");
+  /* assignFingers clamps at 4, leaving three strings on that guess; barreFromFingers would call it a barre, which is
+     exactly why the finder's temporary voicing must ask fingerCount (1.4.4) */
+  assert.ok(C.barreFromFingers(frets, fingers), "the clamped guess is not a barre");
 });
 
 test("every one of the 12 x 19 chords has at least 3 voicings, and every voicing keeps the rules", () => {
