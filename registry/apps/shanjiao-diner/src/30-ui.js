@@ -25,6 +25,11 @@ function tapInside(x, y, w, h) {
   var p = game.pointer;
   return tapWorld() && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
 }
+/* where the tap landed, in world pixels.  Only for the few screens that need
+ * the point itself (a title label's centre, a prep row's 定 column): ask
+ * tapWorld() or tapInside() first, which every hit test does. */
+function tapX() { return game.pointer.x; }
+function tapY() { return game.pointer.y; }
 
 /* a horizontal row of `count` cells: title menu, morning actions, battle grid */
 function tapCell(count, x, y, w, h) {

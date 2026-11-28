@@ -173,18 +173,27 @@ test("shanjiao fill: every screen fills the phone at the five sizes with the din
 });
 
 test("shanjiao fill: a press in the scenery is inert on the title, in prep and in battle", async () => {
-  /* the title: a press in the top band must not move or leave the title */
-  const t = harness(346, 518);
+  /* the title at the short stage: a side-band press at the menu's own height
+     (y 200) must not move or leave the title, and the same height inside the
+     world still does (131 is 说明's centre) */
+  const t = harness(348, 323);
   await t.frame(12);
   assert.equal(t.app.ctx.get("TITLE_SEL"), 0);
   const title = t.game.top();
-  tapAt(t, "pointerdown", 120, 8);
+  assert.ok(t.game.stage.x >= 6, "the short stage should grow side bands");
+  tapAt(t, "pointerdown", 6, 200);
   await t.frame(1);
-  tapAt(t, "pointerup", 120, 8);
+  tapAt(t, "pointerup", 6, 200);
   await t.frame(20);
-  assert.equal(t.app.ctx.get("TITLE_SEL"), 0, "a band tap moved the title's selection");
-  assert.equal(t.game.top(), title, "a band tap left the title");
-  assert.equal(t.app.ctx.get("S"), null, "a band tap started a game");
+  assert.equal(t.app.ctx.get("TITLE_SEL"), 0, "a side-band tap moved the title's selection");
+  assert.equal(t.game.top(), title, "a side-band tap left the title");
+  assert.equal(t.app.ctx.get("S"), null, "a side-band tap started a game");
+  tapAt(t, "pointerdown", 131, 205);
+  await t.frame(1);
+  tapAt(t, "pointerup", 131, 205);
+  await t.frame(40);
+  assert.equal(t.app.ctx.get("TITLE_SEL"), 1, "a world tap at the menu's height no longer selects");
+  assert.notEqual(t.game.top(), title, "a world tap at the menu's height no longer acts");
 
   /* prep: the footer's A hint runs to the world's bottom edge, so a tap in the
      bottom band lands on the last world row: it must not cook the menu */
@@ -222,12 +231,41 @@ test("shanjiao fill: a press in the scenery is inert on the title, in prep and i
   assert.notEqual(b.game.top(), fight, "a world tap no longer closes the ended fight");
 });
 
+test("shanjiao fill: a pushed event paints its own background's bands, not the diner behind it", async () => {
+  const h = harness(386, 738);
+  await h.frame(10);
+  const c = (n) => h.app.ctx.get(n);
+  /* src/58-event.js: ART.eventBg's forest and deep ARE ART.battleBg, and its
+     shop/dawn is the diner after dark */
+  const kind = (bg) => c(`(bandScreen = "event", EVENT_ARGS = { bg: "${bg}" }, bandKind())`);
+  assert.equal(kind("forest"), "battle");
+  assert.equal(kind("deep"), "battle");
+  assert.equal(c('(bandScreen = "event", EVENT_ARGS = { bg: "deep" }, bandsDeep())'), true);
+  assert.equal(c('(bandScreen = "event", EVENT_ARGS = { bg: "forest" }, bandsDeep())'), false);
+  assert.equal(kind("shop"), "night");
+  assert.equal(kind("dawn"), "night");
+
+  /* draw the day-3 forest story and look: the bands are the fight's sky and
+     stage (mid, paper, dark), with none of the room's beam or posts (ink) */
+  c('(S = fresh(), startDay(3), S.seen.intro = 1, S.ph' + "ase = 'morning')");
+  await h.frame(2);
+  h.game.go("event", { who: "yan", bg: "forest", pages: ["后山那头山猪，最近总来拱我的陷阱。"] }, { fade: false });
+  await h.frame(8);
+  const st = h.game.stage, pix = bandPixels(h.image(), st);
+  assert.ok(c("bandScreen") === "event", "the event overlay should be on screen");
+  assert.ok(pix.tones.has(2) && !pix.tones.has(0), "the forest event's bands should be the fight's mountain");
+});
+
 test("shanjiao fill: the touch helpers ask the world before the scenery", () => {
   const ui = readFileSync(join(SRC, "30-ui.js"), "utf8");
   assert.match(ui, /function tapWorld\(\)/);
   assert.match(ui, /p\.stageX >= s\.x/);
-  for (const file of ["50-title.js", "54-battle.js", "55-service.js", "56-night.js", "59-ending.js"]) {
+  assert.match(ui, /function tapX\(\) \{ return game\.pointer\.x; \}/);
+  /* one place reads the pointer: every other screen goes through tapInside,
+     tapRow, tapWorld or tapX/tapY, so a press in a band cannot be acted on */
+  for (const file of ["00-main.js", "50-title.js", "52-prep.js", "54-battle.js", "55-service.js",
+    "56-night.js", "57-shop.js", "59-ending.js", "59b-codex.js"]) {
     const src = readFileSync(join(SRC, file), "utf8");
-    assert.ok(!/game\.pointer\.pressed/.test(src), `${file} still reads game.pointer.pressed directly`);
+    assert.ok(!/game\.pointer/.test(src), `${file} reads game.pointer directly`);
   }
 });

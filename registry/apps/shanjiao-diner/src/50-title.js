@@ -29,7 +29,7 @@ function titleTap(n) {
   if (!tapInside(28, 190, 160, 32)) return -1;
   var xs = titleXs(n), best = 0, dist = 1e9;
   for (var i = 0; i < n; i++) {
-    var d = Math.abs(game.pointer.x - (xs[i] + 13));
+    var d = Math.abs(tapX() - (xs[i] + 13));
     if (d < dist) { dist = d; best = i; }
   }
   return best;

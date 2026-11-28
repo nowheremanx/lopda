@@ -155,9 +155,10 @@ game.scene("battle", {
       if (game.pressed("a")) playerAction(B.sel);
       else {
         /* the drawn 2x2 grid: cells x 6..106 / 106..200, rows y 178..191 / 191..205 */
-        var p = game.pointer, cell = -1;
-        if (tapWorld() && p.x >= 6 && p.x < 200 && p.y >= 178 && p.y < 206) {
-          cell = (p.y < 191 ? 0 : 2) + (p.x < 106 ? 0 : 1);
+        var cell = -1;
+        if (tapWorld()) {
+          var tx = tapX(), ty = tapY();
+          if (tx >= 6 && tx < 200 && ty >= 178 && ty < 206) cell = (ty < 191 ? 0 : 2) + (tx < 106 ? 0 : 1);
         }
         if (cell >= 0) { B.sel = cell; playerAction(cell); }
       }

@@ -11,8 +11,21 @@
  */
 var BAND_SCREENS = { night: "night", ending: "valley", title: "valley", battle: "battle", forest: "forest" };
 
+/* The event overlay paints its own full background (src/58-event.js): the shop
+ * and dawn are the diner at night, and forest and deep are ART.battleBg, so its
+ * bands follow those instead of the room the portrait was pushed from. */
 function bandKind() {
+  if (bandScreen === "event") {
+    var bg = typeof EVENT_ARGS !== "undefined" && EVENT_ARGS && EVENT_ARGS.bg;
+    if (bg === "forest" || bg === "deep") return "battle";
+    return "night";
+  }
   return BAND_SCREENS[bandScreen] || "room";
+}
+/* the shrine fight's dark stage: a battle event says so itself, B says so in a fight */
+function bandsDeep() {
+  if (bandScreen === "event") return !!(typeof EVENT_ARGS !== "undefined" && EVENT_ARGS && EVENT_ARGS.bg === "deep");
+  return typeof B !== "undefined" && !!B && B.from === "deep";
 }
 
 function paintBands(s, st) {
@@ -215,7 +228,7 @@ function valleySide(s, st, rx, rw, screen) {
 /* ---------------- the fight on the mountain ---------------- */
 function battleBands(s, st) {
   var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
-  var deep = typeof B !== "undefined" && B && B.from === "deep";
+  var deep = bandsDeep();
   var stage = deep ? 1 : 3, sky = deep ? 1 : 2;
   var fb = y0 + wh, cut = Math.min(108, wh);            /* the world's stage starts at y 108 */
   s.clear(sky);
@@ -229,6 +242,13 @@ function battleBands(s, st) {
       }
     }
     if (deep) s.dither(0, 0, w, y0, 0, 2);
+    /* the story's own weather (src/58-event.js) dapples the top of its world
+       with paper: the band keeps that haze just above it, so the sky does not
+       step at the world's top edge */
+    if (bandScreen === "event") {
+      var haze = Math.min(y0, typeof EVENT_ARGS !== "undefined" && EVENT_ARGS && EVENT_ARGS.bg === "deep" ? 90 : 40);
+      if (haze > 0) s.dither(0, y0 - haze, w, haze, 3, 1);
+    }
   }
   if (fb < h) {
     s.rect(0, fb, w, h - fb, stage);

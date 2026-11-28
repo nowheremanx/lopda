@@ -17,12 +17,12 @@ function seatPos(i) {
  * action bar (the second row's feet are under it), 58 px wide.  The two rows
  * are split at y 120, where the lower row's order tag starts. */
 function tapSeat() {
-  var p = game.pointer;
   if (!tapWorld()) return -1;
+  var tx = tapX(), ty = tapY();
   for (var i = 0; i < SERV.seats; i++) {
     var tp = tablePos(i), top = tp[1] < 130 ? 44 : 120;
     var bottom = tp[1] < 130 ? 120 : 194;
-    if (p.x >= tp[0] - 6 && p.x < tp[0] + 52 && p.y >= top && p.y < bottom) return i;
+    if (tx >= tp[0] - 6 && tx < tp[0] + 52 && ty >= top && ty < bottom) return i;
   }
   return -1;
 }
