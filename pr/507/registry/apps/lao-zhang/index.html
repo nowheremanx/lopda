@@ -3795,18 +3795,22 @@ GM.initArt();
    Everything is drawn in the four tones with putImageData, like the mine. */
 var GM = (typeof GM !== "undefined" && GM) || {};
 
-GM.SKY_MIN = 56;     /* framebuffer rows the scoreboard needs: label, cash at 2x, the gauge */
+GM.SKY_MIN = 56;     /* framebuffer rows the full scoreboard needs: label, cash at 2x, the gauge */
+GM.SKY_SLIM = 18;    /* a short screen (Safari with its bars) gets the scoreboard on one line instead */
 GM.ROCK_MIN = 48;    /* the bedrock band only when it has room for a cart on its rails */
 
-/* The canvas for a stage of w x h CSS pixels: as wide as the stage (320 columns), as tall as the stage allows.
-   A stage wider than the mine plus the smallest sky (a desktop window) fits by height and leaves paper at the sides.
-   Returns {H, sky, rock, k}: canvas rows, sky rows above the mine, bedrock rows below it, CSS pixels a column. */
+/* The canvas for a stage of w x h CSS pixels: as wide as the stage (320 columns), as tall as the stage allows
+   (rounded up: the last part of a row is cut off by the stage, never left as a line of paper). Under SKY_MIN rows of
+   sky the scoreboard goes slim; a stage too wide for even that (a desktop window) fits by height, with paper at
+   the sides and the full scoreboard.
+   Returns {H, sky, rock, k, slim}: canvas rows, sky rows above the mine, bedrock rows below it, CSS pixels a column. */
 GM.frameLayout = function (w, h) {
-  var least = GM.BH + GM.SKY_MIN, H = least, k = 1;
+  var least = GM.BH + GM.SKY_SLIM, H = GM.BH + GM.SKY_MIN, k = 1;
   if (w > 0 && h > 0) {
     k = w / GM.BW;
-    H = Math.round(h / k);
-    if (H < least) { H = least; k = h / H; }
+    H = Math.ceil(h / k - 0.01);
+    /* too short for even the slim line: paper at the sides anyway, so the full scoreboard, fitted by height */
+    if (H < least) { H = GM.BH + GM.SKY_MIN; k = h / H; }
   }
   var extra = H - GM.BH, sky = extra, rock = 0;
   if (extra >= GM.SKY_MIN + GM.ROCK_MIN + 20) {
@@ -3814,7 +3818,7 @@ GM.frameLayout = function (w, h) {
     sky = Math.max(GM.SKY_MIN + 16, Math.min(104, Math.round(extra * 0.45)));
     rock = extra - sky;
   }
-  return { H: H, sky: sky, rock: rock, k: k };
+  return { H: H, sky: sky, rock: rock, k: k, slim: sky < GM.SKY_MIN };
 };
 
 GM.L = GM.frameLayout(0, 0);
@@ -3901,8 +3905,35 @@ GM.skyKey = function (state, T) {
   return [GM.L.sky, state.level, state.bank, state.target, sec, state.screen === "play" && sec <= 10, state.dynamite, T.level].join("|");
 };
 
+/* the slim scoreboard: one line, level and cash on the left with a short gauge, dynamite and seconds on the right */
+GM.paintSkySlim = function (bd, state, T) {
+  var W = bd.w, H = bd.h, y = Math.max(0, Math.round((H - 13) / 2)), x;
+  var met = state.bank >= state.target;
+  GM.bandRect(bd, 0, 0, W, H, GM.PAPER);
+  x = GM.hudText(bd, GM.fmt(T.level, { n: state.level }), 6, y, GM.DARK, 1) + 6;
+  x = GM.hudText(bd, "$" + GM.money(state.bank), x, y, GM.INK, 1);
+  if (met) {
+    GM.bandRect(bd, x + 3, y - 1, GM.hudWidth(T.hudMet) + 6, 14, GM.INK);
+    x = GM.hudText(bd, T.hudMet, x + 6, y, GM.PAPER, 1) + 3;
+  } else {
+    x = GM.hudText(bd, "/" + GM.money(state.target), x, y, GM.DARK, 1);
+  }
+  var gw = 34, gx = x + 6, fill = met ? 1 : GM.levelShare(state, state.bank - (state.levelBank || 0));
+  GM.bandRect(bd, gx, y + 4, gw, 6, GM.INK);
+  GM.bandRect(bd, gx + 1, y + 5, gw - 2, 4, GM.MID);
+  GM.bandRect(bd, gx + 1, y + 5, Math.round((gw - 2) * fill), 4, GM.INK);
+  var sec = Math.max(0, Math.ceil(state.time)), st = sec + T.hudSec, sw = GM.hudWidth(st);
+  var low = state.screen === "play" && sec <= 10;
+  if (low) GM.bandRect(bd, W - 6 - sw - 3, y - 1, sw + 6, 14, GM.INK);
+  GM.hudText(bd, st, W - 6 - sw, y, low ? GM.PAPER : GM.INK, 1);
+  var dn = "×" + Math.max(0, state.dynamite || 0), dw = GM.hudWidth(dn), dx = W - 6 - sw - 12 - dw;
+  GM.hudText(bd, dn, dx, y, state.dynamite > 0 ? GM.INK : GM.MID, 1);
+  GM.bandSprite(bd, GM.SPR.dynIcon, dx - 15, y - 2, state.dynamite > 0 ? null : GM.MID);
+};
+
 GM.paintSky = function (bd, state, T) {
   var W = bd.w, H = bd.h, i;
+  if (GM.L.slim) { GM.paintSkySlim(bd, state, T); return; }
   GM.bandRect(bd, 0, 0, W, H, GM.PAPER);
   /* a few clouds where the sky is tall enough, between the two halves of the scoreboard, never under its words */
   if (H >= 72) {
@@ -4682,15 +4713,16 @@ GM.ui = (function () {
   var fitW = 0, fitH = 0, stageEl = null;
   function fit() {
     if (!cv) return;
-    var stage = stageEl || (stageEl = $("stage")), w = stage.clientWidth, h = stage.clientHeight;
-    fitW = w; fitH = h;
+    var stage = stageEl || (stageEl = $("stage")), r = stage.getBoundingClientRect(), w = r.width, h = r.height;
+    fitW = stage.clientWidth; fitH = stage.clientHeight;
     if (w < 40 || h < 40) return;
     var L = GM.frameLayout(w, h);
     if (cv.width !== GM.BW) cv.width = GM.BW;
     if (cv.height !== L.H) cv.height = L.H;
     GM.setLayout(L);
-    cv.style.width = Math.round(GM.BW * L.k) + "px";
-    cv.style.height = Math.round(L.H * L.k) + "px";
+    /* exact sizes, not rounded: a rounded width left a line of paper down each side on an iPhone */
+    cv.style.width = (GM.BW * L.k) + "px";
+    cv.style.height = (L.H * L.k) + "px";
     if (state && (state.screen === "play" || state.screen === "intro")) GM.draw(ctx, state);
   }
 
