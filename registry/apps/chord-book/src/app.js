@@ -8,9 +8,9 @@
     strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", prevScale: "Prev scale", nextScale: "Next scale",
     mute: "Mute", unmute: "Sound on", whyTitle: "About the scale", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
-    search: "C#m7b5, D/F#, Bbmaj7", unknown: "This book has 19 qualities ({q} is not one)", unknownEmpty: "Type a chord name", root: "Root", bass: "Bass", none: "none", recent: "Recent",
+    search: "C#m7b5, D/F#, Bbmaj7", unknown: "This book has {n} qualities ({q} is not one)", unknownEmpty: "Type a chord name", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
-    listen: "Play", noChord: "Not one of this book's 19 qualities", also: "also ", posLabel: "fret {n}",
+    listen: "Play", noChord: "Not one of this book's {n} qualities", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
     tonicOnly: "Tonic only", allCards: "All",
@@ -21,9 +21,9 @@
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", prevScale: "上一种音阶", nextScale: "下一种音阶",
     mute: "静音", unmute: "开声", whyTitle: "音阶说明", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
-    search: "C#m7b5、D/F#、Bbmaj7", unknown: "这个版本只收 19 种和弦（认不出 {q}）", unknownEmpty: "先输入一个和弦名", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
+    search: "C#m7b5、D/F#、Bbmaj7", unknown: "这个版本只收 {n} 种和弦（认不出 {q}）", unknownEmpty: "先输入一个和弦名", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
-    listen: "听", noChord: "不是这一版的 19 种和弦", also: "也读作 ", posLabel: "{n} 品起",
+    listen: "听", noChord: "不是这一版的 {n} 种和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
     tonicOnly: "只看主和弦", allCards: "全部",
@@ -49,7 +49,7 @@
     if (typeof c.root === "number" && c.root >= 0 && c.root < 12 && Chords.qual(c.q) &&
       (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
-    /* a save from before 1.4.4 may hold a combination with no voicing (Ab9/B and seven others): show C instead */
+    /* a save from before 1.4.4 may hold a combination with no voicing (Ab9/B and fifteen others): show C instead */
     if (!Chords.voicings(chord()).length) set.cur = { root: 0, q: "", bass: null, i: 0 };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
     if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
@@ -83,8 +83,8 @@
     set.recent = [n].concat(set.recent.filter(function (r) { return r !== n; })).slice(0, 8);
   }
   function go(c, i) {
-    /* eight root / quality / bass combinations have no voicing in this book (Ab9/B, the m9 family over their own
-       thirds and fifths): refuse rather than blank the main screen (1.4.4) */
+    /* sixteen root / quality / bass combinations have no voicing in this book (Ab9/B and the m9 family, plus the new
+       altered and ninth colours over some basses): refuse rather than blank the main screen (1.4.4, 1.4.7) */
     if (!Chords.voicings(c).length) { sfx("err"); return false; }
     if (Chords.name(c) !== Chords.name(chord())) temp = null;
     spelledName = null;
@@ -401,7 +401,7 @@
   }
   function search() {
     var q = $("q").value.trim(), c = Chords.parse(q);
-    if (!c) { $("msg").textContent = q ? t("unknown", { q: q }) : t("unknownEmpty"); sfx("err"); return; }
+    if (!c) { $("msg").textContent = q ? t("unknown", { q: q, n: Chords.QUALS.length }) : t("unknownEmpty"); sfx("err"); return; }
     $("q").blur();
     pick = c; applyPick();
     /* still open: the combination has no voicing, and the picker shows what it refused (1.4.4) */
@@ -585,7 +585,7 @@
       out.textContent = Chords.name(ids[0]);
       alt.textContent = ids.length > 1 ? t("also") + ids.slice(1).map(Chords.name).join(", ") : "";
     } else {
-      out.textContent = t("noChord");
+      out.textContent = t("noChord", { n: Chords.QUALS.length });
       var seen = {}, names = [];
       Chords.midiOf(fs.frets).forEach(function (m) { var n = Chords.NAMES[m % 12]; if (!seen[n]) { seen[n] = 1; names.push(n); } });
       alt.textContent = names.join(" ");
