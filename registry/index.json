@@ -27,7 +27,7 @@
         ".....000000.....",
         "................"
       ],
-      "version": "1.6.0",
+      "version": "1.7.3",
       "released": "2026-10-28",
       "updated": "2026-11-27",
       "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
@@ -40,8 +40,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "51aaab387003395ae4f8e6eac93f7929b9fce71cb8313dd40c3f805a4488a29a",
-      "bytes": 197665
+      "sha256": "868911f209e8a30231a5fa9e1be8e976df6e64123263f466441b2f113038ec68",
+      "bytes": 214083
     },
     {
       "spec": "lopda/1",

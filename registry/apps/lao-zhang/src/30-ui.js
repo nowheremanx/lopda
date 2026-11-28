@@ -4,8 +4,8 @@ var GM = (typeof GM !== "undefined" && GM) || {};
 GM.ui = (function () {
   var LANG = (typeof PAD !== "undefined" && PAD.lang === "en") ? "en" : "zh";
   var T = GM.text(LANG);
-  var state, ctx, cv, ov, introEl, foot, lv, cash, tm, bar;
-  var last = 0, lastScreen = "", lastHud = "", lastFoot = "", lastIntro = "";
+  var state, ctx, cv, ov, introEl;
+  var last = 0, lastScreen = "", lastIntro = "";
   var lastJingleId = 0;
 
   function $(id) { return document.getElementById(id); }
@@ -21,11 +21,8 @@ GM.ui = (function () {
     ctx.imageSmoothingEnabled = false;
     ov = $("ov");
     introEl = $("intro");
-    foot = $("foot");
-    lv = $("lv");
-    cash = $("cash");
-    tm = $("tm");
-    bar = $("barfill");
+    /* the scoreboard is painted in the sky above the mine (src/22-hud.js), in this language */
+    GM.hudT = T;
     document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en";
     document.title = T.title;
     cv.addEventListener("pointerdown", onCanvas);
@@ -34,8 +31,6 @@ GM.ui = (function () {
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
-    updateHud(true);
-    updateFoot(true);
   }
 
   function setBest(info) {
@@ -103,7 +98,8 @@ GM.ui = (function () {
       ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
       : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
       : T.noBest;
-    var items = [{ label: T.menuNew }, { label: T.menuCodex }];
+    /* with a run on record, a new game throws it away (the confirm screen says so): 重新开始; without one, 新游戏 */
+    var items = [{ label: state.run ? T.menuNew : T.menuFresh }, { label: T.menuCodex }];
     if (state.run) items.unshift({ label: T.menuContinue, status: GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) }) });
     return {
       items: items,
@@ -145,18 +141,19 @@ GM.ui = (function () {
       var cells = "";
       for (i = 0; i < GM.ITEM_ORDER.length; i++) {
         var ct = GM.ITEM_ORDER[i];
+        /* the mole's line is long: it takes the whole last row, its picture beside the words */
         var wide = ct === "mole";
-        cells += '<div class="ccell"' + (wide ? ' style="grid-column: span 3"' : "") + '>' +
+        cells += '<div class="ccell' + (wide ? " wide" : "") + '">' +
           '<canvas width="32" height="32" data-item="' + ct + '" aria-hidden="true"></canvas>' +
-          "<b>" + esc(T.codexNames[i]) + "</b>" +
-          "<span" + (wide ? ' style="white-space:normal"' : "") + ">" + esc(codexValue(ct)) + "</span>" +
-          "<em>" + esc(codexWeight(ct)) + "</em></div>";
+          "<div><b>" + esc(T.codexNames[i]) + "</b>" +
+          "<span>" + esc(codexValue(ct)) + "</span>" +
+          "<em>" + esc(codexWeight(ct)) + "</em></div></div>";
       }
+      /* no on-screen back button: B goes back, and the key line under the page already says so */
       return shell("codex",
         "<h1>" + esc(T.codexTitle) + "</h1>" +
         '<p class="small">' + esc(T.codexHint) + "</p>" +
-        '<div class="cgrid">' + cells + "</div>" +
-        '<button type="button" class="primary codexback" data-act="menu">' + esc(T.codexBack) + "</button>",
+        '<div class="cgrid">' + cells + "</div>",
         T.codexFoot);
     }
     if (screen === "clear") {
@@ -209,8 +206,10 @@ GM.ui = (function () {
         '<p class="big">' + esc(GM.fmt(T.overShort, { d: GM.money(short) })) + "</p>" +
         '<p class="small">' + esc(GM.fmt(T.clearLine, { b: GM.money(state.bank), t: GM.money(state.target) })) + "</p>" +
         '<p class="small">' + esc(T.overRun) + "</p>" +
-        '<button type="button" class="primary" data-act="retry">' + esc(T.retry) + "</button>" +
-        '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
+        '<div class="menu">' +
+          row(state.endCursor !== 1, "retry", T.retry, "", false) +
+          row(state.endCursor === 1, "title", T.toTitle, "", false) +
+        "</div>",
         T.footOver);
     }
     if (screen === "victory") {
@@ -219,8 +218,10 @@ GM.ui = (function () {
         "<h1>" + esc(T.victory) + "</h1>" +
         "<p>" + esc(T.victoryLine) + "</p>" +
         '<p class="big">' + esc(GM.fmt(T.shopCash, { b: GM.money(state.bank) })) + "</p>" + rec +
-        '<button type="button" class="primary" data-act="endless">' + esc(T.keep) + "</button>" +
-        '<button type="button" class="ghost" data-act="title">' + esc(T.toTitle) + "</button>",
+        '<div class="menu">' +
+          row(state.endCursor !== 1, "endless", T.keep, "", false) +
+          row(state.endCursor === 1, "title", T.toTitle, "", false) +
+        "</div>",
         T.footVictory);
     }
     return "";
@@ -291,46 +292,9 @@ GM.ui = (function () {
     } else {
       ov.innerHTML = "";
     }
-    updateFoot(true);
-    updateHud(true);
     updateIntro();
     musicFor(screen);
     saveRun();
-  }
-
-  function updateHud(force) {
-    var sec = Math.ceil(state.time);
-    var key = state.screen + "|" + state.level + "|" + state.bank + "|" + state.target + "|" + sec + "|" + (state.bank >= state.target);
-    if (!force && key === lastHud) return;
-    lastHud = key;
-    lv.textContent = GM.fmt(T.level, { n: state.level });
-    cash.textContent = money(state.bank) + " / " + GM.money(state.target);
-    cash.className = state.bank >= state.target ? "met" : "";
-    tm.textContent = GM.fmt(T.time, { n: sec });
-    tm.className = sec <= 10 && state.screen === "play" ? "low" : "";
-    bar.style.width = Math.max(0, Math.min(100, Math.round(state.bank / (state.target || 1) * 100))) + "%";
-  }
-
-  function updateFoot(force) {
-    var text, dyn = state.dynamite > 0 ? state.dynamite : 0;
-    if (state.screen === "play" || state.screen === "intro") text = GM.footPlayText(LANG, dyn);
-    else if (state.screen === "paused") text = T.pauseFoot;
-    else if (state.screen === "confirm") text = T.confirmFoot;
-    else if (state.screen === "codex") text = T.codexFoot;
-    else if (state.screen === "clear") text = T.footClear;
-    else if (state.screen === "shop") text = T.footShop;
-    else if (state.screen === "over") text = T.footOver;
-    else if (state.screen === "victory") text = T.footVictory;
-    else text = T.menuFoot;
-    if (!force && text === lastFoot) return;
-    lastFoot = text;
-    if ((state.screen === "play" || state.screen === "intro") && dyn <= 0) {
-      /* the B key is always taught, but greyed out while there is nothing to throw */
-      var b = esc(GM.fmt(T.footB, { n: 0 }));
-      foot.innerHTML = esc(T.footPlay).replace("{b}", '<span style="color:#7d8a58">' + b + "</span>");
-    } else {
-      foot.textContent = text;
-    }
   }
 
   function updateIntro() {
@@ -348,8 +312,10 @@ GM.ui = (function () {
     if (state.strength) buff.push(T.buffNames[0]);
     if (state.clover) buff.push(T.buffNames[1]);
     if (state.book) buff.push(T.buffNames[2]);
+    /* the keys are taught here, while the level opens: during play the whole screen is the mine */
     var html = "<b>" + esc(GM.fmt(T.intro, { n: state.level, t: GM.money(state.target) })) + "</b><span>" + esc(tip) + "</span>" +
-      (buff.length ? "<span>" + esc(GM.fmt(T.buffIntro, { b: buff.join(" · ") })) + "</span>" : "");
+      (buff.length ? "<span>" + esc(GM.fmt(T.buffIntro, { b: buff.join(" · ") })) + "</span>" : "") +
+      '<span class="keys">' + esc(GM.footPlayText(LANG, state.dynamite > 0 ? state.dynamite : 0)) + "</span>";
     if (html === lastIntro) return;
     lastIntro = html;
     introEl.innerHTML = html;
@@ -583,14 +549,20 @@ GM.ui = (function () {
       } else if (btn === "b" || btn === "start") shopNext();
       return;
     }
-    if (s === "over") {
-      if (btn === "a" || btn === "start") startRun();
-      else if (btn === "b") { GM.toTitle(state); enter("title"); }
-      return;
-    }
-    if (s === "victory") {
-      if (btn === "a" || btn === "start") openShop();
-      else if (btn === "b") { GM.toTitle(state); enter("title"); }
+    /* the end screens are a two-row menu like the pause menu: up and down move, A takes the chosen row,
+       START takes the first (play on), B goes to the title */
+    if (s === "over" || s === "victory") {
+      if (btn === "up" || btn === "down") {
+        state.endCursor = state.endCursor === 1 ? 0 : 1;
+        sfx("move");
+        enter(s);
+      } else if (btn === "b" || (btn === "a" && state.endCursor === 1)) {
+        state.endCursor = 0;
+        GM.toTitle(state); enter("title");
+      } else if (btn === "a" || btn === "start") {
+        state.endCursor = 0;
+        if (s === "over") startRun(); else openShop();
+      }
     }
   }
 
@@ -598,30 +570,36 @@ GM.ui = (function () {
     if (document.hidden && (state.screen === "play" || state.screen === "intro") && GM.pause(state)) enter("paused");
   }
 
+  /* the canvas fills the stage: 320 columns across the width, as many rows as the height allows; the mine keeps
+     its 320 x 288 and the rows left over become sky and bedrock (GM.frameLayout) */
+  var fitW = 0, fitH = 0, stageEl = null;
   function fit() {
     if (!cv) return;
-    var stage = $("stage");
-    var aw = stage.clientWidth - 12, ah = stage.clientHeight - 12;
-    if (aw < 40 || ah < 40) return;
-    var k = Math.min(aw / GM.BW, ah / GM.BH);
-    var dpr = window.devicePixelRatio || 1;
-    var kk = Math.floor(k * dpr) / dpr;
-    if (kk < k * 0.9) kk = k;
-    kk = Math.max(0.75, kk);
-    cv.style.width = Math.round(GM.BW * kk) + "px";
-    cv.style.height = Math.round(GM.BH * kk) + "px";
+    var stage = stageEl || (stageEl = $("stage")), r = stage.getBoundingClientRect(), w = r.width, h = r.height;
+    fitW = stage.clientWidth; fitH = stage.clientHeight;
+    if (w < 40 || h < 40) return;
+    var L = GM.frameLayout(w, h);
+    if (cv.width !== L.W) cv.width = L.W;
+    if (cv.height !== L.H) cv.height = L.H;
+    GM.setLayout(L);
+    /* exact sizes, not rounded: a rounded width left a line of paper down each side on an iPhone */
+    cv.style.width = (L.W * L.k) + "px";
+    cv.style.height = (L.H * L.k) + "px";
+    if (state && (state.screen === "play" || state.screen === "intro")) GM.draw(ctx, state);
   }
 
   function loop(now) {
     var dt = last ? Math.min(0.1, (now - last) / 1000) : 0;
     last = now;
+    /* the handheld can size this page after it starts (on an iPhone the chin pad and the safe areas settle late)
+       and a resize event does not always follow; a stage that changed size is fitted again here, or the mine
+       stays as small as the first, unsettled size and leaves paper at both sides */
+    if (stageEl && (stageEl.clientWidth !== fitW || stageEl.clientHeight !== fitH)) fit();
     if (state.screen === "play" || state.screen === "intro") {
       GM.update(state, dt);
       pump();
       if (state.screen !== lastScreen) enter(state.screen);
       if (state.screen === "play" || state.screen === "intro") {
-        updateHud();
-        updateFoot();
         updateIntro();
         GM.draw(ctx, state);
       }
