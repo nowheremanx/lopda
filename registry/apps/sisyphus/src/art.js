@@ -560,7 +560,7 @@ var ART = (function () {
     var bandH = -y0;
     if (bandH >= 8) {
       var wind = sg.weather === "wind" ? 2.2 : 1;
-      var rows = bandH >= 44 ? [0.22, 0.50, 0.78] : (bandH >= 24 ? [0.30, 0.64] : [0.45]);
+      var rows = bandH >= 44 ? [0.14, 0.38, 0.62, 0.86] : (bandH >= 24 ? [0.20, 0.50, 0.80] : [0.45]);
       for (c = 0; c < rows.length; c++) {
         var cy = y0 + Math.round(bandH * rows[c]);
         var off = ((calm ? 0 : sg.time) * (3 + c) * wind + c * 57) % 240;

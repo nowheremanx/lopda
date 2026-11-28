@@ -84,6 +84,9 @@ function stageDown(app, game, sx, sy) {
 function stageUp(app, game, sx, sy) {
   app.pointerRaw("pointerup", sx * game.stage.k, sy * game.stage.k);
 }
+function stageMove(app, game, sx, sy) {
+  app.pointerRaw("pointermove", sx * game.stage.k, sy * game.stage.k);
+}
 async function tapStage(app, game, run, sx, sy) {
   stageDown(app, game, sx, sy); await run(2);
   stageUp(app, game, sx, sy); await run(2);
@@ -211,6 +214,26 @@ test("sisyphus app: a tap or drag started in a band is not a tap on the screen",
   await a.run(30);
   assert.ok(S.p > 0, "a finger on the world still pushes");
   stageUp(a.app, game, st.x + 80, st.y + 120);
+  await a.run(2);
+
+  /* where the press started decides: a drag from the top band onto the world is no push ... */
+  S.p = 0.2; S.idle = 0; S.wasPush = false;
+  await a.run(1);
+  const held = S.p;
+  stageDown(a.app, game, st.x + 80, st.y - 5);
+  await a.run(1);
+  stageMove(a.app, game, st.x + 80, st.y + 120);     /* onto the world, still down */
+  await a.run(30);
+  assert.equal(S.p, held, "a drag that started in a band pushed the stone once it reached the world");
+  stageUp(a.app, game, st.x + 80, st.y + 120);
+  await a.run(2);
+  /* ... while a drag that starts on the world keeps pushing when it slides off it */
+  stageDown(a.app, game, st.x + 80, st.y + 120);
+  await a.run(1);
+  stageMove(a.app, game, st.x + 80, st.y + H + 10);
+  await a.run(30);
+  assert.ok(S.p > held, "a drag that started on the world stopped pushing when it left it");
+  stageUp(a.app, game, st.x + 80, st.y + H + 10);
   await a.run(2);
 
   /* the pause menu: a band tap would clamp to the window's edge and close it; it must do nothing */

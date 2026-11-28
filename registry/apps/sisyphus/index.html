@@ -1542,7 +1542,7 @@ var ART = (function () {
     var bandH = -y0;
     if (bandH >= 8) {
       var wind = sg.weather === "wind" ? 2.2 : 1;
-      var rows = bandH >= 44 ? [0.22, 0.50, 0.78] : (bandH >= 24 ? [0.30, 0.64] : [0.45]);
+      var rows = bandH >= 44 ? [0.14, 0.38, 0.62, 0.86] : (bandH >= 24 ? [0.20, 0.50, 0.80] : [0.45]);
       for (c = 0; c < rows.length; c++) {
         var cy = y0 + Math.round(bandH * rows[c]);
         var off = ((calm ? 0 : sg.time) * (3 + c) * wind + c * 57) % 240;
@@ -1765,7 +1765,10 @@ function worldPoint() {
     p.stageY >= st.y && p.stageY < st.y + game.height;
 }
 function worldTap() { return game.pointer.pressed && worldPoint(); }
-function worldDown() { return game.pointer.down && worldPoint(); }
+/* the push remembers where the finger went down: a press that starts in a band is not a push even
+   if it slides onto the world, and a press that starts on the world keeps pushing if it slides off */
+function noteTouchOrigin() { if (game.pointer.pressed) S.downInWorld = worldPoint(); }
+function worldDown() { return game.pointer.down && !!S.downInWorld; }
 /* the still screens (pause, the handbook, a quote, loading) keep the bands calm */
 function calmBands() { return !S.loaded || S.menuOpen || !!S.calm; }
 
@@ -1802,7 +1805,7 @@ var S = {
   heaveT: 0, breathT: 0, stepT: 0, slipT: 0, wasPush: false,
   warn: false, warned: false,
   descentT: 0, epi: 0, endT: 0, descendPhase: "far", farX: WORLD.SUMMIT_X, wipe: 0, baseT: 0,
-  menuIndex: 0, menuOpen: false, calm: false,
+  menuIndex: 0, menuOpen: false, calm: false, downInWorld: false,
   galleryList: [], galleryIndex: 0, galleryStatus: null, gallerySaving: false, galleryDone: 0,
   loadingNote: null
 };
@@ -1893,6 +1896,7 @@ game.scene("title", {
   },
   update: function () {
     S.time = game.time;
+    noteTouchOrigin();                    /* a hold that starts here goes on into the climb */
     if (game.pressed("start")) { game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) }); return; }
     if (!S.loaded) return;
     if (game.pressed("a") || worldTap()) {
@@ -1945,6 +1949,7 @@ game.scene("climb", {
   update: function (dt) {
     S.time = game.time;
     if (S.lock > 0) S.lock -= dt;
+    noteTouchOrigin();
 
     var pushing = (game.btn("a") || game.btn("b") || worldDown()) && S.lock <= 0;
     if (!S.wasPush && pushing) {
