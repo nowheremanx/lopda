@@ -60,7 +60,13 @@ export function boot(file, opt = {}) {
     const e = { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
     (elListeners[type] || []).forEach((f) => f(e));
   };
-  return { ctx, frame: g.__frame, hashes, pointer };
+  /* pointerRaw(type, clientX, clientY): at page CSS pixels (the fake rect starts at 0, 0), for fill apps whose
+     stage is not the world's size */
+  const pointerRaw = (type, clientX, clientY) => {
+    const e = { pointerId: 1, clientX, clientY, preventDefault() {} };
+    (elListeners[type] || []).forEach((f) => f(e));
+  };
+  return { ctx, frame: g.__frame, hashes, pointer, pointerRaw };
 }
 
 export function mulberry32(seed) {

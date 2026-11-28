@@ -435,6 +435,13 @@ var LoGame = (function () {
       pointer.stageY = (e.clientY - r.top) * H / r.height;
       pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
     }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
+    }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
     ["pointerup", "pointercancel"].forEach(function (t) { canvas.addEventListener(t, function (e) { toScreen(e); if (pointer.down) { pointer.down = false; pQueuedUp = true; } }); });
@@ -505,8 +512,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -611,7 +618,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -3010,14 +3017,21 @@ var LD = window.LD = {};
       g.pixel(s.x, s.y, s.z > 0.75 ? 3 : s.z > 0.5 ? 2 : 1);
     }
   }
+  /* a tap that starts in the world, not in the bands lo-game's fill layout puts around it; the sticky edges would
+     otherwise turn a side-band tap into a tap on x 0 / y 0 (lo-game 1.5.0 game.stage) */
+  function worldTap() {
+    var p = game.pointer, st = game.stage;
+    return p.pressed && p.stageX >= st.x && p.stageX < st.x + game.width &&
+      p.stageY >= st.y && p.stageY < st.y + game.height;
+  }
   /* a tap on a menu row is that row chosen and A pressed (sdk/UI.md section 5); -1 when the tap misses every row */
   function tapRow(y0, step, h, n, x0, x1) {
     var pt = game.pointer;
-    if (!pt.pressed || pt.x < x0 || pt.x >= x1) return -1;
+    if (!worldTap() || pt.x < x0 || pt.x >= x1) return -1;
     var i = Math.floor((pt.y - y0) / step);
     return i >= 0 && i < n && pt.y - y0 - i * step < h ? i : -1;
   }
-  function tapped() { return game.pointer.pressed; }
+  function tapped() { return worldTap(); }
   function hint(str, y) { g.text(str, 80, y, { color: 3, align: "center" }); }
   function clock(sec) { sec = Math.max(0, Math.floor(sec)); var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
   function dname(d) { return T(d.name); }
@@ -3140,7 +3154,7 @@ var LD = window.LD = {};
     update: function (dt) {
       this.t += dt;
       if (game.pressed("b")) { sfx("tap"); game.go("decks"); return; }
-      if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
+      if (game.pressed("a") || game.pressed("start") || tapped()) {
         var D = LD.DECKS[deckIdx], full = T(D.brief).length;
         if (this.t * 30 < full) { this.t = 99; return; }
         sfx("ok"); game.go("play", null, { to: 0 });
@@ -3249,7 +3263,7 @@ var LD = window.LD = {};
       /* after a dialog or the pause menu, A fires only once it has been let go */
       if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
       var pt = game.pointer, touchFire = false;
-      if (pt.pressed && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
+      if (worldTap() && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
       if (touch) {
         if (pt.down) {
           touch.t += dt;

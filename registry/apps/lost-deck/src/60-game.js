@@ -196,14 +196,21 @@
       g.pixel(s.x, s.y, s.z > 0.75 ? 3 : s.z > 0.5 ? 2 : 1);
     }
   }
+  /* a tap that starts in the world, not in the bands lo-game's fill layout puts around it; the sticky edges would
+     otherwise turn a side-band tap into a tap on x 0 / y 0 (lo-game 1.5.0 game.stage) */
+  function worldTap() {
+    var p = game.pointer, st = game.stage;
+    return p.pressed && p.stageX >= st.x && p.stageX < st.x + game.width &&
+      p.stageY >= st.y && p.stageY < st.y + game.height;
+  }
   /* a tap on a menu row is that row chosen and A pressed (sdk/UI.md section 5); -1 when the tap misses every row */
   function tapRow(y0, step, h, n, x0, x1) {
     var pt = game.pointer;
-    if (!pt.pressed || pt.x < x0 || pt.x >= x1) return -1;
+    if (!worldTap() || pt.x < x0 || pt.x >= x1) return -1;
     var i = Math.floor((pt.y - y0) / step);
     return i >= 0 && i < n && pt.y - y0 - i * step < h ? i : -1;
   }
-  function tapped() { return game.pointer.pressed; }
+  function tapped() { return worldTap(); }
   function hint(str, y) { g.text(str, 80, y, { color: 3, align: "center" }); }
   function clock(sec) { sec = Math.max(0, Math.floor(sec)); var m = Math.floor(sec / 60), s = sec % 60; return m + ":" + (s < 10 ? "0" : "") + s; }
   function dname(d) { return T(d.name); }
@@ -326,7 +333,7 @@
     update: function (dt) {
       this.t += dt;
       if (game.pressed("b")) { sfx("tap"); game.go("decks"); return; }
-      if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) {
+      if (game.pressed("a") || game.pressed("start") || tapped()) {
         var D = LD.DECKS[deckIdx], full = T(D.brief).length;
         if (this.t * 30 < full) { this.t = 99; return; }
         sfx("ok"); game.go("play", null, { to: 0 });
@@ -435,7 +442,7 @@
       /* after a dialog or the pause menu, A fires only once it has been let go */
       if (aLock && !game.btn("a") && !game.pointer.down) aLock = false;
       var pt = game.pointer, touchFire = false;
-      if (pt.pressed && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
+      if (worldTap() && pt.y < VH) touch = { x0: pt.x, last: pt.x, t: 0, moved: false };
       if (touch) {
         if (pt.down) {
           touch.t += dt;

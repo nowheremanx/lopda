@@ -80,3 +80,36 @@ test("lost-deck app: the fitted stage covers all five phone sizes", async () => 
     assert.ok(st.w * st.k >= sw - 1e-9 && st.h * st.k >= sh - 1e-9, `${sw}x${sh}: paper at an edge`);
   }
 });
+
+/* a pointer event at canvas (stage) pixels of a fill app: the stage rect is at 0, 0 and k CSS px a canvas pixel */
+function tapStage(app, game, stageX, stageY) {
+  const k = game.stage.k, x = stageX * k, y = stageY * k;
+  app.pointerRaw("pointerdown", x, y);
+  app.frame();
+  app.pointerRaw("pointerup", x, y);
+  for (let i = 0; i < 3; i++) app.frame();
+}
+
+test("lost-deck app: a tap or drag started in the bands is not a world tap", async () => {
+  /* the short stage's left band is at canvas x < 6; a tap there used to clamp to x 0 and choose a title row */
+  let app = boot(APP, { pad: pad(), seed: 3, stage: { w: 348, h: 323 } });
+  await settle(); for (let i = 0; i < 5; i++) app.frame();
+  let L = app.ctx.get("LD"), game = L.game, title = game.top();
+  tapStage(app, game, 3, 94);                       /* left band, level with the title's first row (y 91..105) */
+  for (let i = 0; i < 40; i++) { app.frame(); await settle(); }
+  assert.equal(game.top(), title, "a left-band tap chose a title row");
+  tapStage(app, game, game.stage.x + 80, 94);       /* the same row, inside the world */
+  for (let i = 0; i < 40; i++) { app.frame(); await settle(); }
+  assert.notEqual(game.top(), title, "a tap on the title row itself still works");
+
+  /* play: a tap in the top band used to clamp to y 0, start a touch and fire on release */
+  app = boot(APP, { pad: pad(), seed: 3, stage: { w: 331, h: 359 } });
+  await settle(); L = app.ctx.get("LD"); L.dbgStart(0);
+  for (let i = 0; i < 10; i++) app.frame();
+  game = L.game;
+  const P = L.dbg().P, ammo = P.ammo;
+  tapStage(app, game, 80, 2);                        /* the band above the world (world starts at y 7) */
+  assert.equal(P.ammo, ammo, "a top-band tap fired");
+  tapStage(app, game, game.stage.x + 80, game.stage.y + 64);   /* the view, dead centre */
+  assert.equal(P.ammo, ammo - 1, "a tap in the view still fires");
+});

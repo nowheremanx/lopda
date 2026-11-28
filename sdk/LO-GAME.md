@@ -127,6 +127,9 @@ in world pixels. With fill on:
 - `game.stage` is `{w, h, k, x, y}` (the canvas and the world's place in it); `game.scale` is `k`.
 - `game.pointer.x` / `y` stay in **world** pixels (clamped to the world, so a tap on a band lands on the near
   edge); `game.pointer.stageX` / `stageY` give the same tap in canvas pixels.
+- A press that starts in a band is **not** a world tap: `game.ok()`, the built-in dialogue box and `game.choose`
+  ignore it. `game.pointer.pressed` is still true, so a game reading it directly must check `stageX`/`stageY`
+  against `game.stage` (`x` to `x + width`, `y` to `y + height`).
 
 With fill off (the default) nothing changes: the world is scaled to fit with even pixels and paper around it.
 `LoGame.fillLayout(stageW, stageH, worldW, worldH)` returns `{w, h, k, x, y}` for the fill case and
@@ -232,7 +235,7 @@ game.pressed("a")       // went down this frame (never missed, even a very quick
 game.released("a")
 game.repeat("down")     // on press, then every 0.09 s after 0.32 s held: for menus
 game.dir()              // {x, y}: -1, 0 or 1 from the D-pad, with repeat
-game.ok()               // A, START or a tap on the screen
+game.ok()               // A, START or a tap inside the world (a band tap with fill does not count)
 game.pointer            // {x, y, down, pressed, released} in screen pixels
 ```
 
