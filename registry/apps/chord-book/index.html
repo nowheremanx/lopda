@@ -376,22 +376,29 @@ var Chords = (function () {
     }
     return { n: n, barre: null };
   }
-  /* The barre a shape's own fingers show (1.4.1): the lowest fret where finger 1 holds two or more sounding strings,
-     spanning the first and the last of them. A string under that span that is open, muted or lower than the barre means
-     the finger cannot be lying across it, so there is no barre. Hand-written shapes know their fingering; fingerCount
-     guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
+  /* The barre a shape's own fingers show (1.4.1): the lowest fret where one finger 1-4 holds two or more sounding
+     strings, spanning the first and the last of them. A string under that span that is open, muted or lower than the
+     barre means the finger cannot be lying across it, so there is no barre at that fret. Finger 1 is the usual index
+     barre; C9 x32333 is barred by the ring finger across G-B-E (1.4.4). Hand-written shapes know their fingering;
+     fingerCount guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
   function barreFromFingers(frets, fingers) {
-    var held = [], best = Infinity, i, j, a = -1, z = -1;
-    for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === 1) held.push(i);
-    for (i = 0; i < held.length; i++) {
-      var f = frets[held[i]], n = 0;
-      for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
-      if (n >= 2 && f < best) best = f;
+    var best = null, k, i, j, a, z, ok;
+    for (k = 1; k <= 4; k++) {
+      var held = [];
+      for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === k) held.push(i);
+      if (held.length < 2) continue;
+      for (i = 0; i < held.length; i++) {
+        var f = frets[held[i]], n = 0;
+        for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
+        if (n < 2 || (best && f >= best.fret)) continue;
+        a = -1; z = -1;
+        for (j = 0; j < 6; j++) if (frets[j] === f && fingers[j] === k) { if (a < 0) a = j; z = j; }
+        ok = true;
+        for (j = a; j <= z; j++) if (frets[j] < f) ok = false;
+        if (ok) best = { fret: f, from: a, to: z, finger: k };
+      }
     }
-    if (best === Infinity) return null;
-    for (i = 0; i < 6; i++) if (frets[i] === best && fingers[i] === 1) { if (a < 0) a = i; z = i; }
-    for (i = a; i <= z; i++) if (frets[i] < best) return null;
-    return { fret: best, from: a, to: z };
+    return best;
   }
   /* fingers for a computed voicing: index on the barre, then the other notes by fret and string */
   function assignFingers(frets) {
@@ -1267,7 +1274,8 @@ var Scales = (function () {
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
-    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k} plus this chord's notes. "
+    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k} plus this chord's notes. ",
+    noVoicing: "No voicing for this chord"
   } : {
     strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", prevScale: "上一种音阶", nextScale: "下一种音阶",
     mute: "静音", unmute: "开声", whyTitle: "音阶说明", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
@@ -1278,7 +1286,8 @@ var Scales = (function () {
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
     role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
-    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}和这个和弦的音选的。"
+    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}和这个和弦的音选的。",
+    noVoicing: "这个和弦没有按法"
   };
   function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.split("{" + v + "}").join(vars[v]); return s; }
   function $(id) { return document.getElementById(id); }
@@ -1289,6 +1298,7 @@ var Scales = (function () {
   var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
   var lastVol = 2;          /* the level the mute button comes back to; set.vol may be 0 (1.4.3) */
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
+  var spelledName = null;   /* the chord opened from a progression, as that key writes it (1.4.4) */
   var saveTimer = 0, VIEWS = ["box", "neck", "map", "scale"];
   function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
   function adopt(s) {
@@ -1297,6 +1307,8 @@ var Scales = (function () {
     if (typeof c.root === "number" && c.root >= 0 && c.root < 12 && Chords.qual(c.q) &&
       (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
       set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
+    /* a save from before 1.4.4 may hold a combination with no voicing (Ab9/B and seven others): show C instead */
+    if (!Chords.voicings(chord()).length) set.cur = { root: 0, q: "", bass: null, i: 0 };
     if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
     if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
@@ -1329,9 +1341,14 @@ var Scales = (function () {
     set.recent = [n].concat(set.recent.filter(function (r) { return r !== n; })).slice(0, 8);
   }
   function go(c, i) {
+    /* eight root / quality / bass combinations have no voicing in this book (Ab9/B, the m9 family over their own
+       thirds and fifths): refuse rather than blank the main screen (1.4.4) */
+    if (!Chords.voicings(c).length) { sfx("err"); return false; }
     if (Chords.name(c) !== Chords.name(chord())) temp = null;
+    spelledName = null;
     set.cur = { root: c.root, q: c.q, bass: c.bass === undefined ? null : c.bass, i: i || 0 };
     remember(); store(); show();
+    return true;
   }
 
   /* ---------------- the improv view's scale (version 1.4) ---------------- */
@@ -1357,12 +1374,17 @@ var Scales = (function () {
   var cv = $("pic"), wrap = $("pwrap");
   function current() {
     var l = list();
+    /* belt and braces: a combination with no voicing never stays in view; C does (1.4.4) */
+    if (!l.length && !(set.cur.root === 0 && set.cur.q === "" && set.cur.bass === null)) {
+      set.cur = { root: 0, q: "", bass: null, i: 0 };
+      l = list();
+    }
     if (set.cur.i >= l.length) set.cur.i = l.length - 1;
     if (set.cur.i < 0) set.cur.i = 0;
     return { list: l, v: l[set.cur.i] };
   }
   function show() {
-    var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v, sv = set.view === "scale";
+    var cur = current(), c = chord(), Q = Chords.qual(c.q), v = cur.v, sv = set.view === "scale";
     /* in the improv view the footer steps through scales, and a chord with a single scale leaves both off (1.4.3) */
     var one = sv && modes().sc.list.length < 2;
     $("prev").textContent = t(sv ? "prevScale" : "prev");
@@ -1372,8 +1394,10 @@ var Scales = (function () {
     $("prev").disabled = one;
     $("next").disabled = one;
     showSound();
-    $("cname").textContent = Chords.name(c);
+    $("cname").textContent = spelledName || Chords.name(c);
+    var fixed = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
+    if (spelledName && spelledName !== fixed) $("qname").textContent += " · " + fixed;
     $("view").textContent = t(set.view === "map" ? "degrees" : set.view === "scale" ? "improv" : set.view);
     if (set.view === "scale") { showScale(); paint(); return; }
     /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
@@ -1400,7 +1424,9 @@ var Scales = (function () {
   /* the improv view's words: the scale and how far through the list, its notes by kind, why it works and the legend */
   function showScale() {
     var m = modes(), o = m.sc.list[m.i], c = chord(), line = $("line"), row = $("tones");
-    $("qname").textContent = Chords.NAMES[c.root] + " " + (EN ? o.en : o.zh) + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
+    /* the scale is named after the root as the key writes it: G#dim7 from a progression shows G#, not Ab (1.4.4) */
+    var spelledRoot = spelledName ? (/^[A-G][#b]?/.exec(spelledName) || [""])[0] : "";
+    $("qname").textContent = (spelledRoot || Chords.NAMES[c.root]) + " " + (EN ? o.en : o.zh) + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
     line.classList.remove("tight");
     line.classList.add("deg");
     line.innerHTML = "";
@@ -1477,8 +1503,8 @@ var Scales = (function () {
   }
   function stepQual(d) {
     var qi = Chords.QUALS.indexOf(Chords.qual(set.cur.q)), n = Chords.QUALS.length;
-    go({ root: set.cur.root, q: Chords.QUALS[(qi + d + n) % n].id, bass: set.cur.bass }, 0);
-    sfx("tick");
+    /* a quality stepped into may have no voicing with this root and bass: stay on the chord you had (1.4.4) */
+    if (go({ root: set.cur.root, q: Chords.QUALS[(qi + d + n) % n].id, bass: set.cur.bass }, 0)) sfx("tick");
   }
   function notesOf(v) { return Chords.midiOf(v.frets); }
   /* one string on its own, at the pitch it sounds in this voicing; strings tapped one after another ring together (at
@@ -1584,7 +1610,7 @@ var Scales = (function () {
     $("ptitle").textContent = Chords.name(pick);
     var roots = $("roots"); roots.innerHTML = "";
     Chords.NAMES.forEach(function (n, pc) {
-      roots.appendChild(choice(n, pick.root === pc, function () { pick.root = pc; if (pick.bass === pc) pick.bass = null; sfx("tick"); buildPicker(); }));
+      roots.appendChild(choice(n, pick.root === pc, function () { pick.root = pc; if (pick.bass === pc) pick.bass = null; $("msg").textContent = ""; sfx("tick"); buildPicker(); }));
     });
     var quals = $("quals"); quals.innerHTML = "";
     Chords.GROUPS.forEach(function (g, gi) {
@@ -1592,7 +1618,7 @@ var Scales = (function () {
       var grid = el("div", "grid3");
       Chords.QUALS.forEach(function (Q) {
         if (Q.group !== gi) return;
-        var b = choice("", pick.q === Q.id, function () { pick.q = Q.id; sfx("tick"); buildPicker(); }, "qual");
+        var b = choice("", pick.q === Q.id, function () { pick.q = Q.id; $("msg").textContent = ""; sfx("tick"); buildPicker(); }, "qual");
         b.appendChild(el("b", "", Q.show || Q.id || "maj"));
         b.appendChild(el("span", "", EN ? Q.en : Q.zh));
         grid.appendChild(b);
@@ -1600,14 +1626,18 @@ var Scales = (function () {
       quals.appendChild(grid);
     });
     var bass = $("basses"); bass.innerHTML = "";
-    bass.appendChild(choice(t("none"), pick.bass === null, function () { pick.bass = null; sfx("tick"); buildPicker(); }));
+    bass.appendChild(choice(t("none"), pick.bass === null, function () { pick.bass = null; $("msg").textContent = ""; sfx("tick"); buildPicker(); }));
     Chords.NAMES.forEach(function (n, pc) {
       if (pc === pick.root) return;
-      bass.appendChild(choice(n, pick.bass === pc, function () { pick.bass = pc; sfx("tick"); buildPicker(); }));
+      bass.appendChild(choice(n, pick.bass === pc, function () { pick.bass = pc; $("msg").textContent = ""; sfx("tick"); buildPicker(); }));
     });
     var rec = $("recent"); rec.innerHTML = "";
     set.recent.forEach(function (n) {
-      rec.appendChild(choice(n, false, function () { var c = Chords.parse(n); if (!c) return; sfx("ok"); go(c, 0); closePicker(); }));
+      rec.appendChild(choice(n, false, function () {
+        var c = Chords.parse(n); if (!c) return;
+        if (!go(c, 0)) { $("msg").textContent = t("noVoicing"); return; }
+        sfx("ok"); closePicker();
+      }));
     });
     $("recentH").style.display = set.recent.length ? "" : "none";
     var ord = $("sorts"); ord.innerHTML = "";
@@ -1623,22 +1653,28 @@ var Scales = (function () {
       }));
     });
   }
-  function applyPick() { sfx("ok"); go(pick, 0); closePicker(); }
+  function applyPick() {
+    if (!go(pick, 0)) { $("msg").textContent = t("noVoicing"); return; }
+    sfx("ok"); closePicker();
+  }
   function search() {
     var q = $("q").value.trim(), c = Chords.parse(q);
     if (!c) { $("msg").textContent = q ? t("unknown", { q: q }) : t("unknownEmpty"); sfx("err"); return; }
     $("q").blur();
     pick = c; applyPick();
+    /* still open: the combination has no voicing, and the picker shows what it refused (1.4.4) */
+    if (pick) buildPicker();
   }
   $("pback").addEventListener("click", function () { sfx("tap"); closePicker(); });
   $("pok").addEventListener("click", applyPick);
   $("qgo").addEventListener("click", search);
   $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(); } });
-  /* the pending pick is applied first, so the finder starts from that chord's first voicing (1.4.3) */
+  /* the pending pick is applied first, so the finder starts from that chord's first voicing (1.4.3); a chord with
+     no voicing keeps the picker open and says so (1.4.4) */
   $("tofind").addEventListener("click", function () {
     var c = pick;
+    if (!go(c, 0)) { $("msg").textContent = t("noVoicing"); return; }
     picker.classList.remove("open"); pick = null;
-    go(c, 0);
     openFinder(true);
   });
 
@@ -1711,12 +1747,14 @@ var Scales = (function () {
     }
     at(0, 0);
   }
-  /* a chord in a progression opens it on the main screen, on the voicing it was played with */
+  /* a chord in a progression opens it on the main screen, on the voicing it was played with; its name is written the
+     key's way, with the book's own name beside it (1.4.4) */
   function jumpTo(r, i) {
-    var v = voicingFor(r, i), c = r.chords[i];
+    var v = voicingFor(r, i), c = r.chords[i], spelled = r.names[i];
     stopSeq();
     progs.classList.remove("open"); gl = null;
-    go(c, 0);
+    if (!go(c, 0)) { show(); return; }   /* unreachable: every progression chord has a voicing */
+    spelledName = spelled && spelled !== Chords.name(c) ? spelled : null;
     md = { name: Chords.name(c), i: -1, ctx: { key: r.key, minor: r.p.key === "min", label: t(r.p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName }) }, sc: null };
     var l = list(), id = v ? v.frets.join(",") : "";
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
@@ -1803,10 +1841,13 @@ var Scales = (function () {
     l = set.sort === "pos" ? Chords.byPosition(l) : l;
     var i = l.map(function (v) { return v.frets.join(","); }).indexOf(frets.join(","));
     temp = null;
+    spelledName = null;
     if (i < 0) {
       var fingers = Chords.assignFingers(frets);
+      /* a guessed shape is fingered by fingerCount, like a generated voicing: assignFingers clamps at finger 4, and
+         two strings left on that guess are not a barre (1.4.4) */
       temp = { name: Chords.name(c), v: { frets: frets, fingers: fingers, tier: 0, rank: 0,
-        pos: Chords.position(frets), barre: Chords.barreFromFingers(frets, fingers) } };
+        pos: Chords.position(frets), barre: Chords.fingerCount(frets).barre } };
       i = 0;
     }
     sfx("ok");
