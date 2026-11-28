@@ -61,8 +61,8 @@ function pad() {
 }
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
 
-test("lost-deck app: is on 1.1.0 and asks lo-game for a fill screen", () => {
-  assert.equal(readJSON("registry/apps/lost-deck/manifest.json").version, "1.1.0");
+test("lost-deck app: is on 1.1.1 and asks lo-game for a fill screen", () => {
+  assert.equal(readJSON("registry/apps/lost-deck/manifest.json").version, "1.1.1");
   const src = readFileSync(join(ROOT, "registry/apps/lost-deck/src/60-game.js"), "utf8");
   assert.match(src, /LoGame\.create\(\{[^}]*fill: true[^}]*bands: paintBands/);
 });
@@ -79,6 +79,66 @@ test("lost-deck app: the fitted stage covers all five phone sizes", async () => 
     for (const key of ["w", "h", "k", "x", "y"]) assert.equal(st[key], want[key], `${sw}x${sh}: the app fitted another ${key}`);
     assert.ok(st.w * st.k >= sw - 1e-9 && st.h * st.k >= sh - 1e-9, `${sw}x${sh}: paper at an edge`);
   }
+});
+
+/* the four tones as RGB, so a captured stage can be read back by tone index */
+const TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"].map((h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)));
+function toneIndex(img, x, y, w) {
+  const o = (y * w + x) * 4;
+  for (let i = 0; i < TONES.length; i++) {
+    if (img.data[o] === TONES[i][0] && img.data[o + 1] === TONES[i][1] && img.data[o + 2] === TONES[i][2]) return i;
+  }
+  return -1;
+}
+async function titleShot(sw, sh) {
+  let shot = null;
+  const app = boot(APP, { pad: pad(), seed: 3, stage: { w: sw, h: sh }, onPut: (img) => { shot = { img, w: img.width, h: img.height }; } });
+  await settle();
+  for (let i = 0; i < 6; i++) app.frame();
+  return { shot, game: app.ctx.get("LD").game };
+}
+
+test("lost-deck app: the top band is the ship's ceiling, not a starfield", async () => {
+  const { shot, game } = await titleShot(386, 738);
+  const w = shot.w, sky = game.stage.y;
+  assert.ok(sky > 40, `a tall stage has a deep top band (${sky})`);
+  /* the lit lip just above the world mirrors the floor's lit edge just below it */
+  for (let x = 0; x < w; x++) assert.equal(toneIndex(shot.img, x, sky - 1, w), 2, `the lip at x ${x} is not lit`);
+  /* a rib at the floor's column runs from the top of the band (col 50 is clear of the lights) */
+  for (let y = 0; y < sky - 2; y++) assert.equal(toneIndex(shot.img, 50, y, w), 1, `rib at y ${y} is missing`);
+  /* plating seams are dotted like the floor's, not a starfield */
+  let seam = 0;
+  for (let x = 0; x < w; x++) if (toneIndex(shot.img, x, sky - 5, w) === 1) seam++;
+  assert.ok(seam >= 8 && seam <= w * 0.5, `seam row ${sky - 5} has ${seam} dark pixels`);
+  /* a recessed strip light: a long run of bright pixels, which stars never make */
+  const brightRun = (y) => {
+    let run = 0, best = 0;
+    for (let x = 0; x < w; x++) { run = toneIndex(shot.img, x, y, w) >= 2 ? run + 1 : 0; best = Math.max(best, run); }
+    return best;
+  };
+  let lights = 0;
+  for (let y = 0; y < sky - 1; y++) if (brightRun(y) >= 8) lights++;
+  assert.ok(lights >= 1, "no recessed light in the top band");
+  /* and no stars: every bright pixel belongs to a lit fixture row */
+  for (let y = 0; y < sky - 1; y++) for (let x = 0; x < w; x++) {
+    if (toneIndex(shot.img, x, y, w) === 3) assert.ok(brightRun(y) >= 6, `a lone bright pixel at ${x},${y} is a star`);
+  }
+  /* the band is mostly plate, not empty space */
+  let ink = 0;
+  for (let y = 0; y < sky - 1; y++) for (let x = 0; x < w; x++) if (toneIndex(shot.img, x, y, w) === 0) ink++;
+  assert.ok(ink > w * (sky - 1) * 0.7, `the top band is only ${Math.round(ink / (w * (sky - 1)) * 100)}% plate`);
+});
+
+test("lost-deck app: a shallow top band still shows deck lip, seams and a light", async () => {
+  const { shot, game } = await titleShot(331, 359);
+  const w = shot.w, sky = game.stage.y;
+  assert.ok(sky >= 5 && sky < 16, `the 331 x 359 stage has a shallow top band (${sky})`);
+  for (let x = 0; x < w; x++) assert.equal(toneIndex(shot.img, x, sky - 1, w), 2, `the lip at x ${x} is not lit`);
+  let light = 0;
+  for (let x = 0; x < w; x++) if (toneIndex(shot.img, x, 1, w) === 2) light++;
+  assert.ok(light >= 8, `the shallow band has no strip light (${light} lit pixels)`);
+  /* a rib away from the slim lights */
+  for (let y = 0; y < sky - 2; y++) assert.equal(toneIndex(shot.img, 86, y, w), 1, `rib at y ${y} is missing`);
 });
 
 /* a pointer event at canvas (stage) pixels of a fill app: the stage rect is at 0, 0 and k CSS px a canvas pixel */
