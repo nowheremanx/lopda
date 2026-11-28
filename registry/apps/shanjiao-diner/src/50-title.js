@@ -112,7 +112,7 @@ game.scene("title", {
 game.scene("help", {
   enter: function (args) { this.from = (args && args.from) || "title"; },
   update: function () {
-    if (game.pressed("a") || game.pressed("b") || game.pressed("start") || game.pointer.pressed) {
+    if (game.pressed("a") || game.pressed("b") || game.pressed("start") || tapWorld()) {
       game.sfx("tap");
       game.go(this.from);
     }

@@ -73,7 +73,9 @@ async function bootDiner(seed, save, opts = {}) {
     on(t, fn) { (listeners[t] ||= []).push(fn); },
     off() {}, isDown() { return false; }
   };
-  return { app: boot(DINER_FILE, { pad, seed }), listeners, store, writes };
+  /* a stage exactly the world's size: fill adds no bands, and a tap at world
+     pixel (x, y) is (x, y) on the stage, as these tests read it */
+  return { app: boot(DINER_FILE, { pad, seed, stage: { w: 216, h: 240 } }), listeners, store, writes };
 }
 
 /* one chin press, then a few frames so the scene sees it */
@@ -533,11 +535,11 @@ test("the night ledger counts down to the feast and, on the seventh night, says 
 test("touch: a tap is the pad's A on every menu, and empty space does nothing", async () => {
   const { app, listeners } = await bootDiner(3);
   const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
-  /* pointer() takes game pixels (216 x 240) and scales them to the fake canvas */
+  /* pointer() in stage pixels; the stage is the world's 216 x 240, so k is 1 */
   const tap = async (x, y) => {
-    app.pointer("pointerdown", x, y, 216, 240);
+    app.pointer("pointerdown", x, y, 216, 240, { k: 1 });
     await tick(2);
-    app.pointer("pointerup", x, y, 216, 240);
+    app.pointer("pointerup", x, y, 216, 240, { k: 1 });
     await tick(3);
   };
   const ctx = (n) => app.ctx.get(n);
@@ -669,9 +671,9 @@ test("touch: the title's three items open the item that was tapped", async () =>
   const { app } = await bootDiner(21, { v: 1, phase: "morning" });
   const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
   const tap = async (x, y) => {
-    app.pointer("pointerdown", x, y, 216, 240);
+    app.pointer("pointerdown", x, y, 216, 240, { k: 1 });
     await tick(2);
-    app.pointer("pointerup", x, y, 216, 240);
+    app.pointer("pointerup", x, y, 216, 240, { k: 1 });
     await tick(3);
   };
   await tick(10);
@@ -689,9 +691,9 @@ test("touch: the night ledger and the ending advance on a tap", async () => {
   const { app, listeners } = await bootDiner(4);
   const tick = async (n = 1) => { for (let i = 0; i < n; i++) { app.frame(); await new Promise((r) => setImmediate(r)); } };
   const tap = async (x, y) => {
-    app.pointer("pointerdown", x, y, 216, 240);
+    app.pointer("pointerdown", x, y, 216, 240, { k: 1 });
     await tick(2);
-    app.pointer("pointerup", x, y, 216, 240);
+    app.pointer("pointerup", x, y, 216, 240, { k: 1 });
     await tick(3);
   };
   await tick(6);

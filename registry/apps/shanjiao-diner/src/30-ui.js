@@ -13,11 +13,17 @@
 /* Touch.  lo-game's `game.pointer` is in game pixels and `pressed` lasts one
  * step, so one tap is one action.  A screen keeps its cursor in the same
  * variable the pad moves: a tap sets it first (the highlight lands on the
- * tapped item) and then runs what A runs there.  `tapInside` is the only
- * place that reads the pointer, so a tap on empty space is always a no-op. */
+ * tapped item) and then runs what A runs there.  `tapWorld` is the only place
+ * that reads the stage, so a tap on the scenery outside the 216 x 240 world is
+ * always a no-op, as it is for game.ok() in fill mode (LO-GAME.md 2.1). */
+function tapWorld() {
+  var p = game.pointer, s = game.stage;
+  return !!p.pressed && p.stageX >= s.x && p.stageX < s.x + W &&
+    p.stageY >= s.y && p.stageY < s.y + H;
+}
 function tapInside(x, y, w, h) {
   var p = game.pointer;
-  return !!p.pressed && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
+  return tapWorld() && p.x >= x && p.x < x + w && p.y >= y && p.y < y + h;
 }
 
 /* a horizontal row of `count` cells: title menu, morning actions, battle grid */

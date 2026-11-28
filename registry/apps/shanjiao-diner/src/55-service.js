@@ -18,7 +18,7 @@ function seatPos(i) {
  * are split at y 120, where the lower row's order tag starts. */
 function tapSeat() {
   var p = game.pointer;
-  if (!p.pressed) return -1;
+  if (!tapWorld()) return -1;
   for (var i = 0; i < SERV.seats; i++) {
     var tp = tablePos(i), top = tp[1] < 130 ? 44 : 120;
     var bottom = tp[1] < 130 ? 120 : 194;
