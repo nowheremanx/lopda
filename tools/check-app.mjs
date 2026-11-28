@@ -4,12 +4,13 @@
 import { readFileSync, existsSync, statSync, readdirSync } from "node:fs";
 import { join, basename, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { sha, fontBlock, fillSrc, released, FONT_BLOCK, LIB_BLOCK, LIB3D_BLOCK, SRC_BLOCK } from "./lo-game-lib.mjs";
+import { sha, fontBlock, fillSrc, released, FONT_BLOCK, LIB_BLOCK, LIB3D_BLOCK, LIBT_BLOCK, SRC_BLOCK } from "./lo-game-lib.mjs";
 
 const ROOT = join(import.meta.dirname, "..");
 /* known releases of the framework libraries: sdk/<name>.versions.json plus the current sdk copy */
 const LO_GAME = released("lo-game");
 const LO_3D = released("lo-3d");
+const LO_TITLE = released("lo-title");
 
 const SPECS = ["lopda/0", "lopda/1"];
 const LANGS = ["zh", "en"];
@@ -159,19 +160,21 @@ export function checkApp(dir) {
   const block = html.match(LIB_BLOCK);
   const hit3d = block3d && verifyBlock("lo-3d", block3d, LO_3D, dir, errors);
   const hit = block && verifyBlock("lo-game", block, LO_GAME, dir, errors);
+  const blockT = html.match(LIBT_BLOCK);
+  const hitT = blockT && verifyBlock("lo-title", blockT, LO_TITLE, dir, errors);
   /* the font block must be exactly what the tool builds from this app's text: data, no code */
   const fb = html.match(FONT_BLOCK);
-  if (hit && fb) {
+  if ((hit || hitT) && fb) {
     if (fb[0].replace(/^\n/, "") !== fontBlock(html)) errors.push("the lo-font block is out of date or was edited: run node tools/bundle-app.mjs " + dir);
-    else info.push("lo-font verified (" + (fb[0].match(/"glyphs":\{/) ? Object.keys(JSON.parse(fb[0].match(/LoGame\.font\((.*)\);/)[1]).glyphs).length : 0) + " glyphs)");
+    else info.push("lo-font verified (" + (fb[0].match(/"glyphs":\{/) ? Object.keys(JSON.parse(fb[0].match(/(?:LoGame\.font\(|LO_FONT = |LoTitle\.font\()(\{.*\})\)?;/)[1]).glyphs).length : 0) + " glyphs)");
   }
   if (hit3d) info.push("lo-3d " + hit3d[0].replace(" (sdk)", "") + " verified");
   if (hit) info.push("lo-game " + hit[0].replace(" (sdk)", "") + " verified");
+  if (hitT) info.push("lo-title " + hitT[0].replace(" (sdk)", "") + " verified");
   if (hit3d) html = html.replace(block3d[0], "<script></script>");
-  if (hit) {
-    if (fb) html = html.replace(fb[0], "");
-    html = html.replace(block[0], "<script></script>");
-  }
+  if ((hit || hitT) && fb) html = html.replace(fb[0], "");
+  if (hit) html = html.replace(block[0], "<script></script>");
+  if (hitT) html = html.replace(blockT[0], "<script></script>");
   /* a data-src opener is not an external script */
   html = html.replace(new RegExp(SRC_BLOCK.source, "g"), (m, p, body) => "<script>\n" + body + "</script>");
   const code = stripComments(html);

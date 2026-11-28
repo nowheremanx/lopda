@@ -31,14 +31,21 @@ GM.titleArt = (function () {
       });
     });
   }
-  function draw(lang) {
+  /* the name and the line under it, as words, for a title screen that paints them itself (sdk/lo-title.js) */
+  function words(lang) {
+    var en = lang === "en";
+    return { text: en ? "GOLD DIG" : "矿工老张", sub: en ? "HOOK THE GOLD" : "钩金子" };
+  }
+  /* bare: the picture without the name (the title screen paints it over the sky); the store's cover keeps it */
+  function draw(lang, bare) {
     var px = new Uint8Array(W * H), b = atob(PIC);
     for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    if (bare) return px;
     /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
-    var en = lang === "en";
-    text(px, en ? "GOLD DIG" : "矿工老张", 4, 4, 2, en ? 1 : 3, 3, 0);
-    text(px, en ? "HOOK THE GOLD" : "钩金子", 5, 33, 1, en ? 1 : 3, 3, 0);
+    var en = lang === "en", w = words(lang);
+    text(px, w.text, 4, 4, 2, en ? 1 : 3, 3, 0);
+    text(px, w.sub, 5, 33, 1, en ? 1 : 3, 3, 0);
     return px;
   }
-  return { W: W, H: H, draw: draw };
+  return { W: W, H: H, draw: draw, words: words };
 })();

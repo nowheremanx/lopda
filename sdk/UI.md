@@ -149,7 +149,8 @@ Four tones and big pixels are the charm, not an excuse. The models to copy are L
 1. **A title screen for every game and story**: a pixel illustration of the app's world plus its name, not a line of
    text over a menu. The gallery (`gallery/`) uses it as the app's cover, so draw it once and draw it well. A tool
    (a calculator, a dictionary card) opens straight on the tool instead (rule 6); its name and a small drawing can sit
-   in the header.
+   in the header. Draw the title's menu with `sdk/lo-title.js` (`LO-TITLE.md`): the picture over a wheel menu, one
+   layout for every app, so the store and the gallery read as one family.
 2. **Dither only large gradients**: a sky, a shadow, a fade to dark, at most a third of the screen. Under text and
    buttons the tone is always flat. A whole screen of grain reads as noise on a phone, not as "retro".
 3. **Small text is ink on paper, or paper on ink**: never mid on anything, never dark on mid (section 4). If the scene

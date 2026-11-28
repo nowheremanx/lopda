@@ -25,6 +25,8 @@
   #intro[hidden] { display: none !important; }
   #ov { position: fixed; inset: 0; z-index: 20; background: #a3ad7e; color: #1f2a14; display: flex; flex-direction: column; padding: 10px 12px; box-sizing: border-box; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   #ov[hidden] { display: none !important; }
+  /* the title screen: one canvas over the whole overlay, drawn by sdk/lo-title.js */
+  #ov canvas.lotitle { flex: 1 1 auto; min-height: 0; margin: -10px -12px; width: calc(100% + 24px); display: block; }
   .sbody { flex: 1 0 auto; min-height: 0; display: flex; flex-direction: column; }
   .sbody.center { justify-content: center; align-items: center; text-align: center; gap: 9px; }
   .sbody.title { gap: 4px; }
@@ -95,6 +97,720 @@
   <footer id="foot"></footer>
 </div>
 <div id="ov" hidden></div>
+<script data-lo-title="0.1.0">
+/* lo-title.js 0.1.0: one title screen for every Lo-PDA app. MIT. See sdk/LO-TITLE.md.
+ *
+ * The fog title: the app's cover picture covers the whole canvas edge to edge, a dithered fog rises from the bottom
+ * over its lower third, and the menu stands in the fog as bare words, no boxes. The chosen word is big, painted like
+ * a sign: a paper-to-mid gradient, an ink outline and a drop shadow. The words before and after it are small and
+ * dim. A move rolls the big word out and the next one in. Under it an ink bar holds one live line (the chosen item's
+ * status, a locked item's reason, or the note) and the keys. The app's name may be painted into the sky the same way.
+ *
+ * Everything is drawn into one canvas with putImageData, in the four tones, with the lopix12 pixel font (the
+ * data-lo-font block that tools/bundle-app.mjs writes after this one calls LoTitle.font). Nothing here touches PAD:
+ * the app passes its button presses in with press(), so it keeps one PAD.on("press") of its own.
+ *
+ *   var menu = LoTitle.mount(canvas, {
+ *     art: { w: 156, h: 156, px: tones },   // tone indices, 0 paper, 1 mid, 2 dark, 3 ink (row by row)
+ *     title: { text: "矿工老张", sub: "钩金子", x: 17, y: 6, w: 86 },   // optional: the name, painted in the sky
+ *     items: [{ label: "继续", status: "第 3 关" }, { label: "随机关", locked: true, reason: "通关 30 关后开放" }],
+ *     index: 0,                              // the chosen item at first
+ *     note: "最高 第 5 关",                   // the bar's line while the chosen item has no status
+ *     hint: "选 · A 确定",                    // the keys, after the up / down arrows this file draws
+ *     maxScale: 5,                           // optional: the chosen word at most 5 LCD pixels a font pixel
+ *     onMove: function (i) {},               // item i is now the chosen one (play a sound here)
+ *     onPick: function (i) {},               // A, START or a tap on the chosen word
+ *     onLocked: function (i) {}              // the same on a locked item (play "err"); onPick is not called
+ *   });
+ *   PAD.on("press", function (b) { if (onTitle) menu.press(b); });   // up / down roll, a / start pick
+ *   menu.set({ items: [...], index: 1 })     // new items or text (a save was read)
+ *
+ * The canvas is sized by the app's CSS (give it the whole screen, or the area under a top bar); this file reads its
+ * size on mount and on every resize, and forgets it once the canvas leaves the page.
+ * Touch: a tap on the chosen word picks, a tap on a small word rolls to it, a finger dragged up or down turns the menu.
+ */
+var LoTitle = (function () {
+  "use strict";
+  var VERSION = "0.1.0";
+  var CODE = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];   /* paper, mid, dark, ink */
+  var ROLL_MS = 130, SHAKE_MS = 320, FLASH_MS = 160, REASON_MS = 1500;
+
+  /* ordered dither thresholds, 4 x 4 and 8 x 8 */
+  var B4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  var B8 = [
+    0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26,
+    12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22,
+    3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25,
+    15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21
+  ];
+  function dither(x, y, level) { return (B8[(y & 7) * 8 + (x & 7)] + 0.5) / 64 < level; }
+  /* value noise for the fog and the ground under the picture: a fixed table, so every start looks the same */
+  var NOISE = (function () {
+    var a = new Uint8Array(256 * 256), s = 1337;
+    for (var i = 0; i < a.length; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; a[i] = (s >> 16) & 255; }
+    return a;
+  })();
+  function vnoise(x, y) {
+    var x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+    var u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+    function g(i, j) { return NOISE[((j & 255) << 8) | (i & 255)] / 255; }
+    var a = g(x0, y0), b = g(x0 + 1, y0), c = g(x0, y0 + 1), d = g(x0 + 1, y0 + 1);
+    var t = a + (b - a) * u, w = c + (d - c) * u;
+    return t + (w - t) * v;
+  }
+
+  /* ---------- the font: lopix12 glyphs as 1-bit masks, scaled up ---------- */
+  var FONT = null, GC = {}, SG = {}, MC = {};
+  function font(data) { FONT = data; GC = {}; SG = {}; MC = {}; }
+  function cellH() { return FONT ? FONT.cell : 13; }
+  function isCJK(ch) { return ch.charCodeAt(0) >= 0x2e80; }
+  function hasCJK(s) { return Array.from(String(s)).some(isCJK); }
+
+  /* a glyph of lopix12: "advance:base64 bits", one bit per pixel, row by row */
+  function glyph(ch) {
+    if (GC[ch]) return GC[ch];
+    var h = cellH(), src = FONT && (FONT.glyphs[ch] || FONT.glyphs["?"]), adv, m, i, x, y;
+    if (!src) { adv = 6; m = new Uint8Array(h * adv); }
+    else {
+      var cut = src.indexOf(":"), raw = atob(src.slice(cut + 1));
+      adv = +src.slice(0, cut);
+      m = new Uint8Array(h * adv);
+      for (i = 0; i < h * adv; i++) m[i] = (raw.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1;
+      if (ch === "·" && adv > 7) {
+        /* the middle dot is a full-width CJK cell in lopix12; a latin cell sits better between two words */
+        var nw = 7, nm = new Uint8Array(h * nw), off = Math.round((adv - nw) / 2);
+        for (y = 0; y < h; y++) for (x = 0; x < nw; x++) nm[y * nw + x] = m[y * adv + x + off];
+        adv = nw; m = nm;
+      }
+    }
+    return (GC[ch] = { w: adv, h: h, m: m });
+  }
+  /* Scale2x: rounds the diagonals and corners of a 1-bit glyph */
+  function scale2x(g) {
+    var w = g.w, h = g.h, ow = w * 2, m = g.m, o = new Uint8Array(ow * h * 2);
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+      var P = m[y * w + x];
+      var A = y > 0 ? m[(y - 1) * w + x] : 0, B = x < w - 1 ? m[y * w + x + 1] : 0;
+      var C = x > 0 ? m[y * w + x - 1] : 0, D = y < h - 1 ? m[(y + 1) * w + x] : 0;
+      var e0 = P, e1 = P, e2 = P, e3 = P;
+      if (C === A && C !== D && A !== B) e0 = A;
+      if (A === B && A !== C && B !== D) e1 = B;
+      if (D === C && D !== B && C !== A) e2 = C;
+      if (B === D && B !== A && D !== C) e3 = D;
+      o[(y * 2) * ow + x * 2] = e0; o[(y * 2) * ow + x * 2 + 1] = e1;
+      o[(y * 2 + 1) * ow + x * 2] = e2; o[(y * 2 + 1) * ow + x * 2 + 1] = e3;
+    }
+    return { w: ow, h: h * 2, m: o };
+  }
+  function scalePlain(g, n) {
+    var w = g.w * n, h = g.h * n, m = new Uint8Array(w * h);
+    for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) m[y * w + x] = g.m[Math.floor(y / n) * g.w + Math.floor(x / n)];
+    return { w: w, h: h, m: m };
+  }
+  /* CJK strokes must stay straight, so they are only ever copied; Latin keeps round corners through Scale2x
+     (once for an even factor, twice when four divides it) and a plain copy for what is left */
+  function glyphAt(ch, scale) {
+    var key = ch + "|" + scale;
+    if (SG[key]) return SG[key];
+    var g = glyph(ch);
+    if (scale > 1) {
+      if (isCJK(ch)) g = scalePlain(g, scale);
+      else {
+        var rest = scale;
+        if (rest % 4 === 0) { g = scale2x(scale2x(g)); rest /= 4; }
+        else if (rest % 2 === 0) { g = scale2x(g); rest /= 2; }
+        if (rest > 1) g = scalePlain(g, rest);
+      }
+    }
+    return (SG[key] = g);
+  }
+  /* a line of text as one mask, with its ink box (top, bot, left, right), so a word is placed by what the eye sees */
+  function mask(str, scale, gap) {
+    var key = str + "|" + scale + "|" + gap;
+    if (MC[key]) return MC[key];
+    var chars = Array.from(String(str)), parts = [], total = 0, i, x, y;
+    for (i = 0; i < chars.length; i++) { var g = glyphAt(chars[i], scale); parts.push(g); total += g.w + gap; }
+    var w = Math.max(1, total - gap), h = cellH() * scale, m = new Uint8Array(w * h), cx = 0;
+    for (i = 0; i < parts.length; i++) {
+      var p = parts[i];
+      for (y = 0; y < h; y++) for (x = 0; x < p.w; x++) if (p.m[y * p.w + x] && cx + x < w) m[y * w + cx + x] = 1;
+      cx += p.w + gap;
+    }
+    var top = h, bot = -1, left = w, right = -1;
+    for (y = 0; y < h; y++) for (x = 0; x < w; x++) if (m[y * w + x]) {
+      if (y < top) top = y;
+      if (y > bot) bot = y;
+      if (x < left) left = x;
+      if (x > right) right = x;
+    }
+    if (bot < 0) { top = 0; bot = h - 1; left = 0; right = w - 1; }
+    return (MC[key] = { w: w, h: h, m: m, top: top, bot: bot, left: left, right: right });
+  }
+  /* the widest letter gap (down to none) that keeps the line within maxW device pixels */
+  function fitGap(str, scale, gap, maxW, unit) {
+    while (gap > 0 && mask(str, scale, gap).w * unit > maxW) gap--;
+    return gap;
+  }
+  /* the one-pixel outline: the mask grown by one pixel, less the mask */
+  function ringOf(mk) {
+    if (mk.ring) return mk.ring;
+    var w = mk.w + 2, h = mk.h + 2, big = new Uint8Array(w * h), ring = new Uint8Array(w * h), x, y;
+    for (y = 0; y < mk.h; y++) for (x = 0; x < mk.w; x++) if (mk.m[y * mk.w + x]) big[(y + 1) * w + x + 1] = 1;
+    for (y = 0; y < h; y++) for (x = 0; x < w; x++) {
+      if (big[y * w + x]) continue;
+      if ((x > 0 && big[y * w + x - 1]) || (x < w - 1 && big[y * w + x + 1]) ||
+          (y > 0 && big[(y - 1) * w + x]) || (y < h - 1 && big[(y + 1) * w + x])) ring[y * w + x] = 1;
+    }
+    return (mk.ring = { w: w, h: h, m: ring });
+  }
+
+  /* pixel pictures: a padlock (its inside ink) and the up / down arrows of the key line */
+  var LOCK = ["..###..", ".#...#.", ".#...#.", "#######", "#..#..#", "#.###.#", "#..#..#", "#.....#", "#######"];
+  var ARROWS = ["..#.......#..", ".###......#..", "#####.....#..", "..#.......#..", "..#.....#####", "..#......###.", "..#.......#.."];
+
+  function mount(canvas, opts) {
+    var o = {}, ready = false, cw = 1, ch = 1, dpr = 1, K = 1, N = 2, F = 1, NF = 2, cropX = 0;
+    var bg = null, frame = null, img = null, u32 = null, ctx2d = null;
+    var aw = 0, ah = 0, calm = 0, S = 4, INK = 0, BIG = 0;
+    var stripTop = 0, edge = 1, recY = 0, hintY = 0, inkPrev = 0, slotName = 0, inkNext = 0;
+    var fogTop = 0, fogSpan = 1, paintTop = 0;
+    var softTop = 0, softRamp = 1, clipBot = 0;   /* a word thins out above softTop and hides under the bar */
+    var st = { pos: 0, from: 0, to: 0, t0: null, dur: ROLL_MS, dir: 1, moving: false, seen: 0,
+      flashT0: 0, shakeT0: 0, reasonIdx: -1, reasonTimer: null, drag: null };
+    var raf = null, fullNext = true, hits = [];
+
+    function items() { return o.items || []; }
+    function clampIndex(i) { return Math.max(0, Math.min(items().length - 1, Math.round(i) || 0)); }
+    function current() { return st.moving ? st.to : clampIndex(st.pos); }
+
+    function set(p) {
+      for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) o[k] = p[k];
+      if (p.index !== undefined) { st.pos = st.from = st.to = st.seen = clampIndex(p.index); st.moving = false; }
+      else if (st.pos > items().length - 1) { st.pos = st.from = st.to = st.seen = clampIndex(st.pos); st.moving = false; }
+      if (ready) { layout(); fullNext = true; kick(); }
+    }
+
+    /* ---------- plotting, in device pixels ---------- */
+    function plotMask(buf, mk, x0, y0, unit, toneFn) {
+      var m = mk.m, w = mk.w, h = mk.h;
+      x0 = Math.round(x0); y0 = Math.round(y0);
+      for (var y = 0; y < h; y++) {
+        var py0 = y0 + y * unit;
+        if (py0 + unit <= 0 || py0 >= ch || (clipBot && py0 >= clipBot)) continue;
+        for (var x = 0; x < w; x++) {
+          if (!m[y * w + x]) continue;
+          var px0 = x0 + x * unit;
+          if (px0 + unit <= 0 || px0 >= cw) continue;
+          var t = toneFn(x, y);
+          if (t < 0) continue;
+          /* above softTop a word thins out through the dither, and is gone softRamp above it */
+          if (softTop > 0 && py0 < softTop && dither(x, y, (softTop + unit - py0) / softRamp)) continue;
+          var xa = Math.max(0, px0), xb = Math.min(cw, px0 + unit), ya = Math.max(0, py0), yb = Math.min(ch, py0 + unit);
+          if (clipBot && yb > clipBot) yb = clipBot;
+          for (var py = ya; py < yb; py++) buf.fill(t, py * cw + xa, py * cw + xb);
+        }
+      }
+    }
+    function flat(t) { return function () { return t; }; }
+    function fade(lx, ly, alpha) { return alpha >= 1 || dither(lx, ly, alpha); }
+    /* a small pixel picture: "#" in tone, "." in back (or left alone when back is undefined) */
+    function picture(buf, rows, x, y, unit, tone, back, alpha) {
+      for (var j = 0; j < rows.length; j++) for (var i = 0; i < rows[j].length; i++) {
+        var t = rows[j][i] === "#" ? tone : back;
+        if (t === undefined) continue;
+        for (var py = y + j * unit; py < y + (j + 1) * unit; py++) for (var px = x + i * unit; px < x + (i + 1) * unit; px++) {
+          if (px < 0 || py < 0 || px >= cw || py >= ch || (clipBot && py >= clipBot)) continue;
+          if (alpha < 1 && !dither(px, py, alpha)) continue;
+          buf[py * cw + px] = t;
+        }
+      }
+    }
+    /* the painted look: a drop shadow, an ink outline, then a fill that turns from the top tone to the lower one
+       at seamAt of the letters' height, through three rows of 4 x 4 dither (locked: a tone darker) */
+    function sign(buf, mk, x, y, unit, alpha, seamAt, locked) {
+      if (alpha > 0.02) {
+        plotMask(buf, mk, x + 2 * unit, y + 2 * unit, unit, function (lx, ly) { return fade(lx, ly, alpha) ? 3 : -1; });
+        plotMask(buf, ringOf(mk), x - unit, y - unit, unit, flat(3));
+      }
+      var g0 = mk.top + Math.round((mk.bot - mk.top + 1) * seamAt), g1 = g0 + 3;
+      var c1 = locked ? 1 : 0, c2 = locked ? 2 : 1;
+      plotMask(buf, mk, x, y, unit, function (lx, ly) {
+        if (!fade(lx, ly, alpha)) return -1;
+        if (ly < g0) return c1;
+        if (ly >= g1) return c2;
+        return (B4[(ly & 3) * 4 + (lx & 3)] + 0.5) / 16 < (ly - g0 + 1) / (g1 - g0) ? c2 : c1;
+      });
+    }
+
+    /* ---------- the layout ----------
+       K device pixels per picture pixel, a whole number so the picture never wobbles: as wide as the screen or a
+       little wider (cropped evenly at the sides), and as tall as it comes; under it the ground goes on. N is one font
+       pixel of the small words (two LCD pixels), F of the big word (one LCD pixel), NF of the bar. */
+    function chosenMask(label, sc) { return mask(label, sc, fitGap(label, sc, hasCJK(label) ? 8 : 4, cw - 12 * F, F)); }
+    function menuHeight(sc) { return 2 * INK + Math.round(11.5 * sc) * F + 8 * N; }
+    /* the menu stands in the middle between the calm row and the bar when it fits there, else it hangs off the bar */
+    function menuStart(sc) {
+      var mh = menuHeight(sc), start = stripTop - mh, floor = calm * K;
+      if (aw && floor + mh <= stripTop) start = Math.round(floor + (stripTop - floor - mh) / 2);
+      return Math.max(0, start);
+    }
+    function fits(sc) {
+      var its = items();
+      for (var i = 0; i < its.length; i++) if (chosenMask(its[i].label, sc).w * F > cw - 12 * F) return false;
+      return true;
+    }
+    function layout() {
+      var r = canvas.getBoundingClientRect(), art = o.art;
+      dpr = window.devicePixelRatio || 1;
+      cw = Math.max(8, Math.round(r.width * dpr)); ch = Math.max(8, Math.round(r.height * dpr));
+      if (canvas.width !== cw) canvas.width = cw;
+      if (canvas.height !== ch) canvas.height = ch;
+      aw = art ? art.w : 0; ah = art ? art.h : 0;
+      calm = o.calm !== undefined ? o.calm : Math.round(ah * 2 / 3);
+      K = aw ? Math.max(1, Math.ceil(cw / aw)) : 1;
+      N = Math.max(2, Math.round(2 * dpr)); F = Math.max(1, Math.round(N / 2)); NF = Math.max(2, N - 1);
+      cropX = Math.max(0, Math.round((aw * K - cw) / 2));
+      var cell = cellH(), inkF = (cell - 1) * NF;
+      INK = (cell - 1) * N;
+      edge = Math.min(K, Math.max(2, Math.round(3 * dpr)));
+      stripTop = ch - (edge + 2 * inkF + 4 * NF);
+      recY = stripTop + edge + NF;
+      hintY = recY + inkF + Math.round(1.6 * NF);
+      /* the biggest chosen word that fits the width and keeps the menu off the picture's upper 40 percent;
+         maxScale caps it, in LCD (CSS) pixels a font pixel */
+      var cap = o.maxScale > 0 ? Math.max(2, Math.floor(o.maxScale * dpr / F)) : 6, clear = Math.round(ah * 0.4) * K;
+      S = 2;
+      for (var sc = cap; sc > 2; sc--) if (fits(sc) && menuStart(sc) >= clear) { S = sc; break; }
+      BIG = Math.round(11.5 * S) * F;
+      inkPrev = menuStart(S);
+      slotName = inkPrev + INK + 4 * N;
+      inkNext = slotName + BIG + 4 * N;
+      /* the fog rises a little above the calm part of the picture and is thick before the menu */
+      fogTop = Math.max(0, Math.min(inkPrev - 12 * K, Math.round(calm * 0.84) * K));
+      fogSpan = Math.max(1, inkPrev - fogTop);
+      /* what a frame repaints: from where a rolling word can still show (it is gone softRamp above softTop) down */
+      paintTop = Math.max(0, inkPrev - 13 * N);
+      bg = new Uint8Array(cw * ch);
+      frame = new Uint8Array(cw * ch);
+      ctx2d = canvas.getContext("2d");
+      img = ctx2d.createImageData(cw, ch);
+      u32 = new Uint32Array(img.data.buffer);
+      scene();
+    }
+
+    /* ---------- the still part: picture, ground, fog, dust, name, bar ---------- */
+    function ground(x, y) {
+      var d = y - ah, n = vnoise(x * 0.09 + 7, y * 0.11 + 31), t = 3;
+      if (d < 2) t = 2;
+      else if (d < 34 && n > 0.74) t = 1;
+      else if (n > 0.64) t = 2;
+      if ((y + Math.round(vnoise(x * 0.05, 3.5) * 7)) % 15 === 0 && d < 40) t = 2;
+      return t;
+    }
+    function fogAt(ax, ay, yd) {
+      var t = (yd - fogTop) / fogSpan;
+      if (t <= 0) return 0;
+      if (t > 1) t = 1;
+      var f = Math.pow(t, 0.85) * 0.96;
+      f += (vnoise(ax * 0.026, ay * 0.045 + 40) - 0.5) * 0.70;
+      f += (vnoise(ax * 0.22 + 90, ay * 0.030 + 12) - 0.5) * 0.30;
+      var g = (yd - (inkPrev - 5 * N)) / (5 * N);
+      if (g > 0 && f < g) f = g;
+      if (t >= 1) {
+        /* behind the menu the fog is nearly ink and calm, so the words read */
+        var deep = 0.88 + (vnoise(ax * 0.03 + 5, ay * 0.05 + 71) - 0.5) * 0.12;
+        var still = Math.max(0, Math.min(1, (yd - (inkPrev - 13 * N)) / (9 * N)));
+        return deep + (1 - deep) * still;
+      }
+      return f < 0 ? 0 : f > 0.96 ? 0.96 : f;
+    }
+    function scene() {
+      var x, y, rows = Math.ceil(ch / K) + 1, art = o.art;
+      softTop = 0; clipBot = 0;
+      if (aw) {
+        var pic = new Uint8Array(aw * rows), hs = 2463534242;
+        for (y = 0; y < rows; y++) for (x = 0; x < aw; x++) {
+          var t = y < ah ? art.px[y * aw + x] & 3 : ground(x, y);
+          hs ^= hs << 13; hs ^= hs >>> 17; hs ^= hs << 5;
+          var f = fogAt(x, y, y * K + K * 0.5);
+          if (f > 0) {
+            /* fog darkens a pixel by up to three tones; the fraction goes through the 8 x 8 dither, a little jittered */
+            var lv = f * 3, k = Math.floor(lv), fr = lv - k, jit = ((hs >>> 8) & 15) - 7;
+            if (fr > 0.002 && (B8[(y & 7) * 8 + (x & 7)] + 0.5 + jit) / 64 < fr) k++;
+            t = Math.min(3, t + k);
+          }
+          pic[y * aw + x] = t;
+        }
+        /* dust caught in the light: a few mid specks in the fog */
+        var seed = 20261;
+        for (var i = 0; i < 30; i++) {
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+          var dx = 6 + (seed >> 16) % Math.max(1, aw - 12);
+          seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+          var dy = Math.floor(fogTop / K) + 4 + (seed >> 16) % Math.max(6, Math.floor((inkPrev - fogTop) / K));
+          if (dy >= 0 && dy < rows && pic[dy * aw + dx] > 1) pic[dy * aw + dx] = 1;
+        }
+        for (y = 0; y < rows && y * K < ch; y++) {
+          var y1 = Math.min(ch, y * K + K);
+          for (x = 0; x < aw; x++) {
+            var x0 = Math.max(0, x * K - cropX), x1 = Math.min(cw, x * K - cropX + K);
+            if (x1 <= x0) continue;
+            for (var py = y * K; py < y1; py++) bg.fill(pic[y * aw + x], py * cw + x0, py * cw + x1);
+          }
+        }
+        if (o.title && o.title.text) name(o.title);
+      } else bg.fill(3);
+      bar();
+    }
+    /* the name in the sky, painted like the chosen word: four LCD pixels a font pixel, fewer when it is wider than
+       w; x / y / w in picture pixels (x left out: centred); sub is a second line under it at half that size */
+    function name(tt) {
+      var w = (tt.w || aw - 16) * K, top = (tt.y !== undefined ? tt.y : 6) * K;
+      function line(str, sc, gap0, y) {
+        var unit = F;
+        while (sc > 1 && mask(str, sc, 0).w * unit > w) sc--;
+        var mk = mask(str, sc, fitGap(str, sc, gap0, w, unit)), inkW = (mk.right - mk.left + 1) * unit;
+        var x = tt.x !== undefined ? tt.x * K - cropX : Math.round((cw - inkW) / 2);
+        sign(bg, mk, x - mk.left * unit, y - mk.top * unit, unit, 1, 0.86, false);
+        return y + (mk.bot - mk.top + 1) * unit;
+      }
+      var bottom = line(tt.text, 4, hasCJK(tt.text) ? 6 : 2, top);
+      if (tt.sub) line(tt.sub, 2, hasCJK(tt.sub) ? 4 : 3, bottom + 8 * F);
+    }
+    /* the bar: ink, its top edge dark with a few mid points, and the keys on its lower line */
+    function bar() {
+      bg.fill(3, stripTop * cw, ch * cw);
+      bg.fill(2, stripTop * cw, (stripTop + edge) * cw);
+      for (var x = 0; x < cw; x++) if (dither(x, (stripTop / K) | 0, 0.3)) bg[stripTop * cw + x] = 1;
+      if (o.hint) {
+        var hint = mask(o.hint, 1, fitGap(o.hint, 1, hasCJK(o.hint) ? 2 : 1, cw - 40 * NF, NF));
+        var hx = Math.round((cw - (16 + hint.w) * NF) / 2);
+        picture(bg, ARROWS, hx, hintY + Math.round(2.5 * NF), NF, 1, undefined, 1);
+        plotMask(bg, hint, hx + 16 * NF, hintY - hint.top * NF, NF, flat(1));
+      }
+    }
+
+    /* ---------- the moving part: the menu and the bar's live line ---------- */
+    function label(buf, idx, inkTop, alpha) {
+      var it = items()[idx], mk = mask(it.label, 1, fitGap(it.label, 1, hasCJK(it.label) ? 2 : 1, cw - 10 * N, N));
+      var x = Math.round((cw - mk.w * N) / 2) - mk.left * N, y = inkTop - mk.top * N;
+      plotMask(buf, mk, x + N, y + N, N, function (lx, ly) { return fade(lx, ly, alpha) ? 3 : -1; });
+      plotMask(buf, mk, x, y, N, function (lx, ly) { return fade(lx, ly, alpha) ? 1 : -1; });
+      if (it.locked) picture(buf, LOCK, x + (mk.right + 2) * N, inkTop - N, N, 1, 3, alpha);
+      hits.push({ i: idx, x0: x - 4 * N, y0: inkTop - 3 * N, x1: x + mk.w * N + 6 * N, y1: inkTop + INK + 3 * N });
+    }
+    function chosen(buf, idx, slotY, alpha, flash, xOff) {
+      var it = items()[idx], mk = chosenMask(it.label, S), inkH = (mk.bot - mk.top + 1) * F;
+      var x = Math.round((cw - (mk.right - mk.left + 1) * F) / 2) - mk.left * F + xOff;
+      var y = slotY + Math.round((BIG - inkH) / 2) - mk.top * F;
+      sign(buf, mk, x, y, F, alpha, it.locked ? 0.8 : 0.72, !!it.locked);
+      if (flash && alpha > 0.5) {
+        /* the pick: the letters flash to paper, with a bar of light under the word */
+        plotMask(buf, mk, x, y, F, function (lx, ly) { return dither(lx, ly, 0.6) ? 0 : -1; });
+        var by = slotY + BIG + 2 * F, x0 = x + mk.left * F - 3 * F, x1 = x0 + (mk.right - mk.left + 1) * F + 6 * F;
+        for (var px = Math.max(0, x0); px < Math.min(cw, x1); px++) for (var q = 0; q < 2 * F; q++) {
+          var gy = by + q;
+          if (gy >= 0 && gy < ch && dither(px, gy, 0.55 - q * 0.2)) buf[gy * cw + px] = 0;
+        }
+      }
+      if (it.locked) {
+        var lu = Math.max(2, Math.round(inkH * 0.5 / 9));
+        picture(buf, LOCK, x + (mk.right + 8) * F, slotY + Math.round((BIG - 9 * lu) / 2), lu, flash ? 0 : 1, 3, alpha);
+      }
+    }
+    function menu(buf, t) {
+      var n = items().length, shx = 0, flash = false;
+      hits = [];
+      if (!n) return;
+      if (st.shakeT0) {
+        var sp = (t - st.shakeT0) / SHAKE_MS;
+        if (sp >= 1) st.shakeT0 = 0;
+        else shx = Math.round(Math.sin(sp * Math.PI * 5) * 3 * F * (1 - sp));
+      }
+      if (st.flashT0) { if (t - st.flashT0 >= FLASH_MS) st.flashT0 = 0; else flash = true; }
+      clipBot = stripTop;
+      /* while it rolls toward a higher index ("up") the old word leaves upward and the new one comes from below */
+      var pos = st.pos, k = Math.floor(pos), fr = pos - k, up = st.dir >= 0;
+      var out = up ? k : k + 1, inc = up ? k + 1 : k, pr = up ? fr : 1 - fr;
+      var aOut = pr <= 0.6 ? 1 : Math.max(0, 1 - (pr - 0.6) / 0.3);
+      var aInc = pr <= 0.08 ? 0 : Math.min(1, (pr - 0.08) / 0.3);
+      var off = cellH() * S * F + 2 * F;
+      var yOut = up ? slotName - off * pr : slotName + off * pr;
+      var yInc = up ? slotName + off * (1 - pr) : slotName - off * (1 - pr);
+      var nearest = clampIndex(pos);
+      /* the small words step aside while the big one rolls */
+      var la = fr > 0 ? Math.max(0, 1 - 3 * pr) : 1;
+      if (la > 0.02) {
+        if (nearest > 0) label(buf, nearest - 1, inkPrev, la);
+        if (nearest < n - 1) label(buf, nearest + 1, inkNext, la);
+      }
+      softTop = inkPrev - 6 * N; softRamp = 6 * N;
+      if (st.moving || fr > 0) {
+        if (aOut > 0.02 && out >= 0 && out < n) chosen(buf, out, yOut, aOut, false, 0);
+        if (aInc > 0.02 && inc >= 0 && inc < n) chosen(buf, inc, yInc, aInc, false, 0);
+      } else chosen(buf, nearest, slotName, 1, flash, shx);
+      softTop = 0;
+      clipBot = 0;
+      hits.push({ i: nearest, x0: 0, y0: slotName - 2 * F, x1: cw, y1: slotName + BIG + 2 * F });
+    }
+    /* the bar's live line: a locked item's reason (paper, for a moment), the chosen item's status, or the note */
+    function liveLine(buf) {
+      var its = items(), it = its[clampIndex(st.pos)], text = o.note, tone = 1;
+      if (st.reasonIdx >= 0 && its[st.reasonIdx] && its[st.reasonIdx].reason) { text = its[st.reasonIdx].reason; tone = 0; }
+      else if (it && it.status) text = it.status;
+      if (!text) return;
+      text = String(text);
+      var mk = mask(text, 1, fitGap(text, 1, hasCJK(text) ? 2 : 1, cw - 8 * NF, NF));
+      plotMask(buf, mk, Math.round((cw - mk.w * NF) / 2) - mk.left * NF, recY - mk.top * NF, NF, flat(tone));
+    }
+
+    var COL32 = CODE.map(function (c) { return (0xff000000 | (c[2] << 16) | (c[1] << 8) | c[0]) >>> 0; });
+    function render(t, full) {
+      var y0 = full ? 0 : paintTop;
+      frame.set(bg.subarray(y0 * cw), y0 * cw);
+      menu(frame, t);
+      liveLine(frame);
+      for (var i = y0 * cw, n = cw * ch; i < n; i++) u32[i] = COL32[frame[i]];
+      if (full) ctx2d.putImageData(img, 0, 0);
+      else ctx2d.putImageData(img, 0, 0, 0, y0, cw, ch - y0);
+    }
+
+    /* ---------- time: frames run only while something moves ---------- */
+    function kick() { if (!raf) raf = requestAnimationFrame(tick); }
+    function tick(t) {
+      raf = null;
+      if (canvas.isConnected === false) return;
+      /* an animation starts on the frame after it was asked for, on the frames' own clock */
+      t = t || 1e-3;
+      if (st.moving && st.t0 === null) st.t0 = t;
+      if (st.flashT0 === -1) st.flashT0 = t;
+      if (st.shakeT0 === -1) st.shakeT0 = t;
+      if (st.moving) {
+        var p = (t - st.t0) / st.dur;
+        if (p >= 1) { st.pos = st.to; st.moving = false; }
+        else st.pos = st.from + (st.to - st.from) * (1 - Math.pow(1 - p, 3));
+      }
+      render(t, fullNext);
+      fullNext = false;
+      if (st.moving || st.shakeT0 || st.flashT0) kick();
+    }
+
+    function moved(i) { if (i !== st.seen) { st.seen = i; if (o.onMove) o.onMove(i); } }
+    function rollTo(target) {
+      if (!items().length) return false;
+      target = clampIndex(target);
+      var d = target - current();
+      if (d === 0) return false;
+      st.from = st.pos; st.to = target; st.dir = d > 0 ? 1 : -1;
+      st.t0 = null; st.dur = ROLL_MS * Math.min(1.9, Math.abs(d)); st.moving = true;
+      moved(target);
+      kick();
+      return true;
+    }
+    function pick(i) {
+      var it = items()[i];
+      if (!it) return;
+      if (st.moving) { st.pos = st.to; st.moving = false; }
+      if (it.locked) {
+        /* a shake, and the reason on the bar for a moment */
+        st.shakeT0 = -1;
+        st.reasonIdx = i;
+        if (st.reasonTimer) clearTimeout(st.reasonTimer);
+        st.reasonTimer = setTimeout(function () { st.reasonIdx = -1; st.reasonTimer = null; kick(); }, REASON_MS);
+        kick();
+        if (o.onLocked) o.onLocked(i);
+        return;
+      }
+      st.flashT0 = -1;
+      kick();
+      if (o.onPick) o.onPick(i);
+    }
+    function press(b) {
+      if (b === "up" || b === "down") { rollTo(current() + (b === "down" ? 1 : -1)); return true; }
+      if (b === "a" || b === "start") { pick(current()); return true; }
+      return false;
+    }
+
+    /* ---------- touch, in the canvas's own pixels ---------- */
+    function at(e) {
+      var r = canvas.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * (cw / r.width), y: (e.clientY - r.top) * (ch / r.height) };
+    }
+    function onDown(e) {
+      if (!ready) return;
+      try { canvas.setPointerCapture(e.pointerId); } catch (x) {}
+      var p = at(e);
+      st.drag = { x: p.x, y: p.y, start: current(), moved: false };
+    }
+    function onMoveP(e) {
+      var d = st.drag;
+      if (!d) return;
+      var dy = at(e).y - d.y;
+      if (!d.moved && Math.abs(dy) > 6 * dpr) d.moved = true;
+      if (!d.moved) return;
+      st.moving = false;
+      st.dir = dy < 0 ? 1 : -1;
+      st.pos = Math.max(0, Math.min(items().length - 1, d.start - dy / (BIG * 1.1)));
+      moved(clampIndex(st.pos));
+      kick();
+    }
+    function onUp(e) {
+      var d = st.drag;
+      if (!d) return;
+      st.drag = null;
+      if (!d.moved) {
+        var p = at(e);
+        for (var i = 0; i < hits.length; i++) {
+          var r = hits[i];
+          if (p.x < r.x0 || p.x > r.x1 || p.y < r.y0 || p.y > r.y1) continue;
+          if (r.i === current()) pick(r.i); else rollTo(r.i);
+          return;
+        }
+        return;
+      }
+      /* let go: the menu settles on the nearest item */
+      var target = clampIndex(st.pos);
+      st.from = st.pos; st.to = target; st.dir = target >= st.pos ? 1 : -1;
+      st.t0 = null; st.dur = ROLL_MS; st.moving = true;
+      moved(target);
+      kick();
+    }
+    function onResize() {
+      if (canvas.isConnected === false) { removeEventListener("resize", onResize); return; }
+      layout(); fullNext = true; kick();
+    }
+
+    set(opts || {});
+    canvas.style.touchAction = "none";
+    canvas.addEventListener("pointerdown", onDown);
+    canvas.addEventListener("pointermove", onMoveP);
+    canvas.addEventListener("pointerup", onUp);
+    canvas.addEventListener("pointercancel", function () { st.drag = null; });
+    addEventListener("resize", onResize);
+    ready = true;
+    layout();
+    render(0, true);
+    fullNext = false;
+
+    return {
+      press: press,
+      set: set,
+      index: current,
+      redraw: function () { layout(); fullNext = true; kick(); }
+    };
+  }
+
+  return { VERSION: VERSION, font: font, mount: mount };
+})();
+if (typeof window !== "undefined") window.LoTitle = LoTitle;
+</script>
+<script data-lo-font="lopix12">
+/*
+lopix12: a 12-pixel bitmap font for Lo-PDA apps.
+
+lopix12 is a Modified Version of Fusion Pixel Font (12px, proportional,
+Simplified Chinese; upstream release 2026.08.11): its glyphs were rasterized at
+their native size into one-bit bitmaps, and apps carry only the characters they
+use. It is distributed under the SIL Open Font License 1.1, below, and only
+under that license. It is not named Fusion Pixel, which is a Reserved Font Name.
+
+Fusion Pixel Font: https://github.com/TakWolf/fusion-pixel-font
+Copyright (c) 2022, TakWolf (https://takwolf.com), with Reserved Font Name 'Fusion Pixel'.
+It combines glyphs from these OFL-licensed fonts:
+- Ark Pixel Font, Copyright (c) 2021, TakWolf (https://takwolf.com).
+- Cubic 11, including JF Dot M+H 12, Copyright(c) 2005 M+ FONTS PROJECT,
+  and M+ BITMAP FONTS, Copyright (C) 2002-2004 COZ.
+- Galmuri, Copyright (c) 2019-2025 Lee Minseo (quiple@quiple.dev).
+
+-----------------------------------------------------------
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+-----------------------------------------------------------
+
+PREAMBLE
+The goals of the Open Font License (OFL) are to stimulate worldwide
+development of collaborative font projects, to support the font creation
+efforts of academic and linguistic communities, and to provide a free and
+open framework in which fonts may be shared and improved in partnership
+with others.
+
+The OFL allows the licensed fonts to be used, studied, modified and
+redistributed freely as long as they are not sold by themselves. The
+fonts, including any derivative works, can be bundled, embedded,
+redistributed and/or sold with any software provided that any reserved
+names are not used by derivative works. The fonts and derivatives,
+however, cannot be released under any other type of license. The
+requirement for fonts to remain under this license does not apply
+to any document created using the fonts or their derivatives.
+
+DEFINITIONS
+"Font Software" refers to the set of files released by the Copyright
+Holder(s) under this license and clearly marked as such. This may
+include source files, build scripts and documentation.
+
+"Reserved Font Name" refers to any names specified as such after the
+copyright statement(s).
+
+"Original Version" refers to the collection of Font Software components as
+distributed by the Copyright Holder(s).
+
+"Modified Version" refers to any derivative made by adding to, deleting,
+or substituting -- in part or in whole -- any of the components of the
+Original Version, by changing formats or by porting the Font Software to a
+new environment.
+
+"Author" refers to any designer, engineer, programmer, technical
+writer or other person who contributed to the Font Software.
+
+PERMISSION & CONDITIONS
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Font Software, to use, study, copy, merge, embed, modify,
+redistribute, and sell modified and unmodified copies of the Font
+Software, subject to the following conditions:
+
+1) Neither the Font Software nor any of its individual components,
+in Original or Modified Versions, may be sold by itself.
+
+2) Original or Modified Versions of the Font Software may be bundled,
+redistributed and/or sold with any software, provided that each copy
+contains the above copyright notice and this license. These can be
+included either as stand-alone text files, human-readable headers or
+in the appropriate machine-readable metadata fields within text or
+binary files as long as those fields can be easily viewed by the user.
+
+3) No Modified Version of the Font Software may use the Reserved Font
+Name(s) unless explicit written permission is granted by the corresponding
+Copyright Holder. This restriction only applies to the primary font name as
+presented to the users.
+
+4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+Software shall not be used to promote, endorse or advertise any
+Modified Version, except to acknowledge the contribution(s) of the
+Copyright Holder(s) and the Author(s) or with their explicit written
+permission.
+
+5) The Font Software, modified or unmodified, in part or in whole,
+must be distributed entirely under this license, and must not be
+distributed under any other license. The requirement for fonts to
+remain under this license does not apply to any document created
+using the Font Software.
+
+TERMINATION
+This license becomes null and void if any of the above conditions are
+not met.
+
+DISCLAIMER
+THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
+OTHER DEALINGS IN THE FONT SOFTWARE.
+*/
+LoTitle.font({"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","·":"12:AAAAAAAAAAAABgBgAAAAAAAAAAA=","×":"6:AAAAAiUIUiAAAA==","↑":"12:AABADgFQBABABABABABABABAAAA=","↓":"12:AABABABABABABABABAFQDgBAAAA=","　":"12:AAAAAAAAAAAAAAAAAAAAAAAAAAA=","、":"12:AAAAAAAAAAAAAAAAAAQAMAEAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","三":"12:AAf8AAAAAAAAP4AAAAAAAA/+AAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","下":"12:AA/+BABABABQBIBEBABABABAAAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","东":"12:AACA/+EAJARAf8BAJIREhCHAAAA=","丢":"12:AAA8fABAf8BABA/+CAEQIIf0AAA=","两":"12:AA/+EQEQ/+kSkSqqxGgCgCgOAAA=","个":"12:AABACgEQIIxGBABABABABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","主":"12:AACABA/+BABABAf8BABABA/+AAA=","之":"12:AACABA/8AIAQAgBACAMATAg+AAA=","也":"12:AABAJAJMJ0PE5EJMJAICICH+AAA=","买":"12:AA/+ACIkEgQgIg/+BACQMIwGAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","些":"12:AAEQUSXUUYUSXS4OAAP4AA/+AAA=","从":"12:AAEQEQEQEQEQKoKoKoREREiCAAA=","他":"12:AAIQKQSWS63SSSSWSQSCSCR+AAA=","价":"12:AAIQIoREWCxERERERERERESEAAA=","会":"12:AABACgMYwGP4AAAA/+EAIIf0AAA=","传":"12:AAIQL8QgQg3+RAT8QERIQwQIAAA=","住":"12:AAIgIQX+QQwQQQT8QQQQQQX+AAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","倍":"12:AAIQL8QASExIX+QAT8SESET8AAA=","借":"12:AAJIL8RIRI3+QAT8SET8SET8AAA=","值":"12:AAIQL+QQT8yET8SET8SESEX+AAA=","停":"12:AAIgP+SET8wAX+UCT8QQQQRwAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","入":"12:AAEACABABACgCgEQEQIIQEgCAAA=","六":"12:AACABAAA/+AAAAIIIEQEQCgCAAA=","关":"12:AAIIEQf8BABABA/+CgEQIIwGAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","写":"12:AA/+gCkCH4IAP8AEAE/0AEA4AAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","力":"12:AABABAf+BCBCBCCCCCECICwcAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","十":"12:AABABABABA/+BABABABABABAAAA=","半":"12:AABAREJIBAf8BABA/+BABABAAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","原":"12:AAf+QgX8UEX8UEX8QgUkUipiAAA=","去":"12:AABABAf8BABA/+CAEIEII0fEAAA=","又":"12:AAf8QEQEIIIIEQCgBACgMYwGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","只":"12:AAf8QEQEQEQEf8AAAAIIQEgCAAA=","后":"12:AAA8fAQAQAf+QAX8UEUEUEn8AAA=","周":"12:AAP+IiL6IiL6ICL6KKT6QCgOAAA=","命":"12:AABACgMY32AAe8SkSkSkesAgAAA=","和":"12:AADAceESES/SESMSWSlSEeEAAAA=","品":"12:AAP4IIIIIIP4AA++iiiiii++AAA=","商":"12:AABA/+IIEQ/+kSoK32kSnygGAAA=","嘲":"12:AABO7qpKruqqrqqurq5KDqBWAAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","围":"12:AA/+hCv6hCnyhCv6hKhahC/+AAA=","图":"12:AA/+iCjysSji8ejCgymChi/+AAA=","圈":"12:AA/+lSv6iC/+kSvq0mlikK/+AAA=","在":"12:AACACA/+EAEQIQb+oQIQIQL+AAA=","地":"12:AAQQSQSW66XSSSSWaQyCCCB+AAA=","场":"12:AAT8QIQQ4gT+QqRKaSwSAiBMAAA=","块":"12:AAQgQgT84kQkQkX+YgxQCIMGAAA=","墙":"12:AAQQT+RU4QX+QAT+aCy6CqD+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","外":"12:AAIQIQOQSQSYqUESEQIQQQgQAAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","失":"12:AAJAJAP8RAhABA/+CgEQIIwGAAA=","头":"12:AAIgEgQgIgAg/+BABQCIMEwCAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","存":"12:AACA/+EAJ8IIYQoQL+IQIQIwAAA=","它":"12:AABA/+gCoCIIIwPAIAICICH+AAA=","定":"12:AABA/+gCAAf8BAJAJ8JAXAg+AAA=","宝":"12:AABA/+gCgCf8BABAf8BIBE/+AAA=","小":"12:AABABABAJIJERERChCBABAHAAAA=","就":"12:AAIU+SAQ/+iQio+oIoqqqqZOAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","岩":"12:AAREREf8AA/+CAEAP8YEoEP8AAA=","工":"12:AAf8BABABABABABABABABA/+AAA=","差":"12:AAEQ/+BAf8CA/+EAP8QgggP+AAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","带":"12:AAJI/+JIAA/+hCf8RERERMBAAAA=","幸":"12:AABAf8BA/+IIEQf8BA/+BABAAAA=","店":"12:AAAgf+QAQgQ+QgQgX8UEUEn8AAA=","度":"12:AAAgf+SIf+SIT4QAX8SIRwuOAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","引":"12:AA/EBEBE/EgEgE/EBEBEBEOEAAA=","张":"12:AA5EJEJI5QhAn+5QJIJIJUxiAAA=","弹":"12:AA5EIoL+6Sj+iS7+IQL+IQwQAAA=","录":"12:AAf8AEf8AE/+BAREJoDQNIzGAAA=","往":"12:AAIgQQn+IQQQwQT8QQQQQQX+AAA=","快":"12:AAIgIgr8skokokP+IgJQKIMGAAA=","意":"12:AABAf8EQ/+IIP4IIP4FEUqj6AAA=","或":"12:AAAoAk/+AgekSkSoeQASGq5GAAA=","才":"12:AAAQAQ/+AQAwBQCQMQwQAQBwAAA=","抢":"12:AAQQQo5EWCR8ZExERcRARCw+AAA=","抬":"12:AAQgQg5ESEX6YCz8SESESEz8AAA=","拉":"12:AAQgQQ7+QAREZEwkQkQoQIz+AAA=","按":"12:AAQQT+6CQQQQb+wkREQoQYzmAAA=","挖":"12:AAQQT+6qREQAb8wIQwRASCx+AAA=","掉":"12:AAQQQe4QT8SEb8yET8QQX+wQAAA=","摆":"12:AAT+Sq6qT+QQZ8wQT+QgREz6AAA=","收":"12:AAEgkgk+lEmkkkkoso0QEoFGAAA=","故":"12:AAIgIg++JEIkIk+oioiQio/GAAA=","效":"12:AAEQ/QAeSkhUSUSUKUEIKUxiAAA=","数":"12:AAlQWQ/eMkWUlUIU/UJIOUxiAAA=","整":"12:AAEQ/+VUfUOIVU/+BAJ8JA/+AAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","无":"12:AAf8BABABA/+CgCgEgEiIiw+AAA=","时":"12:AAAE8El+kEkE9EkkkkkE8EAcAAA=","普":"12:AAEQ/+SkKo/+AAf8QEf8QEf8AAA=","暂":"12:AAIG+4Qgo++kJEf8QEf8QEf8AAA=","更":"12:AA/+BAf8REf8REf8RAJAGA5+AAA=","最":"12:AAf8QEf8QE/+SAe+SiXU6IC2AAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","本":"12:AABABA/+FQFQFQJIJIX0hCBAAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","束":"12:AABA/+BAf8REREf8FQJIxGBAAAA=","条":"12:AAEAH4II0QDg8eBAf8BAJIzGAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","标":"12:AAJ8IA8AL+IQYQdUpSJSKSIwAAA=","档":"12:AAIQKS9UIQL+YCcCr+ICICL+AAA=","次":"12:AAhARAR+CCEUAQQQQoQohEmCAAA=","每":"12:AAIAP+QAv8JEIk/+REQkf+AEAAA=","水":"12:AABABABC9kFoFQJQJIREhCHAAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","涨":"12:AAnSRSBUnYUQE+HYRURUhSmaAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","炸":"12:AAIgIgo+tQqQIeIQIQUeUQgQAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","爆":"12:AAJ8JEp8tEr+IoL+JUW6VUiyAAA=","片":"12:AAIQIQIQP+IAIAP4IIQIQIgIAAA=","版":"12:AAUGV4VAfAR+RCdiVUVIVUmiAAA=","物":"12:AAJApA9+qqIqMq5KJSKSIiJMAAA=","王":"12:AA/+BABABABAf8BABABABA/+AAA=","现":"12:AAD86ESUSUSU6USUQQYqxKGOAAA=","用":"12:AAf8REREf8REREf8REREREhMAAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","盖":"12:AAEQ/+BAf8BA/+AAf8SkSk/+AAA=","目":"12:AAf8QEQEf8QEQEQEf8QEQEf8AAA=","着":"12:AAEQ/+CAf8EA/+IEYEv8IEP8AAA=","石":"12:AA/+CACAEAEAP8YEoEIEIEP8AAA=","矿":"12:AA8IJ+JARAdA1AVAVAVAdACAAAA=","确":"12:AA8gI8JET+dS1+VSV+VSdSCWAAA=","碰":"12:AA9EIoL+Qoco0oWqVsUocoD+AAA=","秒":"12:AAEQ4QJUJS9SKQYScEoIIwLAAAA=","笑":"12:AAQge+lIAAA8fABA/+CgMYwGAAA=","第":"12:AAQge+lIf8BEf8RAf+FCJCxMAAA=","箍":"12:AAQge+lIAAL++IK+Oq6uKIb+AAA=","精":"12:AAIQt8YQJ88QL+ZEd8pEJ8JEAAA=","纪":"12:AAT8QEgEoEwET8iA6ACCKCx+AAA=","结":"12:AAIQIQT+kQ4QJ8QA98BENEx8AAA=","继":"12:AASISqicqIy+SIic6qCIKAz+AAA=","续":"12:AAQQR8gQr+xCSohI7+AQIkzCAAA=","绳":"12:AAT4SIj4og38Ukn88kH8IiweAAA=","老":"12:AACEfoCQCg/+CAME0YHgECD+AAA=","者":"12:AACCf0CICQ/+EAP8YEv8IEP8AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","自":"12:AABACAf8QEf8QEQEf8QEQEf8AAA=","草":"12:AAEQ/+EQf8QEf8QEf8BA/+BAAAA=","药":"12:AAEQ/+JQRA9+JCQC+iASGC4MAAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","行":"12:AAJ8QAgAL+QIwIQIQIQIQIQ4AAA=","补":"12:AAQQIQ8QEQIYKUcSqQIQIQIQAAA=","袋":"12:AAEkI+7gISIOBA/+Eg4ULIMGAAA=","西":"12:AA/+EQEQ/+kSkSkSoewCgC/+AAA=","说":"12:AAiERID8CEyESET8RIVKaKUOAAA=","读":"12:AAgQT8AQH+xCUoSIX+QQZkWCAAA=","贝":"12:AAf8QERERERERERERECgMYwGAAA=","货":"12:AAEiIs7wIiIef8QEREREGw4OAAA=","购":"12:AA+gi+rCqSqSqSqqqqJ2UCiMAAA=","走":"12:AABAf8BABA/+BAJAJ8JAXAg+AAA=","越":"12:AAEKe+EoEq+qEkUsW2UqsAj+AAA=","跟":"12:AA9+lCl+9CJCJ+tIpKpEtUxiAAA=","路":"12:AA8gk8lE+oIQIovGp8pEtEx8AAA=","身":"12:AACAP4IIP4IIP6IM/4BIGI44AAA=","躲":"12:AAJ4dIVIdIWOcQUQ/+M4VUuSAAA=","轰":"12:AAEA/+JAf8BA/+BA++iicciiAAA=","轻":"12:AAJ88EQIoQpo+GJ8MQ4QIQL+AAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","达":"12:AAgQQQAQH+wQQoQoRESCoAn+AAA=","过":"12:AAgIQIH+AIyIRIRIQIQ4oAn+AAA=","运":"12:AAj8QAAAH+xARESESaXioAn+AAA=","返":"12:AAgOTwCACAz+TCSkSYVmoAn+AAA=","还":"12:AAn+QQAgAgxoSkUiQgQgoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","进":"12:AAhIRIH+BIxIX+RIRISIoAn+AAA=","远":"12:AAj8QAAAH+xIRISISKUOoAn+AAA=","选":"12:AAiQT8EQAQ3+RIRISKUOoAn+AAA=","通":"12:AAj8QoAQD+yST+SST+SSoAn+AAA=","那":"12:AA/eJSJS/UJUJS/SJSJcRQmQAAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","量":"12:AAf8QEf8QE/+REf8REf8BA/+AAA=","金":"12:AABACgMYwGP4BABAf8JIFQ/+AAA=","鉴":"12:AAEgk+lQkIkEHwJIf8pKFQ/+AAA=","钩":"12:AARAd+iC8iQiQi9KRKT2YCQMAAA=","钱":"12:AAQUcSge9wQQQe9wQSUMYaTmAAA=","钻":"12:AAQQcQge8QQQR+9CRCVCZCR+AAA=","铁":"12:AASQaQj86QUQQQ7+QQQoZEWCAAA=","间":"12:AAn+QCACnykSkSnykSkSnygGAAA=","限":"12:AA78qEr8qEyEr8qSqU6IikjCAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","雷":"12:AAf8BA/+hCtaAAf8REf8REf8AAA=","颗":"12:AA++qI++qi+qIq+qIqcIqUIiAAA=","题":"12:AA++iI++ii+qAq+IIUui4An+AAA=","骨":"12:AAP4IIPIJI/+oKP4IIP4IIIYAAA=","高":"12:AABA/+IIP4AA/+gCnykSnygGAAA=","鼓":"12:AAII/II++IAI++ii+iUUWI52AAA=","鼠":"12:AAe8QEe8QEf8AAVUTMVUTMdyAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA=","：":"12:AAAAAAMAMAAAAAAAAAMAMAAAAAA=","；":"12:AAAAAAMAMAAAAAAAMAMAEAIAAAA=","？":"12:AAAAcAiAiACAEAIAIAAAIAAAAAA="}});
+</script>
 <script data-src="src/00-data.js">
 /* 矿工老张 / Lao Zhang: data, levels, shop and both languages.
    The game is a four-tone hook-and-haul mine; the picture is 160x144 logical pixels. */
@@ -365,12 +1081,10 @@ GM.TEXT = {
     runWrite: "进度暂时写不进去。",
     menuContinue: "继续",
     menuContinueAt: "第 {n} 关 · 现金 ${b}",
-    menuNoRun: "没有进行中的矿",
     menuNew: "重新开始",
-    menuNewSub: "从第 1 关开始，没达标就从头来",
     menuCodex: "物品图鉴",
-    menuCodexSub: "看看每样东西值多少",
     menuFoot: "↑↓ 选　A 确定",
+    titleHint: "选 · A 确定",
     confirmTitle: "重新开始？",
     confirmText: "会丢掉第 {n} 关的进度。",
     confirmCancel: "取消",
@@ -458,12 +1172,10 @@ GM.TEXT = {
     runWrite: "Run progress cannot be saved now.",
     menuContinue: "CONTINUE",
     menuContinueAt: "LV {n} · ${b}",
-    menuNoRun: "NO RUN IN PROGRESS",
     menuNew: "NEW GAME",
-    menuNewSub: "From level 1; a miss starts over",
     menuCodex: "ITEM CODEX",
-    menuCodexSub: "What each thing is worth",
     menuFoot: "UP/DOWN PICK　A CHOOSE",
+    titleHint: "PICK · A CHOOSE",
     confirmTitle: "START OVER?",
     confirmText: "The run at LV {n} will be lost.",
     confirmCancel: "CANCEL",
@@ -3099,16 +3811,23 @@ GM.titleArt = (function () {
       });
     });
   }
-  function draw(lang) {
+  /* the name and the line under it, as words, for a title screen that paints them itself (sdk/lo-title.js) */
+  function words(lang) {
+    var en = lang === "en";
+    return { text: en ? "GOLD DIG" : "矿工老张", sub: en ? "HOOK THE GOLD" : "钩金子" };
+  }
+  /* bare: the picture without the name (the title screen paints it over the sky); the store's cover keeps it */
+  function draw(lang, bare) {
     var px = new Uint8Array(W * H), b = atob(PIC);
     for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    if (bare) return px;
     /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
-    var en = lang === "en";
-    text(px, en ? "GOLD DIG" : "矿工老张", 4, 4, 2, en ? 1 : 3, 3, 0);
-    text(px, en ? "HOOK THE GOLD" : "钩金子", 5, 33, 1, en ? 1 : 3, 3, 0);
+    var en = lang === "en", w = words(lang);
+    text(px, w.text, 4, 4, 2, en ? 1 : 3, 3, 0);
+    text(px, w.sub, 5, 33, 1, en ? 1 : 3, 3, 0);
     return px;
   }
-  return { W: W, H: H, draw: draw };
+  return { W: W, H: H, draw: draw, words: words };
 })();
 </script>
 <script data-src="src/30-ui.js">
@@ -3145,7 +3864,6 @@ GM.ui = (function () {
     cv.addEventListener("pointerdown", onCanvas);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
-    addEventListener("resize", function () { if (lastScreen === "title") paintTitle(); });
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
@@ -3208,29 +3926,32 @@ GM.ui = (function () {
     return '<div class="sbody ' + cls + '">' + body + '</div><div class="ofoot">' + esc(footer) + "</div>";
   }
 
+  /* what the title menu shows: continue (only with a run in progress, its level and cash on the bar while it is
+     chosen), new run, the codex; the record or a save warning on the bar otherwise. The menu's index is not
+     state.menuCursor (0 continue, 1 new, 2 codex): without a run the menu starts at new. */
+  function titleOffset() { return state.run ? 0 : 1; }
+  function titleSpec() {
+    /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
+    var best = state.best.level > 0
+      ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
+      : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
+      : T.noBest;
+    var items = [{ label: T.menuNew }, { label: T.menuCodex }];
+    if (state.run) items.unshift({ label: T.menuContinue, status: GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) }) });
+    return {
+      items: items,
+      index: Math.max(0, state.menuCursor - titleOffset()),
+      note: state.saveMsg || state.runMsg || best,
+      hint: T.titleHint
+    };
+  }
+
   function render(screen) {
     var i, item, have, can, sel, price, rows, best, warn, extra, rec, next, target, short;
     if (screen === "title") {
-      /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
-      best = state.best.level > 0
-        ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
-        : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
-        : T.noBest;
-      warn = (state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "") +
-             (state.runMsg ? '<p class="warn">' + esc(state.runMsg) + "</p>" : "");
-      var runSub = state.run
-        ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
-        : T.menuNoRun;
-      return shell("title center",
-        '<canvas id="logo" aria-hidden="true"></canvas>' +
-        '<h1 class="vh">' + esc(T.title) + "</h1>" +
-        '<div class="menu">' +
-          row(state.menuCursor === 0, "continue", T.menuContinue, runSub, !state.run) +
-          row(state.menuCursor === 1, "new", T.menuNew, T.menuNewSub, false) +
-          row(state.menuCursor === 2, "codex", T.menuCodex, T.menuCodexSub, false) +
-        "</div>" +
-        '<p class="best">' + esc(best) + "</p>" + warn,
-        T.menuFoot);
+      /* the shared title screen (sdk/lo-title.js): post("title") mounts it on this canvas; the menu turns by
+         itself, so a cursor move does not redraw the screen */
+      return '<canvas id="tt" class="lotitle"></canvas><h1 class="vh">' + esc(T.title) + "</h1>";
     }
     if (screen === "paused") {
       return shell("center",
@@ -3341,7 +4062,7 @@ GM.ui = (function () {
   function post(screen) {
     var i, c, spr;
     if (screen === "title") {
-      paintTitle();
+      mountTitle();
       return;
     }
     if (screen === "shop") {
@@ -3365,33 +4086,20 @@ GM.ui = (function () {
     }
   }
 
-  /* The title picture (the name is written in it), as large as the room above the menu allows, at most 3x, in
-     whole device pixels so every pixel stays square; on a screen too short for 1x it shrinks rather than push the
-     menu off. Written with putImageData only; the pixels for one size are kept, as every cursor move redraws. */
-  var titleImg = null;
-  function paintTitle() {
-    var logo = $("logo");
-    if (!logo || !ov) return;
-    var A = GM.titleArt, W = A.W, H = A.H, body = logo.parentNode, kids = body.children, used = 20, n = 0, i;
-    for (i = 0; i < kids.length; i++) if (kids[i] !== logo && kids[i].offsetHeight) { used += kids[i].offsetHeight; n++; }
-    used += n * 4 + (ov.lastElementChild && ov.lastElementChild !== body ? ov.lastElementChild.offsetHeight : 0);
-    var room = ov.clientHeight - used;
-    var d = window.devicePixelRatio || 1;
-    var fit = Math.max(0.25, Math.min((ov.clientWidth - 24) / W, room / H, 3)) * d, k = Math.max(1, Math.floor(fit));
-    logo.style.width = (W * (fit < 1 ? fit : k) / d) + "px";
-    logo.style.height = (H * (fit < 1 ? fit : k) / d) + "px";
-    if (!titleImg || titleImg.width !== W * k) {
-      var px = A.draw(LANG), tones = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
-      titleImg = new ImageData(W * k, H * k);
-      var o = titleImg.data;
-      for (var y = 0; y < H * k; y++) for (var x = 0; x < W * k; x++) {
-        var t = tones[px[((y / k) | 0) * W + ((x / k) | 0)]], j = (y * W * k + x) * 4;
-        o[j] = t[0]; o[j + 1] = t[1]; o[j + 2] = t[2]; o[j + 3] = 255;
-      }
-    }
-    logo.width = W * k;
-    logo.height = H * k;
-    logo.getContext("2d").putImageData(titleImg, 0, 0);
+  /* The title screen: the picture, the name painted over its sky and the menu, all drawn by sdk/lo-title.js */
+  var titleMenu = null, titleArt = null;
+  function mountTitle() {
+    var c = $("tt");
+    if (!c || typeof LoTitle === "undefined") return;
+    if (!titleArt) titleArt = { w: GM.titleArt.W, h: GM.titleArt.H, px: GM.titleArt.draw(LANG, true) };
+    var spec = titleSpec(), name = GM.titleArt.words(LANG);
+    spec.art = titleArt;
+    /* the name on the sky left of the winch; the fog may cover the picture from the claw on the nugget down */
+    spec.title = { text: name.text, sub: name.sub, x: 17, y: 6, w: 86 };
+    spec.calm = 141;
+    spec.onMove = function (i) { state.menuCursor = i + titleOffset(); sfx("move"); };
+    spec.onPick = function (i) { state.menuCursor = i + titleOffset(); chooseMenu(); };
+    titleMenu = LoTitle.mount(c, spec);
   }
 
   function enter(screen) {
@@ -3631,13 +4339,7 @@ GM.ui = (function () {
   function onPad(btn) {
     var s = state.screen;
     if (s === "title") {
-      if (btn === "up" || btn === "down") {
-        state.menuCursor = (state.menuCursor + (btn === "down" ? 1 : 2) + 3) % 3;
-        sfx("move");
-        enter("title");
-        return;
-      }
-      if (btn === "a" || btn === "start") chooseMenu();
+      if (titleMenu) titleMenu.press(btn);
       return;
     }
     if (s === "confirm") {
