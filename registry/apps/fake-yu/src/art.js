@@ -732,8 +732,144 @@ var ART = (function () {
     }
   }
 
+  /* ---------------- the bands around the world ----------------
+     lo-game 1.5.0's fill canvas is taller (or wider) than the 160 x 144 world on a phone.
+     These paint everything outside the world in the app's own tones: the hall's ceiling and
+     boards, the venue's sky, the stage's curtain, and a flat frame for a held screen. The
+     surface is reused from frame to frame, so every painter covers its whole band. */
+
+  /* the boards below the world: dark planks with a lit edge under the stage */
+  function bandFloor(g, i) {
+    var w = i.w, by = i.y + i.worldH, bh = i.h - by, row = 0, x, y;
+    g.rect(0, by, w, bh, INK);
+    g.rect(0, by, w, 1, MID);
+    for (y = by + 9; y < i.h; y += 9, row++) {
+      g.rect(0, y, w, 1, DARK);
+      for (x = (row % 2 ? 17 : 45); x < w; x += 58) g.rect(x, y - 8, 1, 8, DARK);
+    }
+  }
+
+  /* the hall over the world: rafters, beams, the eave, and two lanterns under the roof */
+  function bandCeiling(g, i, t) {
+    var w = i.w, th = i.y, x, y;
+    g.rect(0, 0, w, th, INK);
+    for (x = 6; x < w; x += 26) g.rect(x, 0, 2, Math.max(0, th - 7), DARK);
+    for (y = th - 13; y > 3; y -= 11) { g.rect(0, y, w, 2, DARK); g.rect(0, y, w, 1, MID); }
+    /* the eave, its lit underside */
+    var e = Math.min(7, th);
+    g.rect(0, th - e, w, e, INK);
+    g.rect(0, th - e, w, 1, MID);
+    for (x = 5; x < w; x += 12) g.rect(x, th - e + 2, 5, 2, DARK);
+    if (th >= 34) { lantern(g, 34, 2, t); lantern(g, w - 34, 2, t + 1.3); }
+  }
+
+  /* the performance: a curtain hanging over the stage, quiet enough that the notes still lead */
+  function bandCurtain(g, i) {
+    var w = i.w, th = i.y, x, k = 0;
+    g.rect(0, 0, w, th, INK);
+    for (x = 3; x < w; x += 13, k++) {
+      g.rect(x, 0, 4, Math.max(0, th - 3), DARK);
+      if (k % 3 === 0) g.rect(x + 4, 0, 1, Math.max(0, th - 3), MID);
+    }
+    if (th >= 3) { g.rect(0, th - 3, w, 3, INK); g.rect(0, th - 3, w, 1, MID); }
+  }
+
+  /* the cold rooms of King Min, the lake at night: the venue's dark carried up */
+  function bandNight(g, i, venue) {
+    var w = i.w, th = i.y, n, x, y;
+    g.rect(0, 0, w, th, INK);
+    if (venue === "throne") {
+      for (x = 8; x < w; x += 38) { g.rect(x, 0, 9, Math.max(0, th - 3), DARK); g.rect(x + 2, 0, 2, Math.max(0, th - 3), MID); }
+      for (y = th - 10; y > 2; y -= 13) g.rect(0, y, w, 1, DARK);
+      if (th > 0) g.rect(0, th - 1, w, 1, MID);
+      return;
+    }
+    for (n = 0; n < 30; n++) {
+      x = (n * 47 + 13) % w;
+      y = (n * 23 + 5) % Math.max(1, th);
+      g.pixel(x, y, n % 3 ? MID : PAPER);
+    }
+    if (venue === "night" && th > 6) g.dither(0, th - Math.min(22, th), w, Math.min(22, th), DARK, 1);
+    if (th > 0) g.rect(0, th - 1, w, 1, DARK);
+  }
+
+  /* the garden sky and the dawn: the world's dither carried up, getting lighter away from it */
+  function bandSky(g, i, dawn, t) {
+    var w = i.w, th = i.y, k, bx, by;
+    g.rect(0, 0, w, th, PAPER);
+    if (th <= 0) return;
+    g.dither(0, Math.max(0, th - (dawn ? 14 : 20)), w, Math.min(dawn ? 14 : 20, th), MID, 1);
+    g.rect(0, th - 1, w, 1, MID);
+    /* the garden's tall sky gets a few faint cloud banks, or it is a blank paper field */
+    if (!dawn && th >= 26) {
+      for (k = 0; k < 3; k++) {
+        bx = Math.round(((k * 67 + 16 + t * 1.6) % (w + 58)) - 29);
+        by = Math.round(th * (0.2 + 0.17 * k));
+        g.dither(bx, by, 42 + k * 9, 3, MID, 1);
+        g.dither(bx + 7, by - 2, 30 + k * 7, 2, MID, 1);
+      }
+    }
+    for (k = 0; k < 2; k++) {
+      bx = (k ? w - 30 : 22) + Math.round(Math.sin(t * 0.6 + k * 2) * 3);
+      by = Math.max(4, Math.floor(th / 2) - k * 4);
+      g.line(bx, by, bx + 2, by - 1, INK);
+      g.line(bx + 2, by - 1, bx + 4, by, INK);
+    }
+  }
+
+  /* the dawn's fields below the world */
+  function bandField(g, i) {
+    var w = i.w, by = i.y + i.worldH, x;
+    g.rect(0, by, w, i.h - by, PAPER);
+    g.rect(0, by, w, 1, DARK);
+    for (x = 4; x < w; x += 12) {
+      g.rect(x, by + 4, 1, 3, DARK);
+      g.rect(x + 2, by + 5, 1, 2, MID);
+    }
+  }
+
+  /* a held screen (pause, a dialogue, loading): one flat dark frame, nothing to read */
+  function bandQuiet(g, i) {
+    var by = i.y + i.worldH;
+    g.rect(0, 0, i.w, i.h, DARK);
+    if (i.y > 0) g.rect(0, i.y - 1, i.w, 1, INK);
+    if (by < i.h) g.rect(0, by, i.w, 1, INK);
+  }
+
+  /* a stage too short for the world's width: the columns at the sides are pillars, never paper */
+  function bandSides(g, i) {
+    var x = i.x, w = i.w, r = i.x + i.worldW, rw = w - r;
+    if (x > 0) {
+      g.rect(0, 0, x, i.h, INK);
+      if (x >= 6) { g.rect(x - 6, 0, 6, i.h, DARK); g.rect(x - 6, 0, 1, i.h, MID); g.rect(x - 2, 0, 1, i.h, INK); }
+    }
+    if (rw > 0) {
+      g.rect(r, 0, rw, i.h, INK);
+      if (rw >= 6) { g.rect(r, 0, 6, i.h, DARK); g.rect(r, 0, 1, i.h, MID); g.rect(r + 5, 0, 1, i.h, INK); }
+    }
+  }
+
+  function bands(g, i, o) {
+    o = o || {};
+    var mode = o.mode || "hall";
+    if (mode === "quiet") { bandQuiet(g, i); return; }
+    if (i.y > 0) {
+      if (mode === "stage") bandCurtain(g, i);
+      else if (mode === "night") bandNight(g, i, o.venue);
+      else if (mode === "garden") bandSky(g, i, false, o.t || 0);
+      else if (mode === "dawn") bandSky(g, i, true, o.t || 0);
+      else bandCeiling(g, i, o.t || 0);
+    }
+    if (i.y + i.worldH < i.h) {
+      if (mode === "dawn") bandField(g, i);
+      else bandFloor(g, i);
+    }
+    bandSides(g, i);
+  }
+
   return {
     INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+    bands: bands,
     drape: drape, lantern: lantern, pillar: pillar, paintedScreen: paintedScreen, hangingBanner: hangingBanner,
     archWindow: archWindow, crowdHead: crowdHead, guard: guard, musician: musician,
     player: player, conductor: conductor, audience: audience, king: king, portrait: portrait,
