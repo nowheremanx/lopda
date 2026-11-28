@@ -12,6 +12,7 @@
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
     listen: "Play", noChord: "Not one of this book's {n} qualities", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
+    capo: "Capo", sounds: "sounds {c}",
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
     tonicOnly: "Tonic only", allCards: "All",
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
@@ -25,6 +26,7 @@
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
     listen: "听", noChord: "不是这一版的 {n} 种和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
+    capo: "变调夹", sounds: "实际 {c}",
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
     tonicOnly: "只看主和弦", allCards: "全部",
     role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
@@ -37,7 +39,7 @@
   function sfx(n) { try { PAD.sfx(n); } catch (e) {} }
 
   /* ---------------- state and save (section 5) ---------------- */
-  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
+  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, capo: 0, recent: [] };
   var lastVol = 2;          /* the level the mute button comes back to; set.vol may be 0 (1.4.3) */
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
   var spelledName = null;   /* the chord opened from a progression, as that key writes it (1.4.4) */
@@ -56,6 +58,8 @@
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
     if (s.lastVol === 1 || s.lastVol === 2) set.lastVol = s.lastVol;
+    /* the capo (1.4.10): a whole number 0-12; a save from before it, or any other value, is 0 */
+    if (typeof s.capo === "number" && s.capo === Math.floor(s.capo) && s.capo >= 0 && s.capo <= 12) set.capo = s.capo;
     /* a save from before 1.4.2 may hold Ammaj7: show it as Am(maj7), once */
     if (Array.isArray(s.recent)) {
       var seen = {};
@@ -72,6 +76,13 @@
     }
   }
   function chord() { return { root: set.cur.root, q: set.cur.q, bass: set.cur.bass }; }
+  /* the chord the strings actually sound: the shape chord moved up by the capo (15.2). Everything that is played, or
+     worked out by key (the info line's real name, the scales, the progressions), uses it; the shape stays what the header,
+     the picker, the voicings and the save hold. */
+  function sounding(c) { return Chords.transpose(c, set.capo); }
+  /* the real chord's name in the info line: the key's spelling when this chord came from a progression, else the book's */
+  function soundingName(c) { return spelledName || Chords.name(sounding(c)); }
+  function capoText() { return t("capo") + " " + set.capo; }
   function list() {
     var all = Chords.voicings(chord());
     all = set.sort === "pos" ? Chords.byPosition(all) : all;
@@ -101,7 +112,7 @@
   function modes() {
     var n = Chords.name(chord());
     if (md.name !== n) md = { name: n, i: -1, ctx: null, sc: null };
-    if (!md.sc) md.sc = Scales.forChord(chord(), md.ctx);
+    if (!md.sc) md.sc = Scales.forChord(sounding(chord()), md.ctx);
     if (md.i < 0) md.i = md.sc.def;
     return md;
   }
@@ -137,24 +148,34 @@
     $("prev").disabled = one;
     $("next").disabled = one;
     showSound();
-    $("cname").textContent = spelledName || Chords.name(c);
+    /* the header keeps the shape's name: the capo moves the hand, not the chord's name (15.2). The key's spelling of a
+       chord opened from a progression moves to the real name in the info line while a capo is on (capo 0 is unchanged). */
+    $("cname").textContent = set.capo ? Chords.name(c) : (spelledName || Chords.name(c));
     var fixed = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
-    if (spelledName && spelledName !== fixed) $("qname").textContent += " · " + fixed;
+    if (!set.capo && spelledName && spelledName !== fixed) $("qname").textContent += " · " + fixed;
     $("view").textContent = t(set.view === "map" ? "degrees" : set.view === "scale" ? "improv" : set.view);
     if (set.view === "scale") { showScale(); paint(); return; }
     /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
-       fret position, which the picture shows anyway; a second row would shrink the picture */
+       fret position, which the picture shows anyway; a second row would shrink the picture. With a capo the frets, the capo
+       and the real chord never drop, so the voicing's index goes first (15.1); capo 0 never reaches that last step. */
     $("line").classList.remove("deg");
-    var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
+    var line = $("line"), head = "", idx = "";
+    if (v) {
+      head = Chords.fretText(v.frets);
+      if (set.capo) head += " · " + capoText() + " · " + t("sounds", { c: soundingName(c) });
+      idx = t("of", { i: set.cur.i + 1, n: cur.list.length });
+    }
     line.classList.remove("tight");
-    line.textContent = v ? head + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
+    line.textContent = v ? head + " · " + idx + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
     if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
-    if (line.scrollWidth > line.clientWidth) line.textContent = head;
-    /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
+    if (line.scrollWidth > line.clientWidth) line.textContent = v ? head + " · " + idx : "";
+    if (line.scrollWidth > line.clientWidth && set.capo) line.textContent = head;
+    /* one cell per string, low E first, so what the hand plays can be read off: the note it sounds at this capo and its
+       degree in the shape chord */
     var row = $("tones");
     row.innerHTML = "";
-    (v ? Chords.strings(v.frets, c) : []).forEach(function (x) {
+    (v ? Chords.strings(v.frets, c, set.capo) : []).forEach(function (x) {
       if (!x) { row.appendChild(el("span", "tone mute", "x")); return; }
       var cell = el("button", "tone");
       cell.appendChild(el("b", "", Chords.NAMES[x.pc]));
@@ -167,9 +188,11 @@
   /* the improv view's words: the scale and how far through the list, its notes by kind, why it works and the legend */
   function showScale() {
     var m = modes(), o = m.sc.list[m.i], c = chord(), line = $("line"), row = $("tones");
-    /* the scale is named after the root as the key writes it: G#dim7 from a progression shows G#, not Ab (1.4.4) */
+    /* the scale is named after the chord the strings sound (the shape moved up by the capo), as the key writes it when the
+       chord came from a progression: G#dim7 from a progression shows G#, not Ab (1.4.4) */
     var spelledRoot = spelledName ? (/^[A-G][#b]?/.exec(spelledName) || [""])[0] : "";
-    $("qname").textContent = (spelledRoot || Chords.NAMES[c.root]) + " " + (EN ? o.en : o.zh) + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
+    $("qname").textContent = (spelledRoot || Chords.NAMES[sounding(c).root]) + " " + (EN ? o.en : o.zh) +
+      (set.capo ? " · " + capoText() : "") + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
     line.classList.remove("tight");
     line.classList.add("deg");
     line.innerHTML = "";
@@ -203,7 +226,7 @@
     var cur = current(), c = chord();
     if (!cur.v) return;
     var w = wrap.clientWidth, h = wrap.clientHeight;
-    var b = set.view === "scale" ? Draw.scale(modes().sc.list[md.i].notes) : set.view === "map" ? Draw.map(cur.v, c) :
+    var b = set.view === "scale" ? Draw.scale(modes().sc.list[md.i].notes, set.capo) : set.view === "map" ? Draw.map(cur.v, c) :
       set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
     Draw.paint(cv, b, Math.max(1, w), Math.max(1, h));
     prevBuf = lastBuf; lastBuf = b;
@@ -249,7 +272,7 @@
     /* a quality stepped into may have no voicing with this root and bass: stay on the chord you had (1.4.4) */
     if (go({ root: set.cur.root, q: Chords.QUALS[(qi + d + n) % n].id, bass: set.cur.bass }, 0)) sfx("tick");
   }
-  function notesOf(v) { return Chords.midiOf(v.frets); }
+  function notesOf(v) { return Chords.midiOf(v.frets, set.capo); }
   /* one string on its own, at the pitch it sounds in this voicing; strings tapped one after another ring together (at
      most 8), so the intervals between them can be heard as melody and as harmony */
   function playString(x) {
@@ -269,7 +292,7 @@
     if (!v || !r.width) return;
     var bx = (e.clientX - r.left) * cv.width / r.width, by = (e.clientY - r.top) * cv.height / r.height;
     var hit = set.view === "neck" || set.view === "scale" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
-    if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true) && Guitar.level()) sfx("tap");
+    if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f + set.capo], 0, true) && Guitar.level()) sfx("tap");
   }
   (function () {
     var x0 = null, y0 = 0;
@@ -395,6 +418,19 @@
         if (i) Guitar.play([52, 59, 64], 0.012); else sfx("tick");
       }));
     });
+    /* the capo takes effect at once, like the order and the sound: the pictures and the voicing stay, the pitch and
+       everything worked out by key move. A new capo is a new real chord and a new real scale, so the key's spelling and
+       the chosen scale go too, as they do on a new chord (15.1). */
+    var cp = $("capo"); cp.innerHTML = "";
+    for (var n = 0; n <= 12; n++) (function (n) {
+      cp.appendChild(choice(String(n), set.capo === n, function () {
+        if (set.capo === n) { sfx("tick"); return; }
+        set.capo = n;
+        md = { name: "", i: 0, ctx: null, sc: null };
+        spelledName = null;
+        sfx("ok"); store(); buildPicker(); show();
+      }));
+    })(n);
   }
   function applyPick() {
     if (!go(pick, 0)) { $("msg").textContent = t("noVoicing"); return; }
@@ -430,11 +466,12 @@
   /* the cards on screen, in their order; a display index is what the sequence and the focus use */
   function shownProgs() { return gtonic ? gl.filter(isTonic) : gl; }
   function openProgs() {
-    var c = chord();
+    var c = sounding(chord());
     gl = Progs.forChord(c);
     gtonic = false;   /* every visit starts with all of them: the filter is not a remembered setting */
     gfocus = 0; gkeyed = false;
-    $("gtitle").textContent = t("progTitle", { c: Chords.name(c) });
+    /* the real key and chord: a shape C under capo 2 shows D's progressions, and says why (15.1) */
+    $("gtitle").textContent = t("progTitle", { c: Chords.name(c) }) + (set.capo ? " · " + capoText() : "");
     buildProgs();
     progs.classList.add("open");
     $("glist").scrollTop = 0;
@@ -442,12 +479,16 @@
   }
   function closeProgs() { stopSeq(); progs.classList.remove("open"); gl = null; gshown = []; show(); }
   /* the voicing each chord of a progression is played with: the one in view for the chord you came from, the nearest
-     common one to its fret position for the others, so the hand would stay in one place */
+     common one to its fret position for the others, so the hand would stay in one place. A card's chords are the real ones,
+     so each is taken back below the capo to find the shape the hand holds (15.4). */
   function voicingFor(r, i) {
     var v = current().v;
     if (i === r.at && r.exact && v) return v;
-    return Progs.nearVoicing(Chords.voicings(r.chords[i]), v ? v.pos : 0);
+    return Progs.nearVoicing(Chords.voicings(Chords.transpose(r.chords[i], -set.capo)), v ? v.pos : 0);
   }
+  /* a card's chord that has no shape once the capo is taken off would blank the main screen: it is drawn disabled, and
+     Play skips it (15.5). The table has none today; the guard costs nothing. */
+  function shapeOf(x) { return Chords.transpose(x, -set.capo); }
   function buildProgs() {
     var box = $("glist"); box.innerHTML = "";
     gshown = gl ? shownProgs() : [];
@@ -463,12 +504,13 @@
       var chips = el("div", "chips grid4");
       r.chords.forEach(function (x, i) {
         var b = choice(r.names[i], seq.card === n && seq.i === i, function () { jumpTo(r, i); });
+        if (!Chords.voicings(shapeOf(x)).length) b.disabled = true;
         if (i === r.at) b.className += " me";
         chips.appendChild(b);
       });
       card.appendChild(chips);
-      var row = el("div", "grow"), here = Chords.name(chord()), rn = p.rn[r.at];
-      row.appendChild(el("div", "grole", !r.exact ? t("loose", { c: Chords.name({ root: chord().root, q: chord().q, bass: null }), rn: rn }) :
+      var row = el("div", "grow"), sc = sounding(chord()), here = Chords.name(sc), rn = p.rn[r.at];
+      row.appendChild(el("div", "grole", !r.exact ? t("loose", { c: Chords.name({ root: sc.root, q: sc.q, bass: null }), rn: rn }) :
         r.names[r.at] !== here ? t("spelled", { c: here, s: r.names[r.at], rn: rn }) : t("role", { c: here, rn: rn })));
       row.appendChild(choice(seq.card === n ? t("stopIt") : t("play"), false, function () { playProg(n); }, "gplay"));
       card.appendChild(row);
@@ -513,21 +555,21 @@
       if (i >= r.chords.length) { stopSeq(); buildProgs(); return; }
       seq.card = n; seq.i = i;
       var v = voicingFor(r, i);
-      if (v) Guitar.play(Chords.midiOf(v.frets), 0.012);
+      if (v) Guitar.play(Chords.midiOf(v.frets, set.capo), 0.012);
       buildProgs();
       var bars = (r.p.bars && r.p.bars[i]) || 1;
       seq.timer = setTimeout(function () { if (bar + 1 < bars) at(i, bar + 1); else at(i + 1, 0); }, 1000);
     }
     at(0, 0);
   }
-  /* a chord in a progression opens it on the main screen, on the voicing it was played with; its name is written the
-     key's way, with the book's own name beside it (1.4.4) */
+  /* a chord in a progression opens it on the main screen, on the voicing it was played with, as the shape the hand holds
+     below the capo; its real name is written the key's way and goes in the info line (1.4.4, 15.4) */
   function jumpTo(r, i) {
-    var v = voicingFor(r, i), c = r.chords[i], spelled = r.names[i];
+    var v = voicingFor(r, i), actual = r.chords[i], spelled = r.names[i], c = shapeOf(actual);
     stopSeq();
     progs.classList.remove("open"); gl = null; gshown = []; gtonic = false;
-    if (!go(c, 0)) { show(); return; }   /* unreachable: every progression chord has a voicing */
-    spelledName = spelled && spelled !== Chords.name(c) ? spelled : null;
+    if (!go(c, 0)) { show(); return; }   /* unreachable: every progression chord has a shape */
+    spelledName = spelled && spelled !== Chords.name(actual) ? spelled : null;
     md = { name: Chords.name(c), i: -1, ctx: { key: r.key, minor: r.p.key === "min", label: t(r.p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName }) }, sc: null };
     var l = list(), id = v ? v.frets.join(",") : "";
     set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
@@ -573,7 +615,7 @@
       }, "xo");
       xo.appendChild(b);
     });
-    $("fpos").textContent = t("posLabel", { n: fs.base });
+    $("fpos").textContent = t("posLabel", { n: fs.base }) + (set.capo ? " · " + capoText() : "");
     var grid = $("frets"); grid.innerHTML = "";
     for (var r = 0; r < 5; r++) for (var s = 0; s < 6; s++) (function (s, f) {
       var b = choice(String(f), fs.frets[s] === f, function () {
@@ -581,14 +623,15 @@
       }, "cell");
       grid.appendChild(b);
     })(s, fs.base + r);
-    var ids = Chords.identify(fs.frets), out = $("fname"), alt = $("falt");
+    /* the shape is under the capo: the names are the chords the strings really sound, so x32010 under capo 2 is D (15.3) */
+    var ids = Chords.identify(fs.frets, set.capo), out = $("fname"), alt = $("falt");
     if (ids.length) {
       out.textContent = Chords.name(ids[0]);
       alt.textContent = ids.length > 1 ? t("also") + ids.slice(1).map(Chords.name).join(", ") : "";
     } else {
       out.textContent = t("noChord", { n: Chords.QUALS.length });
       var seen = {}, names = [];
-      Chords.midiOf(fs.frets).forEach(function (m) { var n = Chords.NAMES[m % 12]; if (!seen[n]) { seen[n] = 1; names.push(n); } });
+      Chords.midiOf(fs.frets, set.capo).forEach(function (m) { var n = Chords.NAMES[m % 12]; if (!seen[n]) { seen[n] = 1; names.push(n); } });
       alt.textContent = names.join(" ");
     }
     $("fsee").disabled = !ids.length;
@@ -608,9 +651,10 @@
     sfx("tick"); buildFinder();
   }
   function seeFound() {
-    var ids = Chords.identify(fs.frets);
+    var ids = Chords.identify(fs.frets, set.capo);
     if (!ids.length) { sfx("err"); return; }
-    var c = { root: ids[0].root, q: ids[0].q, bass: ids[0].bass }, frets = fs.frets.slice();
+    /* the finder names the real chord; the main screen holds the shape under the capo, so it comes back down (15.3) */
+    var c = Chords.transpose({ root: ids[0].root, q: ids[0].q, bass: ids[0].bass }, -set.capo), frets = fs.frets.slice();
     var l = Chords.voicings(c);
     l = set.sort === "pos" ? Chords.byPosition(l) : l;
     var i = l.map(function (v) { return v.frets.join(","); }).indexOf(frets.join(","));
@@ -635,7 +679,7 @@
   $("fdown").addEventListener("click", function () { moveBase(-1); });
   $("fup").addEventListener("click", function () { moveBase(1); });
   $("fplay").addEventListener("click", function () {
-    var n = Chords.midiOf(fs.frets);
+    var n = Chords.midiOf(fs.frets, set.capo);
     if (!n.length) { if (Guitar.level()) sfx("err"); return; }
     if (!Guitar.play(n, 0.012) && Guitar.level()) sfx("err");
   });
@@ -687,7 +731,7 @@
   $("pback").textContent = t("back"); $("pok").textContent = t("ok"); $("qgo").textContent = t("find");
   $("q").placeholder = t("search"); $("rootH").textContent = t("root"); $("bassH").textContent = t("bass");
   $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
-  $("sortH").textContent = t("order");
+  $("sortH").textContent = t("order"); $("capoH").textContent = t("capo");
   $("prog").textContent = t("progs"); $("gback").textContent = t("back");
   $("gfilter").textContent = t("tonicOnly");
   $("fback").textContent = t("back"); $("wback").textContent = t("back");
