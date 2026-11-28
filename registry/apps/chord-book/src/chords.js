@@ -9,6 +9,9 @@ var Chords = (function () {
   var MAX_FRET = 15, SPAN = 3, LIMIT = 24;
   /* the note names shown, the same set the four-track uses */
   var NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  /* the picker's root and bass labels: the book's names with the common enharmonic beside them (1.4.5). Only those two
+     grids read this; chord names, tone names, search and saves keep NAMES. */
+  var PICK_NAMES = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
   var LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
   /* The 19 qualities of version 1, in the order the picker lists them (section 2.1). iv: semitones above the root;
@@ -25,7 +28,7 @@ var Chords = (function () {
     { id: "m7",    zh: "小七",   en: "minor 7",     iv: [0, 3, 7, 10],     lab: ["R", "b3", "5", "b7"],          opt: [7], group: 1, common: 0.8 },
     { id: "m7b5",  zh: "半减七", en: "half-dim",    iv: [0, 3, 6, 10],     lab: ["R", "b3", "b5", "b7"],         opt: [],  group: 1, common: 0.5 },
     { id: "dim7",  zh: "减七",   en: "dim 7",       iv: [0, 3, 6, 9],      lab: ["R", "b3", "b5", "bb7"],        opt: [],  group: 1, common: 0.5 },
-    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3 },
+    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3, show: "m(maj7)" },
     { id: "sus2",  zh: "挂二",   en: "sus2",        iv: [0, 2, 7],         lab: ["R", "2", "5"],                 opt: [],  group: 2, common: 0.6 },
     { id: "sus4",  zh: "挂四",   en: "sus4",        iv: [0, 5, 7],         lab: ["R", "4", "5"],                 opt: [],  group: 2, common: 0.6 },
     { id: "7sus4", zh: "属七挂四", en: "7sus4",     iv: [0, 5, 7, 10],     lab: ["R", "4", "5", "b7"],           opt: [7], group: 2, common: 0.5 },
@@ -85,7 +88,8 @@ var Chords = (function () {
     if (bass === root) bass = null;
     return { root: root, q: q, bass: bass };
   }
-  function name(c) { return NAMES[c.root] + c.q + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
+  /* the name a player writes: the quality's own spelling where it has one (Am(maj7), not Ammaj7) */
+  function name(c) { var Q = qual(c.q); return NAMES[c.root] + (Q && Q.show ? Q.show : c.q) + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
   function qual(id) { return Object.prototype.hasOwnProperty.call(QI, id) ? QUALS[QI[id]] : null; }
 
   /* the chord's notes and how each is written, bass first when it is not a chord tone */
@@ -223,6 +227,30 @@ var Chords = (function () {
     }
     return { n: n, barre: null };
   }
+  /* The barre a shape's own fingers show (1.4.1): the lowest fret where one finger 1-4 holds two or more sounding
+     strings, spanning the first and the last of them. A string under that span that is open, muted or lower than the
+     barre means the finger cannot be lying across it, so there is no barre at that fret. Finger 1 is the usual index
+     barre; C9 x32333 is barred by the ring finger across G-B-E (1.4.4). Hand-written shapes know their fingering;
+     fingerCount guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
+  function barreFromFingers(frets, fingers) {
+    var best = null, k, i, j, a, z, ok;
+    for (k = 1; k <= 4; k++) {
+      var held = [];
+      for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === k) held.push(i);
+      if (held.length < 2) continue;
+      for (i = 0; i < held.length; i++) {
+        var f = frets[held[i]], n = 0;
+        for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
+        if (n < 2 || (best && f >= best.fret)) continue;
+        a = -1; z = -1;
+        for (j = 0; j < 6; j++) if (frets[j] === f && fingers[j] === k) { if (a < 0) a = j; z = j; }
+        ok = true;
+        for (j = a; j <= z; j++) if (frets[j] < f) ok = false;
+        if (ok) best = { fret: f, from: a, to: z, finger: k };
+      }
+    }
+    return best;
+  }
   /* fingers for a computed voicing: index on the barre, then the other notes by fret and string */
   function assignFingers(frets) {
     var fc = fingerCount(frets), out = [0, 0, 0, 0, 0, 0], notes = [], i, f = 1;
@@ -317,7 +345,10 @@ var Chords = (function () {
     });
     list.sort(function (a, b) { return b.rank - a.rank; });
     list = list.slice(0, LIMIT);
-    list.forEach(function (v) { v.pos = position(v.frets); v.barre = fingerCount(v.frets).barre; });
+    list.forEach(function (v) {
+      v.pos = position(v.frets);
+      v.barre = v.tier > 0 ? barreFromFingers(v.frets, v.fingers) : fingerCount(v.frets).barre;
+    });
     CACHE[k] = list;
     return list;
   }
@@ -361,11 +392,12 @@ var Chords = (function () {
   }
 
   return {
-    OPEN: OPEN, NAMES: NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
+    OPEN: OPEN, NAMES: NAMES, PICK_NAMES: PICK_NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
     parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
-    fingerCount: fingerCount, assignFingers: assignFingers, position: position, midiOf: midiOf, fretText: fretText,
+    fingerCount: fingerCount, assignFingers: assignFingers, barreFromFingers: barreFromFingers, position: position,
+    midiOf: midiOf, fretText: fretText,
     identify: identify
   };
 })();

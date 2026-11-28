@@ -4,16 +4,16 @@
   "name": "和弦大全",
   "glyph": "弦",
   "category": "productivity",
-  "version": "1.4.0",
-  "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板、度数图和即兴音阶，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。",
+  "version": "1.4.6",
+  "description": "吉他和弦字典：19 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。",
   "i18n": {
     "zh": {
       "name": "和弦大全",
-      "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板、度数图和即兴音阶，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。"
+      "description": "吉他和弦字典：19 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。"
     },
     "en": {
       "name": "Chords",
-      "description": "Guitar chords: shapes, degree maps, scales to improvise, progressions and why."
+      "description": "EADGBE, no capo: 19 qualities, slash chords, shapes, scales, progressions."
     }
   },
   "author": "Haowei Wu",

@@ -1,8 +1,10 @@
 # 和弦大全 / Chords: notes for maintainers
 
-A guitar chord dictionary for Lo-PDA, standard tuning only. It has 19 chord qualities plus slash chords and up to 24
-voicings each. There are four pictures of a chord, 23 common progressions with a note on why each works, a scale view
-for improvising, and a finder that names the chord your fingers make. Sound is a plucked string made in the app.
+A guitar chord dictionary for Lo-PDA. This version covers **19 chord qualities plus slash chords, in standard tuning
+(EADGBE) only, with no capo**; a capo is planned for v2 (section 11), while other tunings and a left-handed layout are
+not planned yet. It has up to 24 voicings each, four pictures of a chord, 23 common progressions with a note on why each
+works, a scale view for improvising, and a finder that names the chord your fingers make. Sound is a plucked string made
+in the app.
 
 This file says where things are and what must not break. Why things are the way they are is in
 [`docs/design/chord-book.md`](../../../docs/design/chord-book.md) (the design, section 13 for each version's changes) and
@@ -29,23 +31,53 @@ ones' globals (`Chords`, `Draw`, `Guitar`, `Progs`, `Scales`).
 
 From top to bottom:
 
-- **Header:** the chord name, which opens the picker; 连接, the progressions; the view button.
+- **Header:** the chord name, which opens the picker; 连接, the progressions; the view button. A chord opened from a
+  progression keeps the key's spelling here (`G#dim7`), and the quality line adds the book's own name (`减七 · Abdim7`);
+  a normal pick, search or recent chip clears the note (1.4.4).
 - **Picture:** one of four views.
 - **Quality line:** the chord quality, or in the improv view the scale's name.
 - **Info line:** the frets, the voicing's number and its position, or in the improv view the scale's degrees.
-- **Bottom row:** one 44 x 44 cell per string, or in the improv view the why and the legend.
-- **Footer:** previous, strum, next.
+- **Bottom row:** one 44 x 44 cell per string, or in the improv view the why and the legend. A tap on the why opens it
+  in full on its own screen (`#whyfull`).
+- **Footer:** previous, strum, next, mute. In the improv view previous and next become Prev scale and Next scale, and
+  both are off when the chord has a single scale. Mute turns the guitar off, or back to the last level that made a sound
+  (mid by default; kept across restarts).
 
 The view button cycles through four views. The view is saved as `set.view`.
 
 | `set.view` | Shows | A tap plays | Left / right |
 |---|---|---|---|
-| `box` (框图) | The voicing on 6 strings x 5 frets, fingers in the dots, the root as a square | the note at that string and fret, among the five frets (and the open strings when the box starts at the nut) | voicing |
+| `box` (框图) | The voicing on 6 strings x 5 frets, fingers in the dots, the root as a square, a barre as a bar (finger 1, or a ring finger as in C9 x32333) | the note at that string and fret, among the five frets (and the open strings when the box starts at the nut) | voicing |
 | `neck` (指板) | The voicing on 15 frets, with the chord's notes elsewhere as small dots | the note anywhere on 15 frets | voicing |
 | `map` (度数) | The box's five frets with every place named by its degree | as `box` | voicing |
-| `scale` (即兴) | The chosen scale on 15 frets: root square, chord tone dot, tension ring, avoid cross | as `neck` | scale |
+| `scale` (即兴) | The chosen scale on 15 frets: root square, chord tone dot, tension ring, avoid cross | as `neck` | scale (both buttons off when there is only one) |
 
 A swipe slides the picture (`slide()` in app.js). The words and the hit tests change at once; only the picture moves.
+The finder opened from the picker starts from the pending chord's first voicing, and its Back returns to the picker
+(`finderFromPicker` in app.js); 看这个和弦 always goes to the main screen.
+
+### The picker
+
+The root and bass grids write the common enharmonic beside the book's name (`C#/Db`, `Eb/D#`, `F#/Gb`, `Ab/G#`,
+`Bb/A#`), from the pure array `Chords.PICK_NAMES`. Only those labels change: a tap still selects the pitch class, the
+selected state is still the pitch class, the bass grid still leaves the root out, and the title and every chord name,
+tone name, search result and save keep `Chords.NAMES` (so tapping `C#/Db` gives C#). Five characters fit the four-column
+grid at 331, and the cells stay 44 px tall (1.4.5).
+
+### The progressions screen
+
+23 hand-written progressions (`src/progs.js`), each a card with its key, Roman numerals, a chip per chord (the one you
+came from underlined), a Play button and a note on why it works. The sequence strums one chord a bar, holds a chord for
+its `p.bars[i]` bars and fills the chip that is sounding; a second tap stops it. A chip opens that chord on the main
+screen on the voicing it was played with, and the key's spelling follows.
+
+`#gbar` above the scrolling list has one filter button. All cards show by default; `只看主和弦 / Tonic only` keeps only
+the cards where the chord is the tonic of its key (`r.p.ch[r.at][0] === 0`, 12 of C's 15), and the button then reads
+`全部 / All` in the on style. The filtered array is the list everywhere: the cards drawn, the `seq.card` index, the
+keyboard focus and what Play plays. Toggling stops a running sequence, clears the focus and scrolls to the top; every
+visit starts with all cards. The row appears only when there is a mix to choose between: a chord with no tonic card
+(Bdim is only vii° of the circle) or with every card already tonic (Cmaj7's two) hides it and disables the button, so the
+filter never leaves an empty screen or does nothing (1.4.5).
 
 ### Rules the screen depends on
 
@@ -58,7 +90,15 @@ A swipe slides the picture (`slide()` in app.js). The words and the hit tests ch
   with `Draw.paint` from the previous buffer.
 - **Sound starts on release.** The strum plays on `pointerup` (a long press is the arpeggio), because iPhone only lets
   audio start in a gesture that ends.
+- **A chord with no voicing never opens.** Eight root / quality / bass combinations have no voicing (`Ab9/B`, the m9
+  family over some basses). `go()` in app.js checks `Chords.voicings(c)` first, plays `err` and leaves the main screen
+  alone; the picker's 好, search, recent chips and 在指板上点出和弦 all stay put and say 这个和弦没有按法 / No voicing for
+  this chord, and the finder does not open. The main screen's ↑ ↓ 换性质 is refused too, but silently apart from the
+  `err` sound (the main screen has no message row). An old save holding one of them starts on C (1.4.4).
 - **No chin pad.** SELECT exists only as Shift on a computer keyboard. Every key has a button on screen.
+- **Keys are what the code does.** In the picker ← → change the root and ↑ ↓ the quality; the bass row is touch-only.
+  In the finder ← → move the position; its x / o row and 6 x 5 grid are touch-only. Every one of those actions also has
+  a button (the bass row, the grid, the why line, the mute).
 
 ## Data that is ours
 
@@ -72,7 +112,7 @@ below a chord tone. The tests check that every avoid note is a half step over a 
 
 ## Saved state
 
-`PAD.save("set", {v: 1, cur: {root, q, bass, i}, sort, view, vol, recent})`. `adopt()` in app.js reads older saves:
+`PAD.save("set", {v: 1, cur: {root, q, bass, i}, sort, view, vol, lastVol, recent})`. `adopt()` in app.js reads older saves:
 
 - 1.2.0's `map: true` becomes `view: "map"`.
 - Anything it does not know is dropped.

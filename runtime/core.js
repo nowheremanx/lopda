@@ -257,7 +257,7 @@ document.addEventListener("visibilitychange",function(){
 });
 
 /* ---------- sound: tiny square-wave chips through Web Audio (the named sounds themselves are in chip.js) ---------- */
-var RUNTIME_VERSION="1.7.3";   /* keep in step with VERSION in sw.js */
+var RUNTIME_VERSION="1.7.4";   /* keep in step with VERSION in sw.js */
 /* One volume, five steps, 0 is off (decisions.md section 10). It sets the master gain and nothing else does.
    Under the master: `ui` for the runtime's own clicks and the built-ins' prompts, held at a fraction so they stay as
    quiet as they always were (step 2 gives them 0.11, their level before 0.12.0), and `app` for apps, music and the
@@ -630,15 +630,42 @@ padRoute("home",function(b,down){
   dismissAddHomeTip(); return true;
 });
 function padOn(){ return !$("gamepad").hidden; }
-function setButton(b,down){
-  if(!(b in PADB) || PADB[b]===down) return;
+/* A key can be held by more than one thing at once: a thumb on the chin pad, a keyboard key and a Bluetooth controller.
+   Keep one pressed flag per source and route only the effective state, so letting go of one source does not release
+   the key while another still holds it (the touch and controller A used to steal each other's release). */
+var PADSRC={touch:{},key:{},pad:{},bind:{}};
+function padSource(name){ if(!PADSRC[name]) PADSRC[name]={}; return PADSRC[name]; }
+function padEmit(b,down,src){
   PADB[b]=down;
   var el=document.querySelector('.gamepad [data-b="'+b+'"]'); if(el) el.classList.toggle("on",down);
   var arm=document.querySelector(".dpad ."+({up:"u",down:"d",left:"l",right:"r"}[b]||"x")); if(arm) arm.classList.toggle("on",down);
-  if(down && navigator.vibrate) try{ navigator.vibrate(6); }catch(e){}
+  /* a controller has its own feel: the phone must not buzz for every button of a pad lying next to it */
+  if(down && src!=="pad" && navigator.vibrate) try{ navigator.vibrate(6); }catch(e){}
   for(var i=0;i<PAD_ORDER.length;i++){ var fn=padRoutes[PAD_ORDER[i]]; if(fn && fn(b,down)) return; }
 }
-function releaseButtons(){ Object.keys(PADB).forEach(function(b){ setButton(b,false); }); }
+function setButton(b,down,src){
+  if(!(b in PADB)) return;
+  src=src||"touch";
+  var mine=padSource(src);
+  if(down){ if(mine[b]) return; mine[b]=true; }
+  else { if(!mine[b]) return; mine[b]=false; }
+  var on=false;
+  for(var s in PADSRC){ if(PADSRC[s][b]){ on=true; break; } }
+  if(on!==PADB[b]) padEmit(b,on,src);
+}
+/* one source lets go (blur, a keyboard keyup): other sources on the same key stay down */
+function releaseSource(src){
+  var m=PADSRC[src]; if(!m) return;
+  Object.keys(m).forEach(function(b){ if(m[b]) setButton(b,false,src); });
+}
+/* everything lets go (the chin pad hides, the cartridge pauses): clear every source and route the releases */
+function releaseButtons(){
+  Object.keys(PADB).forEach(function(b){
+    if(!PADB[b]) return;
+    for(var s in PADSRC) PADSRC[s][b]=false;
+    padEmit(b,false);
+  });
+}
 function showPad(on){
   if(!on) releaseButtons();
   $("gamepad").hidden=!on;
@@ -646,8 +673,8 @@ function showPad(on){
 }
 Array.prototype.forEach.call(document.querySelectorAll(".gamepad .pk"),function(el){
   var b=el.getAttribute("data-b");
-  el.addEventListener("pointerdown",function(e){ e.preventDefault(); try{ el.setPointerCapture(e.pointerId); }catch(x){} setButton(b,true); });
-  ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){ el.addEventListener(t,function(){ setButton(b,false); }); });
+  el.addEventListener("pointerdown",function(e){ e.preventDefault(); try{ el.setPointerCapture(e.pointerId); }catch(x){} setButton(b,true,"touch"); });
+  ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){ el.addEventListener(t,function(){ setButton(b,false,"touch"); }); });
   el.addEventListener("contextmenu",function(e){ e.preventDefault(); });
 });
 /* iOS Safari ignores user-scalable=no and zooms on a quick double tap on anything that is not a button, which the cross
@@ -667,9 +694,9 @@ $("gamepad").addEventListener("touchend",function(e){ if(e.cancelable) e.prevent
       if(sec>=3&&sec<=5) want.left=true;
       if(sec>=5&&sec<=7) want.up=true;
     }
-    Object.keys(want).forEach(function(k){ setButton(k,want[k]); });
+    Object.keys(want).forEach(function(k){ setButton(k,want[k],"touch"); });
   }
-  function end(e){ if(e.pointerId!==id) return; id=null; ["up","down","left","right"].forEach(function(k){ setButton(k,false); }); }
+  function end(e){ if(e.pointerId!==id) return; id=null; ["up","down","left","right"].forEach(function(k){ setButton(k,false,"touch"); }); }
   dp.addEventListener("pointerdown",function(e){ e.preventDefault(); id=e.pointerId; try{ dp.setPointerCapture(id); }catch(x){} aim(e); });
   dp.addEventListener("pointermove",function(e){ if(e.pointerId===id) aim(e); });
   ["pointerup","pointercancel","lostpointercapture"].forEach(function(t){ dp.addEventListener(t,end); });
@@ -677,10 +704,11 @@ $("gamepad").addEventListener("touchend",function(e){ if(e.cancelable) e.prevent
 document.addEventListener("keydown",function(e){
   var b=PADKEYS[e.key], homeTip=b==="a" && !$("v-home").hidden && $("home-add-tip");
   if(!b || (!padOn() && !homeTip) || /INPUT|TEXTAREA/.test(e.target.nodeName)) return;
-  e.preventDefault(); if(!e.repeat) setButton(b,true);
+  e.preventDefault(); if(!e.repeat) setButton(b,true,"key");
 });
-document.addEventListener("keyup",function(e){ var b=PADKEYS[e.key]; if(b && (padOn() || PADB[b])) setButton(b,false); });
-window.addEventListener("blur",releaseButtons);
+document.addEventListener("keyup",function(e){ var b=PADKEYS[e.key]; if(b) setButton(b,false,"key"); });
+/* losing the window can lose the keyboard keyup; fingers get pointercancel. A controller is polled, so it stays. */
+window.addEventListener("blur",function(){ releaseSource("key"); releaseSource("touch"); });
 
 if(/[?&]debug\b/.test(location.search)) window.LOPDA_DEBUG={setButton:setButton, sfxLog:[]};
 

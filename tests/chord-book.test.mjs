@@ -75,6 +75,76 @@ test("golden list: the shape a guitarist expects comes first under Common", () =
   }
 });
 
+test("barres: a hand-written shape draws a barre only where its own fingers bar the strings", () => {
+  const shapes = C.shapes();
+  let barred = 0, checked = 0;
+  for (const key of Object.keys(shapes)) {
+    const [root, q, bass] = key.split(":");
+    const c = { root: +root, q, bass: bass === "" ? null : +bass };
+    const byFret = new Map(C.voicings(c).map((v) => [v.frets.join(","), v]));
+    for (const s of shapes[key]) {
+      const v = byFret.get(s.frets.join(","));
+      assert.ok(v, `${C.name(c)} ${C.fretText(s.frets)} is a voicing`);
+      checked++;
+      if (!v.barre) continue;
+      barred++;
+      for (let i = v.barre.from; i <= v.barre.to; i++) {
+        if (v.frets[i] === v.barre.fret) assert.equal(v.fingers[i], v.barre.finger, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} under the barre is finger ${v.barre.finger}`);
+        else assert.ok(v.frets[i] > v.barre.fret, `${C.name(c)} ${C.fretText(v.frets)}: string ${i} inside the barre`);
+      }
+    }
+  }
+  assert.ok(checked > 400 && barred > 150, `${checked} hand-written voicings, ${barred} with a barre`);
+});
+
+test("barres: shapes played with separate fingers draw none; the E shape still bars across all six strings", () => {
+  const first = (name) => C.voicings(C.parse(name))[0];
+  for (const name of ["D", "A", "Em", "Asus2", "Asus4", "Em7", "Emaj7", "Ammaj7", "E5", "A5", "Esus4", "D/A"])
+    assert.equal(first(name).barre, null, `${name} ${C.fretText(first(name).frets)}: no barre`);
+  const f = first("F");
+  assert.equal(C.fretText(f.frets), "133211");
+  assert.deepEqual({ ...f.barre }, { fret: 1, from: 0, to: 5, finger: 1 });
+});
+
+test("barres: the canonical shapes keep their real barre", () => {
+  const canon = {
+    F: ["133211", { fret: 1, from: 0, to: 5, finger: 1 }],
+    Bb: ["x13331", { fret: 1, from: 1, to: 5, finger: 1 }],
+    Bm: ["x24432", { fret: 2, from: 1, to: 5, finger: 1 }],
+    B: ["x24442", { fret: 2, from: 1, to: 5, finger: 1 }],
+    "F#m": ["244222", { fret: 2, from: 0, to: 5, finger: 1 }],
+    "C#m": ["x46654", { fret: 4, from: 1, to: 5, finger: 1 }],
+    Dmaj7: ["xx0222", { fret: 2, from: 3, to: 5, finger: 1 }],
+    A6: ["x02222", { fret: 2, from: 2, to: 5, finger: 1 }],
+    "F/C": ["x33211", { fret: 1, from: 4, to: 5, finger: 1 }],
+    Dm7: ["xx0211", { fret: 1, from: 4, to: 5, finger: 1 }]
+  };
+  for (const [name, [frets, want]] of Object.entries(canon)) {
+    const v = C.voicings(C.parse(name)).find((x) => C.fretText(x.frets) === frets);
+    assert.ok(v, `${name} ${frets} is a voicing`);
+    assert.deepEqual({ ...v.barre }, want, `${name} ${frets}`);
+  }
+});
+
+test("barres: C9 x32333 is barred by the ring finger across G-B-E, and the box draws it; D/A has none", () => {
+  const c = C.parse("C9"), v = C.voicings(c).find((x) => C.fretText(x.frets) === "x32333");
+  assert.ok(v, "C9 x32333 is a voicing");
+  assert.deepEqual({ ...v.barre }, { fret: 3, from: 3, to: 5, finger: 3 }, "the ring finger lies across the top three strings");
+  const b = D.box(v, c.root), x = 83, y = 58;
+  assert.equal(b.px[y * b.w + x], 0, "ink between the B and high E strings at fret 3 is the barre");
+  const d = C.voicings(C.parse("D/A"))[0];
+  assert.equal(C.fretText(d.frets), "x00232");
+  assert.equal(d.barre, null, "D/A x00232 uses separate fingers");
+});
+
+test("barres: a guessed finder shape is fingered by fingerCount, so x12222 has no barre", () => {
+  const frets = C.fr("x12222"), fingers = C.assignFingers(frets);
+  assert.equal(C.fingerCount(frets).barre, null, "six strings, five notes: no barre");
+  /* assignFingers clamps at 4, leaving three strings on that guess; barreFromFingers would call it a barre, which is
+     exactly why the finder's temporary voicing must ask fingerCount (1.4.4) */
+  assert.ok(C.barreFromFingers(frets, fingers), "the clamped guess is not a barre");
+});
+
 test("every one of the 12 x 19 chords has at least 3 voicings, and every voicing keeps the rules", () => {
   for (const c of every()) {
     const list = C.voicings(c);
@@ -106,12 +176,26 @@ test("names: every chord's name reads back as the same chord; aliases and enharm
   same("C°7", "Cdim7"); same("Co", "Cdim"); same("C+", "Caug"); same("Csus", "Csus4"); same("Cadd2", "Cadd9");
   same("CmM7", "Cmmaj7"); same("Cm(maj7)", "Cmmaj7"); same("C#m7b5", "Dbm7b5"); same("E♭m", "Ebm"); same("D#", "Eb");
   same("CMAJ7", "Cmaj7"); same("c", "C"); same(" G / B ", "G/B"); same("Fb", "E"); same("B#", "C"); same("C/C", "C");
+  assert.equal(C.name({ root: 9, q: "mmaj7", bass: null }), "Am(maj7)", "the minor-major is written as players write it");
+  assert.deepEqual({ ...C.parse("Am(maj7)") }, { root: 9, q: "mmaj7", bass: null });
   assert.equal(C.parse("Cm").q, "m");
   assert.equal(C.parse("CM").q, "");
   assert.equal(C.parse("Bb").root, 10);
   assert.equal(C.parse("Bbm").q, "m");
   assert.equal(C.parse("Bb5").q, "5");
   for (const bad of ["", "H", "Cxyz", "C/H", "C13", "Cmaj13#11", "12", null, 7]) assert.equal(C.parse(bad), null, String(bad));
+});
+
+test("the picker's labels: the fixed names with the common enharmonic beside them (1.4.5)", () => {
+  assert.deepEqual([...C.PICK_NAMES], ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"]);
+  C.PICK_NAMES.forEach((n, pc) => {
+    assert.ok(n.indexOf(C.NAMES[pc]) === 0, `${n} begins with the book's ${C.NAMES[pc]}`);
+    assert.ok(n.length <= 5, `${n} fits a 44 px cell`);
+    assert.deepEqual({ ...C.parse(n) }, { root: pc, q: "", bass: null }, `${n} reads back as pitch class ${pc}`);
+  });
+  /* every other name still uses the book's fixed set */
+  assert.equal(C.name({ root: 1, q: "m", bass: null }), "C#m");
+  assert.equal(C.name({ root: 3, q: "", bass: 1 }), "Eb/C#", "the fixed names, even for a bass written enharmonically");
 });
 
 test("identify: each hand-written shape is named as itself first (an equivalent spelling counts)", () => {
@@ -202,6 +286,22 @@ test("degree map: every place in the box's frets is named by its degree, the cho
   assert.equal(m.px[24 * m.w + 34 - 6], 3, "a note not played has a paper patch");
 });
 
+test("the x above a muted string is neither a note to play nor an open-row degree (1.4.3)", () => {
+  const c = C.parse("C"), v = C.voicings(c)[0];
+  assert.deepEqual([...v.frets], [-1, 3, 2, 0, 1, 0]);
+  /* the box starts at the nut, so the open row is there: the x above the muted low E plays nothing, the o's still play */
+  assert.equal(D.boxAt(v, 20, 6), null, "the x above the muted low E is not an open note");
+  assert.deepEqual({ ...D.boxAt(v, 20 + 3 * 14, 6) }, { s: 3, f: 0 }, "the open G is");
+  assert.deepEqual({ ...D.boxAt(v, 20 + 5 * 14, 6) }, { s: 5, f: 0 }, "the open high E is");
+  assert.deepEqual({ ...D.boxAt(v, 34, 58) }, { s: 1, f: 3 }, "a fretted string is unaffected");
+  /* the degree map: the muted low E's open row is an ink cross, with no degree tile or digit over it */
+  const m = D.map(v, c);
+  assert.equal(m.px[6 * m.w + 20], 0, "an ink cross at the open row");
+  assert.equal(m.px[4 * m.w + 20 - 1], 3, "no digit: the tile and its label are not drawn");
+  /* a fretted string keeps its open-row degree: the open high E (a possible position) still reads as 3 */
+  assert.ok(m.px[6 * m.w + 20 + 5 * 14] !== 0, "the open high E's degree is not a cross");
+});
+
 /* ---------------- the progressions (和弦连接, 1.2.0) ---------------- */
 
 test("progressions: every entry is whole, in both languages, and every chord in it is one the app knows", () => {
@@ -211,6 +311,10 @@ test("progressions: every entry is whole, in both languages, and every chord in 
     assert.ok(p.key === "maj" || p.key === "min", `${p.id} key`);
     assert.ok(p.zh && p.en && p.why.zh && p.why.en, `${p.id} has both languages`);
     assert.equal(p.rn.length, p.ch.length, `${p.id}: one numeral per chord`);
+    if (p.bassStep) assert.equal(p.bassStep.length, p.ch.length, `${p.id}: a bassStep per chord`);
+    p.ch.forEach((slot, i) => {
+      if (slot[2] !== undefined) assert.ok(p.bassStep && p.bassStep[i] != null, `${p.id}: the slash chord at ${i} has its bassStep`);
+    });
     for (const [deg, q] of p.ch) {
       assert.ok(deg >= 0 && deg < 12, `${p.id} degree`);
       assert.ok(C.qual(q), `${p.id}: ${q} is a quality`);
@@ -238,7 +342,7 @@ test("progressions: spelled by the key, the chord you came from where the key al
   assert.equal(first("Ebm", "andalusian").names.join(" "), "Ebm Db Cb Bb");
   /* the passing diminished chord between I and ii is a raised I, so it is G#dim7 in G, not Abdim7 */
   assert.equal(first("G", "dim-passing").names.join(" "), "G G#dim7 Am D");
-  /* a slash chord matches by its bass where a progression has one: C/E is the canon's I/3 */
+  /* a slash chord matches by its bass where a progression has one: C/E is the canon's I6 */
   const canon = first("C/E", "canon");
   assert.equal(canon.exact, true);
   assert.equal(canon.names[canon.at], "C/E");
@@ -252,11 +356,37 @@ test("progressions: spelled by the key, the chord you came from where the key al
   assert.equal(C.name(c[0].chords[c[0].at]), "C");
 });
 
+test("progressions: the numerals name the inversions, and the blues counts its bars", () => {
+  const byId = (id) => P.LIST.find((p) => p.id === id);
+  const canon = byId("canon");
+  assert.deepEqual([...canon.rn], ["I", "V6", "vi", "iii6", "IV", "I6", "IV", "V"]);
+  assert.deepEqual([...canon.bassStep], [null, 6, null, 4, null, 2, null, null], "B, G and E are the 7th, 5th and 3rd degrees");
+  assert.deepEqual([...byId("cliche").rn], ["I", "I+", "I(add6)", "I7", "IV"], "a sixth chord, not a first inversion");
+  assert.deepEqual([...byId("minor-cliche").rn], ["i", "i(maj7)", "i7", "i(add6)"]);
+  const blues = byId("blues").bars;
+  assert.equal(blues.reduce((a, b) => a + b, 0), 12, "twelve bars");
+  assert.ok(blues.every((b) => b >= 1 && b <= 4), `${blues} bars a chord`);
+});
+
 test("progressions: the other chords are played near the hand's fret, the commonest shape on a tie", () => {
   const g = C.voicings(C.parse("G"));
   assert.equal(P.nearVoicing(g, 0), g[0]);
   const near7 = P.nearVoicing(g, 7);
   assert.ok(Math.abs(near7.pos - 7) <= Math.abs(g[0].pos - 7));
+});
+
+test("the tonic filter's data: C has 15 cards and 12 with C as the tonic; Bdim has none (1.4.5)", () => {
+  const split = (n) => {
+    const r = P.forChord(C.parse(n));
+    return { all: r.length, tonic: r.filter((x) => x.p.ch[x.at][0] === 0).length };
+  };
+  assert.deepEqual(split("C"), { all: 15, tonic: 12 });
+  assert.deepEqual(split("Bdim"), { all: 1, tonic: 0 }, "vii° of the circle, never the tonic");
+  assert.deepEqual(split("G#dim7"), { all: 1, tonic: 0 }, "#I°7 of the passing diminished");
+  assert.deepEqual(split("Cmaj7"), { all: 2, tonic: 2 }, "every card makes Cmaj7 the tonic: nothing to filter");
+  assert.deepEqual(split("C6"), { all: 1, tonic: 1 });
+  const others = [...P.forChord(C.parse("C")).filter((x) => x.p.ch[x.at][0] !== 0).map((x) => x.p.id)];
+  assert.deepEqual(others, ["minor-cadence", "andalusian", "add9-pop"], "the three cards where C is not the tonic");
 });
 
 /* ---------------- the improv view's scales (1.4.0) ---------------- */
@@ -304,6 +434,18 @@ test("the common defaults: maj7 Ionian with 11 to avoid, m7 Dorian, 7 Mixolydian
   assert.ok(first("maj7").list.find((o) => o.id === "majpent").notes.some((n) => n.lab === "7" && n.kind === "c"));
   /* E is the root of an E chord: the pcs follow the root */
   assert.equal(S.forChord({ root: 4, q: "m7", bass: null }, null).list[0].notes[0].pc, 4);
+});
+
+test("the degree line puts the 9 last; the notes themselves stay in pitch order for the picture", () => {
+  for (const q of ["9", "add9", "m9", "maj7"]) {
+    const o = S.forChord({ root: 0, q, bass: null }, null).list[0];
+    assert.equal(o.line[o.line.length - 1].lab, "9", `${q}: the 9 is read last`);
+    assert.deepEqual([...o.line.map((n) => n.iv)], [...o.notes.filter((n) => n.lab !== "9").map((n) => n.iv),
+      ...o.notes.filter((n) => n.lab === "9").map((n) => n.iv)], `${q}: everything else keeps its order`);
+  }
+  const c9 = S.forChord({ root: 0, q: "9", bass: null }, null).list[0];
+  assert.deepEqual([...c9.notes.map((n) => n.iv)], [0, 2, 4, 5, 7, 9, 10], "notes stay low to high");
+  assert.equal(c9.line[c9.line.length - 1].iv, 2);
 });
 
 test("from a progression the key picks the mode: ii Dorian, iii Phrygian, IV Lydian, V Mixolydian, minor V7 Phrygian dominant", () => {

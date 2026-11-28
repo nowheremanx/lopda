@@ -3168,7 +3168,7 @@ test("settings: twelve 44 px rows fit 331x359 down to AI 线路; the share QR an
     return { rows: rows.map((r) => { const b = r.getBoundingClientRect(); return { top: b.top - box.top, bottom: b.bottom - box.top, h: b.height }; }),
       scroll: v.scrollWidth, client: v.clientWidth };
   });
-  assert.equal(menu.rows.length, 12);   /* 12 with the controller row of the test PR (手柄) */
+  assert.equal(menu.rows.length, 12);
   assert.ok(menu.rows.every((r) => r.h >= 44), JSON.stringify(menu.rows));
   assert.ok(menu.scroll <= menu.client + 1, "no sideways scroll at 331");
   /* 系统声音 is the tenth (decisions.md section 41): the first screen still fits down to AI 线路, and 备份与恢复
@@ -3205,6 +3205,121 @@ test("settings: twelve 44 px rows fit 331x359 down to AI 线路; the share QR an
   assert.match(await p.textContent("#v-set-about"), /什么是 PDA[\s\S]*这台 Lo-PDA/);
   await p.click("#set-about-back");
   await p.waitForFunction(() => !document.getElementById("v-settings").hidden);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+/* a controller the Gamepad API can see; the init script runs before gamepad.js reads navigator.getGamepads */
+function fakePadScript() {
+  const gp = { index: 0, id: "Fake Pad", mapping: "standard", connected: true,
+    buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), axes: [0, 0, 0, 0] };
+  let present = false;
+  window.__pad = gp;
+  navigator.getGamepads = () => (present ? [gp] : []);
+  window.__padPress = (i, down) => { gp.buttons[i].pressed = !!down; gp.buttons[i].value = down ? 1 : 0; };
+  window.__padConnect = () => {
+    present = true;
+    let ev;
+    try { ev = new GamepadEvent("gamepadconnected", { gamepad: gp }); }
+    catch (e) { ev = new Event("gamepadconnected"); ev.gamepad = gp; }
+    window.dispatchEvent(ev);
+  };
+}
+
+test("gamepad: the press that connects a pad binds on Settings -> 手柄, and Shift is not a key", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN", viewport: { width: 331, height: 359 } });
+  await p.addInitScript(fakePadScript);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.evaluate(() => LP.builtins.find((b) => b.id === "settings").open());
+  await p.waitForSelector("#v-settings:not([hidden])");
+  await p.click("#set-pad-open");
+  await p.waitForSelector("#v-set-pad:not([hidden])");
+  assert.match(await p.textContent("#set-pad-who"), /没看到手柄/);
+  await p.evaluate(() => [...document.querySelectorAll(".set-pad-row")].find((b) => b.dataset.k === "a").click());
+  /* the first press is what exposes the pad to the page; it should bind, not become the ignored baseline */
+  await p.evaluate(() => { window.__padPress(0, true); window.__padConnect(); });
+  const doc = () => p.evaluate(() => LP.S.db.doc("data/users/local/gamepad").get().then((s) => (s.exists ? s.data() : null)));
+  const waitDoc = async (check, what) => {
+    for (let i = 0; i < 40; i++) {
+      const d = await doc();
+      if (d && check(d)) return d;
+      await p.waitForTimeout(50);
+    }
+    assert.fail(what + ": " + JSON.stringify(await doc()));
+  };
+  const bound = await waitDoc((d) => d.maps && d.maps["Fake Pad"] && d.maps["Fake Pad"].a && d.maps["Fake Pad"].a[0] === "b0", "the first press bound A");
+  assert.deepEqual(bound.maps["Fake Pad"].a, ["b0"]);
+  /* Shift is a modifier, not a key to bind */
+  await p.evaluate(() => [...document.querySelectorAll(".set-pad-row")].find((b) => b.dataset.k === "b").click());
+  await p.keyboard.press("Shift");
+  await p.waitForTimeout(100);
+  assert.equal((await doc()).keys.Shift, undefined, "Shift is not captured");
+  /* Shift+W binds the physical W, not Shift */
+  await p.evaluate(() => [...document.querySelectorAll(".set-pad-row")].find((b) => b.dataset.k === "up").click());
+  await p.keyboard.down("Shift"); await p.keyboard.press("w"); await p.keyboard.up("Shift");
+  await waitDoc((d) => d.keys && d.keys.KeyW === "up", "Shift+W bound the physical W");
+  assert.equal((await doc()).keys.Shift, undefined);
+  assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
+});
+
+test("gamepad: a pad presses the chin keys, typing holds it out, and a blur keeps a held key", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await page(t, { locale: "zh-CN" });
+  await p.addInitScript(fakePadScript);
+  await p.goto(base + "/runtime/", { waitUntil: "networkidle" });
+  await p.waitForFunction(() => window.LP && window.LP.S.db);
+  await p.evaluate(() => LP.builtins.find((b) => b.id === "dict").open());
+  await p.waitForSelector("#v-dict:not([hidden])");
+  await p.evaluate(() => window.__padConnect());
+  await p.waitForTimeout(80);
+  await p.evaluate(() => {
+    window.__calls = [];
+    const orig = LP.setButton;
+    LP.setButton = function (b, d, s) { window.__calls.push(b + (d ? "+" : "-") + (s ? ":" + s : "")); return orig(b, d, s); };
+  });
+  const lit = () => p.evaluate(() => document.querySelector('.gamepad [data-b="a"]').classList.contains("on"));
+  await p.evaluate(() => window.__padPress(0, true));
+  await p.waitForFunction(() => document.querySelector('.gamepad [data-b="a"]').classList.contains("on"));
+  assert.deepEqual(await p.evaluate(() => window.__calls.slice()), ["a+:pad"]);
+  /* a window blur must not release and re-press a controller that is still held */
+  await p.evaluate(() => { window.__calls = []; window.dispatchEvent(new Event("blur")); });
+  await p.waitForTimeout(80);
+  assert.deepEqual(await p.evaluate(() => window.__calls.slice()), []);
+  assert.equal(await lit(), true);
+  /* the soft keyboard hides the chin pad; the controller must be quiet meanwhile */
+  await p.evaluate(() => {
+    const i = document.createElement("input"); i.id = "pad-probe"; document.body.appendChild(i); i.focus();
+  });
+  /* the runtime's own focusin fit runs a moment later and would clear a class we add too early */
+  await p.waitForTimeout(120);
+  await p.evaluate(() => document.documentElement.classList.add("kb"));
+  await p.evaluate(() => window.__padPress(0, false));
+  await p.evaluate(() => window.__padPress(0, true));
+  await p.waitForTimeout(80);
+  assert.equal(await lit(), false, "typing keeps the controller out");
+  await p.evaluate(() => {
+    document.documentElement.classList.remove("kb");
+    const i = document.getElementById("pad-probe"); if (i) i.remove();
+  });
+  await p.evaluate(() => window.__padPress(0, false));
+  await p.waitForTimeout(40);
+  /* a focused field alone (no soft keyboard) must not mute the pad: notes search, calendar add and dict search use it */
+  await p.evaluate(() => {
+    const i = document.createElement("input"); i.id = "pad-probe2"; document.body.appendChild(i); i.focus();
+  });
+  await p.waitForTimeout(120);
+  await p.evaluate(() => window.__padPress(0, true));
+  await p.waitForFunction(() => document.querySelector('.gamepad [data-b="a"]').classList.contains("on"));
+  assert.equal(await lit(), true, "a focused field alone does not mute the controller");
+  await p.evaluate(() => { window.__padPress(0, false); const i = document.getElementById("pad-probe2"); if (i) i.remove(); });
+  await p.waitForTimeout(40);
+  /* a thumb and a controller are different sources: releasing one must not release the other */
+  await p.evaluate(() => LP.setButton("a", true, "touch"));
+  await p.waitForFunction(() => document.querySelector('.gamepad [data-b="a"]').classList.contains("on"));
+  await p.evaluate(() => { window.__padPress(0, true); window.__padPress(0, false); });
+  await p.waitForTimeout(60);
+  assert.equal(await lit(), true, "the finger still holds A");
+  await p.evaluate(() => LP.setButton("a", false, "touch"));
+  await p.waitForFunction(() => !document.querySelector('.gamepad [data-b="a"]').classList.contains("on"));
   assert.deepEqual(errors.filter((e) => !SW_NOISE.test(e)), []);
 });
 
@@ -11943,6 +12058,7 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
       pixels: [c.width, c.height],
       shown: getComputedStyle(c).display !== "none",
       oldArt: !!document.getElementById("title-art"),
+      oldRows: document.querySelectorAll("#cover-list li").length,
       size: [root.clientWidth, root.clientHeight],
     };
   });
@@ -11951,10 +12067,12 @@ test("crossing: round 1 shows a grid, a demo spells one word, words typed with t
   assert.deepEqual(title.pixels, [331, 359], "one device pixel a screen pixel at dpr 1");
   assert.equal(title.shown, true);
   assert.equal(title.oldArt, false, "the old framed picture is gone");
+  assert.equal(title.oldRows, 0, "no DOM menu rows under the canvas");
   assert.deepEqual(title.info.items.map((i) => i.label), ["继续", "选关", "随机关", "玩法"]);
-  assert.equal(title.info.items[0].status, "第 1 关", "a fresh title continues at round 1");
+  assert.deepEqual(title.info.items.map((i) => i.status || ""), ["第 1 关", "", "", ""], "a fresh start: the round on 继续, no progress on 选关");
   assert.deepEqual(title.info.items.map((i) => i.locked === true), [false, false, true, false], "RANDOM is locked before round 30");
   assert.equal(title.info.items[2].reason, "通关 30 关后开放", "the locked item says why in the bar");
+  assert.equal(title.info.index, 0, "the title opens on 继续");
   assert.equal(title.info.note, "从第 1 关开始", "a fresh start has no record yet");
   assert.equal(title.info.hint, "选 · A 确定");
   /* START picks the chosen item: round 1 and its demo */
@@ -12621,7 +12739,11 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   const helpRow = await f.evaluate(() => game.title.items[3]);
   assert.equal(helpRow.label, "玩法", "the fourth item is still HOW TO PLAY");
   const enterPractice = async () => {
-    await press("down"); await press("down"); await press("down");
+    /* roll from wherever the menu stands, as a player would, and let the roll finish before A */
+    const at = await f.evaluate(() => game.title.index);
+    for (let k = at; k < 3; k++) await press("down");
+    await p.waitForTimeout(200);       /* the menu's roll */
+    assert.equal(await f.evaluate(() => game.title.index), 3, "the menu rolled to HOW TO PLAY");
     await press("a");
     await until(p, () => f.evaluate(() => game.phase === "demo"), "the practice demo");
   };
@@ -12780,6 +12902,7 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   await p.mouse.click(titleBox.x + (card.btn.l + card.btn.r) / 2, titleBox.y + (card.btn.t + card.btn.b) / 2);
   await p.waitForTimeout(100);
   assert.equal(await f.evaluate(() => game.phase), "title", "the tap under the old button opens nothing");
+  assert.equal(await f.evaluate(() => game.title.index), 3, "the menu stays on HOW TO PLAY");
   assert.equal(await f.evaluate(() => game.mode), "fixed", "closing the card clears the practice mode");
   assert.deepEqual(withoutTaught(await readSave()), beforeSave, "practice leaves round, cleared, hints, done, random and bookTip untouched");
   const kept = await readSave();

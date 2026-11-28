@@ -137,11 +137,13 @@ test("crossing at 331x359: RANDOM opens after round 30, and before it the locked
       locked: t.items.map((li) => li.locked === true),
       reason: t.items[2] ? t.items[2].reason || "" : "",
       note: t.note,
+      canvas: [document.getElementById("lotitle").getBoundingClientRect().width, document.getElementById("lotitle").getBoundingClientRect().height],
       size: [document.documentElement.clientWidth, document.documentElement.clientHeight],
     };
   });
   let ts = await title(frame());
   assert.deepEqual(ts.size, [331, 359]);
+  assert.deepEqual(ts.canvas, [331, 359], "the shared title canvas fills the screen in CSS pixels");
   assert.deepEqual(ts.labels, ["继续", "选关", "随机关", "玩法"]);
   assert.equal(ts.status[0], "第 31 关", "继续 names the round it opens");
   assert.deepEqual(ts.locked, [false, false, false, false], "no item is locked at cleared 30");
@@ -154,6 +156,7 @@ test("crossing at 331x359: RANDOM opens after round 30, and before it the locked
   /* a save at round 12 is still before the unlock, and the bar says which round opens it */
   ({ p, errors, frame } = await open(t, { round: 12, cleared: 11, taught: true }));
   ts = await title(frame());
+  assert.deepEqual(ts.labels, ["继续", "选关", "随机关", "玩法"]);
   assert.equal(ts.status[0], "第 12 关");
   assert.equal(ts.reason, "通关 30 关后开放", "the locked item names round 30");
   assert.deepEqual(ts.locked, [false, false, true, false], "RANDOM is closed at round 12");
