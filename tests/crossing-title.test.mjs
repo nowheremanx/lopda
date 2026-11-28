@@ -169,6 +169,44 @@ test("crossing title: A continues, 选关 opens the picker, the locked 随机关
   assert.deepEqual(en.errors, []);
 });
 
+test("crossing title: a tap on the chosen word picks, a neighbour rolls, and the return guard blocks both", { skip, timeout: 90000 }, async (t) => {
+  const { p, errors, frame } = await open(t, { round: 1, cleared: 0, taught: true });
+  const ev = (fn) => frame().evaluate(fn);
+  const tap = async (y) => { await frame().locator("#lotitle").tap({ position: { x: 165, y: y } }); await p.waitForTimeout(250); };
+  const info = () => ev(() => game.title);
+
+  /* 331 x 359, dpr 1: the big word's slot is around y 245, the small word under it around y 290 */
+  await tap(290);
+  assert.equal(await ev(() => game.phase), "title", "a tap on a neighbour only rolls");
+  assert.equal((await info()).index, 1, "the neighbour became the chosen item");
+  await tap(245);
+  await until(p, () => ev(() => game.phase === "pick"), "a tap on the chosen word to pick 选关");
+  assert.deepEqual(errors, []);
+  await press(p, "b");
+  await until(p, () => ev(() => game.phase === "title"), "B back to the title");
+
+  /* leave a round: the closing panel's 300 ms guard takes the canvas's pointer, so even a roll is swallowed */
+  await press(p, "up");
+  await press(p, "a");
+  await until(p, () => ev(() => game.phase === "play"), "round 1");
+  await press(p, "b");
+  await until(p, () => ev(() => game.phase === "leave"), "the leave panel");
+  await frame().locator("#cover-btn2").tap();
+  assert.equal(await ev(() => game.phase), "title", "LEAVE closes onto the title");
+  const before = (await info()).index;
+  const box = await frame().locator("#lotitle").boundingBox();
+  /* a raw mouse click dispatches at once; Playwright's tap waits for actionability and would outlast 300 ms */
+  await p.mouse.click(box.x + 165, box.y + 290);
+  await p.waitForTimeout(100);
+  assert.equal(await ev(() => game.phase), "title");
+  assert.equal((await info()).index, before, "the guard swallows a tap that would roll the menu");
+  await p.waitForTimeout(350);
+  await p.mouse.click(box.x + 165, box.y + 290);
+  await p.waitForTimeout(250);
+  assert.equal((await info()).index, before + 1, "after the guard a neighbour tap rolls again");
+  assert.deepEqual(errors, []);
+});
+
 test("crossing title: the play screen under the title is unchanged", { skip, timeout: 90000 }, async (t) => {
   const { p, errors, frame } = await open(t, { round: 6, cleared: 5, taught: true });
   const f = frame();

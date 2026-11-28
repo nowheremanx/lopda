@@ -540,8 +540,8 @@
         "wordbook"
       ],
       "path": "apps/crossing/index.html",
-      "sha256": "e61bb14c8775d0771e78286f38235f7943f527fd0ab8933214d8faa8dc04fbac",
-      "bytes": 157646
+      "sha256": "b4f5365f0327391d12ea9b526b05037a1f3c6785e642624b223a19322069936d",
+      "bytes": 156129
     },
     {
       "spec": "lopda/1",

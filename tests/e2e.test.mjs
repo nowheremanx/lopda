@@ -12759,9 +12759,10 @@ test("crossing: HOW TO PLAY runs the fixed practice round and leaves the save al
   assert.ok(card.scroll <= card.client, "the practice card needs no scrolling: " + card.scroll + " <= " + card.client);
 
   /* (d) the card's button closes onto the title; a tap at the same spot within the guard is that same press,
-     not a pick. The canvas covers the stage, so the point is on the menu wherever the button was. */
+     not a pick. A raw mouse click dispatches at once; Playwright's tap would outlast the 300 ms guard. */
   await f.locator("#cover-btn").tap();
-  await f.locator("#lotitle").tap({ position: { x: (card.btn.l + card.btn.r) / 2, y: (card.btn.t + card.btn.b) / 2 } });
+  const titleBox = await f.locator("#lotitle").boundingBox();
+  await p.mouse.click(titleBox.x + (card.btn.l + card.btn.r) / 2, titleBox.y + (card.btn.t + card.btn.b) / 2);
   await p.waitForTimeout(100);
   assert.equal(await f.evaluate(() => game.phase), "title", "the tap under the old button opens nothing");
   assert.equal(await f.evaluate(() => game.mode), "fixed", "closing the card clears the practice mode");
