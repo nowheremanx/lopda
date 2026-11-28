@@ -93,34 +93,31 @@ GM.ui = (function () {
     return '<div class="sbody ' + cls + '">' + body + '</div><div class="ofoot">' + esc(footer) + "</div>";
   }
 
-  /* what the title wheel shows: continue (locked with no run in progress), new run, the codex; the record or a
-     save warning on the line under it */
+  /* what the title menu shows: continue (only with a run in progress, its level and cash on the bar while it is
+     chosen), new run, the codex; the record or a save warning on the bar otherwise. The menu's index is not
+     state.menuCursor (0 continue, 1 new, 2 codex): without a run the menu starts at new. */
+  function titleOffset() { return state.run ? 0 : 1; }
   function titleSpec() {
     /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
     var best = state.best.level > 0
       ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
       : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
       : T.noBest;
-    var runSub = state.run
-      ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
-      : T.menuNoRun;
+    var items = [{ label: T.menuNew }, { label: T.menuCodex }];
+    if (state.run) items.unshift({ label: T.menuContinue, status: GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) }) });
     return {
-      items: [
-        { label: T.menuContinue, sub: runSub, locked: !state.run },
-        { label: T.menuNew, sub: T.menuNewSub },
-        { label: T.menuCodex, sub: T.menuCodexSub }
-      ],
-      index: state.menuCursor,
+      items: items,
+      index: Math.max(0, state.menuCursor - titleOffset()),
       note: state.saveMsg || state.runMsg || best,
-      hint: T.menuFoot
+      hint: T.titleHint
     };
   }
 
   function render(screen) {
     var i, item, have, can, sel, price, rows, best, warn, extra, rec, next, target, short;
     if (screen === "title") {
-      /* the shared title screen (sdk/lo-title.js): post("title") mounts it on this canvas; the wheel turns by
-         itself, so a cursor move no longer redraws the screen */
+      /* the shared title screen (sdk/lo-title.js): post("title") mounts it on this canvas; the menu turns by
+         itself, so a cursor move does not redraw the screen */
       return '<canvas id="tt" class="lotitle"></canvas><h1 class="vh">' + esc(T.title) + "</h1>";
     }
     if (screen === "paused") {
@@ -256,16 +253,19 @@ GM.ui = (function () {
     }
   }
 
-  /* The title screen: the picture (the name is written in it) and the wheel, both drawn by sdk/lo-title.js */
+  /* The title screen: the picture, the name painted over its sky and the menu, all drawn by sdk/lo-title.js */
   var titleMenu = null, titleArt = null;
   function mountTitle() {
     var c = $("tt");
     if (!c || typeof LoTitle === "undefined") return;
-    if (!titleArt) titleArt = { w: GM.titleArt.W, h: GM.titleArt.H, px: GM.titleArt.draw(LANG) };
-    var spec = titleSpec();
+    if (!titleArt) titleArt = { w: GM.titleArt.W, h: GM.titleArt.H, px: GM.titleArt.draw(LANG, true) };
+    var spec = titleSpec(), name = GM.titleArt.words(LANG);
     spec.art = titleArt;
-    spec.onMove = function (i) { state.menuCursor = i; sfx("move"); };
-    spec.onPick = function (i) { state.menuCursor = i; chooseMenu(); };
+    /* the name on the sky left of the winch; the fog may cover the picture from the claw on the nugget down */
+    spec.title = { text: name.text, sub: name.sub, x: 17, y: 6, w: 86 };
+    spec.calm = 141;
+    spec.onMove = function (i) { state.menuCursor = i + titleOffset(); sfx("move"); };
+    spec.onPick = function (i) { state.menuCursor = i + titleOffset(); chooseMenu(); };
     titleMenu = LoTitle.mount(c, spec);
   }
 

@@ -55,7 +55,9 @@ The seven stocks on one photo, same roll and same development, only the stock ch
 | Radio | 电波台 | Experimental. Two handhelds talk over sound, like a 1986 modem: both press Link, then send short text and 16 × 16 pictures. Slow on purpose. |
 | Store | 应用商店 | Install, update and run community apps, by category, with search. |
 | Scripts | 脚本 | Your own small HTML/JS programs: one line to an AI line and it writes the program (or copy the prompt into any AI chat and paste the code back), then run it in the sandbox. Revise changes it with one more sentence; the old code is kept first, ten versions per script. |
-| Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, app saves, backup and restore of the whole device, AI lines (your own keys for DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter, like SIM cards), updates. |
+| Settings | 设置 | Sound, volume, language (中文 / English), which apps may use the sensors and camera, app saves, backup and restore of the whole device, AI lines (your own keys for DeepSeek, Kimi, Qwen, SiliconFlow or OpenRouter, like SIM cards), controller keys, updates. |
+
+A Bluetooth controller (Joy-Con, Pro Controller, Xbox, PlayStation), a page turner or a keyboard paired to the phone presses the same keys as the chin buttons, in the built-ins and in store games that use the chin buttons. Settings → Controller lets you choose which button is which.
 
 ![The pet in its room, the demo tune in Tape4, the Tuner's dial on a station, and a short exchange in Radio with a 16 × 16 picture of a boat](docs/images/more.png)
 

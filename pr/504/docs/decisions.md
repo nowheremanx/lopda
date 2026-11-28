@@ -2347,3 +2347,26 @@ EXIF，相册就能把照片放到地图上。
 - **做法**：有两个按钮的确认框里，←→ 在「确定」和「取消」之间移动，选中的那个画成实心，另一个画成空心；A 按下选中的
   那个，B 仍然是取消。打开时选中「确定」，所以只按 A 的人行为不变。只认 A、B 的那种横条提示（传感器）不变。
 - **代码**：`runtime/apps/store.js`（`askPick`、`padRoute("file")`），提示文字 `file.keys`。
+
+## 78. 蓝牙手柄、遥控器和键盘当下巴键用（1.7.3）
+
+- **问题**：手机连上蓝牙手柄（Joy-Con 等）以后，Lo-PDA 什么也收不到，只认屏幕上的下巴键和键盘的方向键、X、Z、Enter、Shift。
+  调研（2026-11-27）：iPhone 和安卓的浏览器都有 Gamepad API，网页能读到手柄，但只能逐帧轮询，而且要先按一下键手柄才出现。
+- **做法**：
+  - 新文件 `runtime/gamepad.js`：有手柄连着、页面在前台时每帧读一次 `navigator.getGamepads()`，把变化交给
+    `LP.setButton`，跟下巴键和键盘走同一个入口。所以所有显示下巴键的内置程序、所有 `"buttons": true` 的商店 app 都直接能用，
+    app 不用改，SPEC 也不变。和键盘一样，只在下巴键显示时才送键。
+  - 默认键位按 W3C 的 standard 布局编号：0 / 3 是 A，1 / 2 是 B，9 / 5 / 7 是 START，8 / 4 / 6 是 SELECT（肩键兼作
+    SELECT / START），12-15 和左摇杆是方向键；Home（16）留给系统。iPhone 上单只 Joy-Con 报的是空 mapping：owner 实测
+    1 / 3 当 A 时 A、B 是反的，所以单只 Joy-Con 改成 0 / 2 是 A、1 / 3 是 B，SL / SR 是 SELECT / START。不是 standard 的
+    手柄还把最后两根轴当十字键（安卓的 HAT_X / HAT_Y）。
+  - 设置 → 手柄：点一个键，再按手柄上的键、推摇杆，或按键盘、翻页器上的键，就绑上了。新绑定替换这个键原来的，并从别的
+    键上拿走同一个来源；绑摇杆的一个方向时，相反方向跟着绑到同一根杆上。6 秒没按就放弃，Escape 取消。「恢复默认」清掉
+    当前手柄和键盘的绑定。手柄的绑定按手柄 id 分开存；键盘的绑定只有一套（字母按小写存，在文本框里不生效，按着
+    Ctrl / Alt / ⌘ 时也不生效）。键盘原来的方向键、X、Z、Enter、Shift 一直有效。
+  - 存在 `data/users/local/gamepad` {v:1, maps:{<手柄 id>:{up:[...], ...}}, keys:{<键>:<Lo-PDA 键>}}，跟整机备份走。
+- **没做的**：振动（iPhone 的 Safari 没有 `vibrationActuator`）；一个键绑多个来源要在页面上一个个点（现在一次替换）；
+  画手柄示意图。手柄的按键不算用户手势，所以要「点一下」才能开始的事（声音、分享）还得先碰一下屏幕。
+- **代码**：`runtime/gamepad.js`，`runtime/apps/settings.js`（入口一行），`runtime/index.html`（`v-set-pad`），
+  字符串 `pad.*`；测试 `tests/gamepad.test.mjs`。
+
