@@ -75,24 +75,28 @@ function stageApp(sw, sh, onPut) {
   return { app, run, key, tap };
 }
 /* every row above or below the world, and every column beside it on a wide stage, must have been painted:
-   losing a band leaves whole rows (or columns) of bare PAPER. Scenery may still use PAPER as a highlight. */
+   losing a band leaves whole rows (or columns) of bare PAPER, so bound the PAPER a band may hold. The
+   busiest real row is the platform's dashed lip at 96 of 160 (60%); the dawn sky dither is 50%. */
 function assertScenery(shot, st, label) {
   assert.ok(shot, `${label}: nothing was drawn`);
   const tone = (x, y) => {
     const o = (y * shot.width + x) * 4;
     return shot.data[o] + "," + shot.data[o + 1] + "," + shot.data[o + 2];
   };
+  let rowMax = 0;
   for (let y = 0; y < shot.height; y++) {
     if (y >= st.y && y < st.y + H) continue;
-    let painted = false;
-    for (let x = 0; x < shot.width && !painted; x++) if (tone(x, y) !== PAPER_TONE) painted = true;
-    assert.ok(painted, `${label}: row ${y} is bare paper`);
+    let paper = 0;
+    for (let x = 0; x < shot.width; x++) if (tone(x, y) === PAPER_TONE) paper++;
+    rowMax = Math.max(rowMax, paper);
+    assert.ok(paper <= shot.width * 0.6, `${label}: row ${y} is ${paper}/${shot.width} paper`);
   }
+  assert.ok(rowMax <= shot.width * 0.75, `${label}: a row is ${rowMax}/${shot.width} paper`);
   for (let x = 0; x < shot.width; x++) {
     if (x >= st.x && x < st.x + W) continue;
-    let painted = false;
-    for (let y = st.y; y < st.y + H && !painted; y++) if (tone(x, y) !== PAPER_TONE) painted = true;
-    assert.ok(painted, `${label}: column ${x} is bare paper`);
+    let paper = 0;
+    for (let y = st.y; y < st.y + H; y++) if (tone(x, y) === PAPER_TONE) paper++;
+    assert.ok(paper <= H * 0.6, `${label}: column ${x} is ${paper}/${H} paper`);
   }
 }
 /* the screens with their own bands: title (night), chapter card and log and choice (calm), end card (dawn) */
