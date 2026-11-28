@@ -3,7 +3,21 @@
    speed on a phone. Progress is saved at the save stones; what the player has already seen is saved with it.
    The cutscenes (the boss's entrance, the pendant, the ending) and the credits are at the end of the map scene.
    Sound (src/sound.js): each scene says which song and ambience it wants; the wrapper below sends them once a frame. */
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+/* The stage is the whole screen; the 3D view is a window in it. A full-stage background canvas paints the
+   shrine (src/frame.js) behind lo-game's own 160 x 144 canvas, which keeps its familiar contain fit inside
+   an inset wrapper. The frame canvas takes no pointers, so only the window is a touch target. */
+var stage = document.createElement("div");
+stage.id = "frame-stage";
+var frameArt = document.createElement("canvas");
+frameArt.id = "frame-art";
+if (frameArt.setAttribute) frameArt.setAttribute("aria-hidden", "true");
+var frameView = document.createElement("div");
+frameView.id = "frame-view";
+stage.appendChild(frameArt);
+stage.appendChild(frameView);
+document.body.appendChild(stage);
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", parent: frameView });
+ZTFrame.attach(stage, frameArt, frameView);
 Snd.attach(game);
 var R = Lo3D.create({ width: 160, height: 144 });
 var town = World.build(TOWN);
