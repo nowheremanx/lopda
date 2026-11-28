@@ -520,7 +520,7 @@
         "....11111111....",
         "......1111......"
       ],
-      "version": "1.9.0",
+      "version": "1.10.0",
       "released": "2026-10-24",
       "updated": "2026-11-27",
       "description": "在字母盘上拼出单词，填满小小字谜格。拼对后中文显示在格下，再读出英文。",
@@ -540,8 +540,8 @@
         "wordbook"
       ],
       "path": "apps/crossing/index.html",
-      "sha256": "ca352b740c5aa31cce8dd4740f83bdd00dd7e7a80f5b87ddf263208363558dec",
-      "bytes": 115454
+      "sha256": "d4fdc9cd3ed356f04fd9918a73db69ae17be6df5ab7d05a3d6703aeb8fc9b701",
+      "bytes": 154739
     },
     {
       "spec": "lopda/1",
