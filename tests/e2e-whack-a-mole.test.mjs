@@ -1,4 +1,4 @@
-// Whack-a-mole 4.2.0 in the dev harness: bests, levels, thief runs, the dirt tell
+// Whack-a-mole 4.3.0 in the dev harness: bests, levels, thief runs, the dirt tell
 // before a mole rises (window.__mole, tests only), and a 60 s game that still ends at 60 s.
 // Needs Playwright, which the repo does not depend on, so the test skips without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-whack-a-mole.test.mjs
@@ -37,8 +37,8 @@ after(async () => { await browser?.close(); server?.close(); });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* one dev harness tab on the app in its own context, so one test's save never reaches the next */
-async function tab(t, { lang, clock, viewport } = {}) {
-  const context = await browser.newContext({ viewport: viewport || { width: 390, height: 844 }, hasTouch: true });
+async function tab(t, { lang, clock, viewport, dpr } = {}) {
+  const context = await browser.newContext({ viewport: viewport || { width: 390, height: 844 }, hasTouch: true, deviceScaleFactor: dpr || 1 });
   t.after(() => context.close());
   const p = await context.newPage();
   const errors = [];
@@ -83,7 +83,7 @@ test("whack-a-mole: 「还没有记录」 with no record yet, the numbers once a
   const frame = await appFrame(saved.p);
   await frame.waitForFunction(() => /\d/.test(document.getElementById("bests").textContent), null, { timeout: 5000 });
   assert.equal(await bests(frame), "60 秒 42 · 无尽 1:35", "both records, the endless one as time");
-  assert.equal(await frame.evaluate(() => document.getElementById("bs").textContent.trim()), "最高 42", "the HUD's best follows the mode");
+  assert.equal(await frame.evaluate(() => window.__mole().hud.best), "42", "the painted HUD's best follows the mode");
 
   /* only one record: a dash for the missing one is enough */
   await saved.p.evaluate(([key, v]) => localStorage.setItem(key, JSON.stringify(v)), [SAVE, { best60: 7 }]);
@@ -104,16 +104,20 @@ test("whack-a-mole: level stars use the three score thresholds", { skip }, async
 });
 
 test("whack-a-mole: every overlay fits or scrolls safely at 331 x 359", { skip, timeout: 60000 }, async (t) => {
-  const { p } = await tab(t, { clock: new Date(2026, 10, 24, 12, 0), viewport: { width: 331, height: 359 } });
+  const { p } = await tab(t, { lang: "zh", clock: new Date(2026, 10, 24, 12, 0), viewport: { width: 331, height: 359 } });
   const frame = await appFrame(p);
   await p.evaluate(() => {
     const app = document.getElementById("app");
     app.style.width = "331px"; app.style.height = "359px";
   });
   await frame.waitForFunction(() => innerWidth === 331 && innerHeight === 359);
+  await sleep(100);
   const measure = () => frame.evaluate(() => {
-    const ov = document.getElementById("ov");
-    return { screen: window.__mole().screen, scrollHeight: ov.scrollHeight, clientHeight: ov.clientHeight };
+    const body = document.getElementById("ovbody");
+    const ov = document.getElementById("ov").getBoundingClientRect();
+    const st = document.getElementById("stage").getBoundingClientRect();
+    return { screen: window.__mole().screen, scrollHeight: body.scrollHeight, clientHeight: body.clientHeight,
+      covers: ov.left === st.left && ov.top === st.top && ov.width === st.width && ov.height === st.height };
   });
   const measurements = [await measure()];
   await frame.locator("#btns button").first().click();
@@ -129,6 +133,8 @@ test("whack-a-mole: every overlay fits or scrolls safely at 331 x 359", { skip, 
   await p.clock.runFor(31000);
   measurements.push(await measure());
   assert.deepEqual(measurements.map((m) => m.screen), ["title", "levels", "card", "tally"]);
+  assert.equal(measurements[0].screen, "title");
+  assert.ok(measurements.every((m) => m.covers), "the overlay is the whole stage on every screen: " + JSON.stringify(measurements));
   assert.ok(measurements.every((m) => m.scrollHeight <= m.clientHeight), JSON.stringify(measurements));
   console.log("overlay 331x359 scrollHeight/clientHeight:", JSON.stringify(measurements));
 });
@@ -298,14 +304,108 @@ test("whack-a-mole: a 60 s game still ends at 60 s", { skip, timeout: 90000 }, a
   const end = await frame.evaluate(() => ({
     playing: window.__mole().playing,
     title: document.getElementById("ot").textContent.trim(),
-    clock: document.getElementById("tm").textContent.trim(),
+    clock: window.__mole().hud.clock,
     result: document.getElementById("op").textContent.trim(),
     overlay: !document.getElementById("ov").classList.contains("hide")
   }));
   assert.equal(end.playing, false, "over by 61 s");
   assert.equal(end.overlay, true, "the result screen is up");
   assert.equal(end.title, "时间到");
-  assert.equal(end.clock, "0 秒");
+  assert.equal(end.clock, 0);
   assert.match(end.result, /命中 \d+\/\d+/);
+  assert.deepEqual(errors, []);
+});
+
+/* the sizes UI.md 13 names, plus both no-pad phone heights: the smallest, Safari-short, and the tall phones */
+const STAGES = [[331, 359], [331, 473], [346, 518], [346, 650], [386, 650], [348, 323], [386, 738]];
+
+test("whack-a-mole: the field fills the stage, edge to edge, and the overlay covers the whole stage", { skip, timeout: 90000 }, async (t) => {
+  const { p, frame, errors } = await tab(t, { lang: "zh", clock: new Date(2026, 10, 24, 12, 0) });
+  for (const [w, h] of STAGES) {
+    await p.evaluate(([w, h]) => { const a = document.getElementById("app"); a.style.width = w + "px"; a.style.height = h + "px"; }, [w, h]);
+    await frame.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [w, h]);
+    await sleep(100);
+    const m = await frame.evaluate(() => {
+      const st = document.getElementById("stage").getBoundingClientRect();
+      const c = document.getElementById("c").getBoundingClientRect();
+      const ov = document.getElementById("ov").getBoundingClientRect();
+      const L = window.__moleLayout(innerWidth, innerHeight);
+      return { stage: { l: st.left, t: st.top, r: st.right, b: st.bottom }, canvas: { l: c.left, t: c.top, r: c.right, b: c.bottom },
+        ov: { l: ov.left, t: ov.top, w: ov.width, h: ov.height }, L: L, hud: !!document.getElementById("hud") };
+    });
+    const tag = `${w}x${h}`;
+    assert.equal(m.hud, false, `${tag}: the HTML HUD row is gone`);
+    assert.ok(m.canvas.l <= m.stage.l + 0.01 && m.canvas.t <= m.stage.t + 0.01, `${tag}: the canvas starts inside the stage corner`);
+    assert.ok(m.canvas.r >= m.stage.r - 0.01 && m.canvas.b >= m.stage.b - 0.01, `${tag}: the canvas covers the stage, no paper bars`);
+    assert.ok(m.canvas.r - m.stage.r < m.L.k && m.canvas.b - m.stage.b < m.L.k, `${tag}: less than one canvas pixel of overhang`);
+    assert.ok(Math.abs(m.ov.l - m.stage.l) < 0.01 && Math.abs(m.ov.t - m.stage.t) < 0.01, `${tag}: the overlay starts at the stage corner`);
+    assert.ok(Math.abs(m.ov.w - m.stage.r + m.stage.l) < 0.01 && Math.abs(m.ov.h - m.stage.b + m.stage.t) < 0.01, `${tag}: the overlay is the whole stage`);
+  }
+  /* the play screen has no HTML bars either: the canvas alone fills the stage while playing */
+  await p.evaluate(() => { const a = document.getElementById("app"); a.style.width = "386px"; a.style.height = "738px"; });
+  await frame.waitForFunction(() => innerWidth === 386 && innerHeight === 738);
+  await frame.locator("#btns button").nth(1).click();
+  await frame.waitForFunction(() => window.__mole().playing);
+  assert.equal(await frame.evaluate(() => window.__mole().sel), 1, "the touched mode stays the selected row");
+  const playing = await frame.evaluate(() => {
+    const st = document.getElementById("stage").getBoundingClientRect();
+    const c = document.getElementById("c").getBoundingClientRect();
+    return { overlay: !document.getElementById("ov").classList.contains("hide"), left: c.left - st.left, top: c.top - st.top, right: st.right - c.right, bottom: st.bottom - c.bottom };
+  });
+  assert.equal(playing.overlay, false, "the overlay is out of the way while playing");
+  assert.ok(playing.left <= 0 && playing.top <= 0 && playing.right <= 0 && playing.bottom <= 0, "the canvas is the play screen: " + JSON.stringify(playing));
+  assert.deepEqual(errors, []);
+
+  /* a dpr 3 phone lays the same box out; the canvas backing store stays the field's pixels */
+  const hi = await tab(t, { clock: new Date(2026, 10, 24, 12, 0), dpr: 3 });
+  await hi.p.evaluate(() => { const a = document.getElementById("app"); a.style.width = "386px"; a.style.height = "738px"; });
+  await hi.frame.waitForFunction(() => innerWidth === 386 && innerHeight === 738);
+  await sleep(100);
+  const hidpi = await hi.frame.evaluate(() => {
+    const st = document.getElementById("stage").getBoundingClientRect(), c = document.getElementById("c");
+    const r = c.getBoundingClientRect();
+    return { dpr: devicePixelRatio, rows: c.height, cols: c.width, covers: r.left <= st.left + 0.01 && r.top <= st.top + 0.01 && r.right >= st.right - 0.01 && r.bottom >= st.bottom - 0.01 };
+  });
+  assert.equal(hidpi.dpr, 3);
+  assert.ok(hidpi.covers, "dpr 3 still covers the stage");
+  assert.equal(hidpi.cols, 120, "the field keeps its 120 columns");
+  assert.deepEqual(hi.errors, []);
+});
+
+test("whack-a-mole: a tap in the scenery never whacks, a tap on the field does", { skip, timeout: 60000 }, async (t) => {
+  const { p, frame, errors } = await tab(t, { lang: "zh", clock: new Date(2026, 10, 24, 12, 0) });
+  const size = async (w, h) => {
+    await p.evaluate(([w, h]) => { const a = document.getElementById("app"); a.style.width = w + "px"; a.style.height = h + "px"; }, [w, h]);
+    await frame.waitForFunction(([w, h]) => innerWidth === w && innerHeight === h, [w, h]);
+    await sleep(150);
+  };
+  const layout = () => frame.evaluate(() => window.__moleLayout(innerWidth, innerHeight));
+  const dispatch = (px, py) => frame.evaluate(([px, py]) => {
+    const cv = document.getElementById("c"), r = cv.getBoundingClientRect();
+    const L = window.__moleLayout(innerWidth, innerHeight);
+    const x = r.left + (L.x0 + px) * r.width / L.W, y = r.top + (L.hud + py) * r.height / L.H;
+    cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: x, clientY: y, bubbles: true }));
+  }, [px, py]);
+  const taps = () => frame.evaluate(() => window.__mole().taps);
+
+  /* a short stage grows side columns; those columns are scenery, not holes */
+  await size(331, 359);
+  await frame.locator("#btns button").nth(1).click();
+  await frame.waitForFunction(() => window.__mole().playing);
+  const before = await taps();
+  let L = await layout();
+  assert.ok(L.x0 > 0, "331 x 359 is fitted by height, with side columns: " + JSON.stringify(L));
+  await dispatch(-Math.floor(L.x0 / 2), 60);
+  assert.equal(await taps(), before, "a tap on a side column does not whack");
+
+  /* the tall stage has a real soil band under the field */
+  await size(386, 738);
+  L = await layout();
+  assert.ok(L.dirt > 0, "386 x 738 has a soil band to tap: " + JSON.stringify(L));
+  await dispatch(60, -Math.floor(L.hud / 2));                    /* the scoreboard band */
+  await dispatch(60, 150 + Math.floor(L.dirt / 2));              /* the soil band */
+  assert.equal(await taps(), before, "sky and soil taps do not whack");
+  await dispatch(60, 100);
+  assert.equal(await taps(), before + 1, "a field tap still whacks");
   assert.deepEqual(errors, []);
 });
