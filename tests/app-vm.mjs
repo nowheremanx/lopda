@@ -21,22 +21,30 @@ export function boot(file, opt = {}) {
     measureText: () => ({ width: 12 }), fillText() {}, clearRect() {}
   };
   /* every element's listeners by event type: the canvas's pointer listeners are how pointer() taps the screen.
-     opt.stage ({w, h}) gives the page a phone-sized stage: lo-game's fill mode reads it from getBoundingClientRect. */
+     opt.stage ({w, h}) gives the page a phone-sized stage: lo-game's fill mode reads it from getBoundingClientRect.
+     querySelector("canvas") finds the first canvas made, so an app's own pointer tracker (klotski) listens too. */
   const elListeners = {};
+  const created = [];
   const rect = opt.stage
     ? { left: 0, top: 0, width: opt.stage.w, height: opt.stage.h }
     : { left: 0, top: 0, width: 160, height: 144 };
-  const el = () => ({
-    style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
-    addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); }, appendChild() {}, setPointerCapture() {},
-    getContext: () => ctx2d, getBoundingClientRect: () => rect
-  });
+  const el = (tag) => {
+    const node = {
+      tag: tag, style: {}, width: 0, height: 0, textContent: "", clientWidth: 0, clientHeight: 0,
+      addEventListener(type, f) { (elListeners[type] = elListeners[type] || []).push(f); }, appendChild() {}, setPointerCapture() {},
+      getContext: () => ctx2d, getBoundingClientRect: () => rect
+    };
+    created.push(node);
+    return node;
+  };
   class KeyboardEvent { constructor(type, o = {}) { this.type = type; this.key = o.key; this.repeat = false; } preventDefault() {} }
   /* the page's globals. The scripts run as one function in this realm rather than in a vm context, whose
      global lookups (Math, every top-level var) are many times slower */
   const g = {
     console, performance, KeyboardEvent, atob, btoa,
-    document: { createElement: el, body: el(), head: el(), documentElement: el(), getElementById: () => el(), addEventListener() {} },
+    document: { createElement: el, body: el(), head: el(), documentElement: el(), getElementById: () => el(),
+      querySelector: (sel) => (sel === "canvas" ? created.find((n) => n.tag === "canvas") || null : null),
+      addEventListener() {} },
     innerWidth: 160, innerHeight: 144, devicePixelRatio: 1,
     requestAnimationFrame: (f) => { raf.push(f); return raf.length; },
     addEventListener: (type, f) => { (listeners[type] = listeners[type] || []).push(f); },

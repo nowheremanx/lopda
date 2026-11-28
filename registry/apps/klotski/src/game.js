@@ -1,7 +1,7 @@
 /* 华容道 / Klotski for Lo-PDA. The rules and solver are separate pure files; this is the handheld:
    the title, the open level list, the board, the master-class lessons, the records and the pages.
    Screen 160x200: 20 px header, the 4x5 board (120x150) at y=22, 28 px of hints. */
-var game = LoGame.create({ width: 160, height: 200, lang: "zh" });
+var game = LoGame.create({ width: 160, height: 200, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
@@ -10,22 +10,144 @@ var HEAD = 20, BOARD_TOP = 22, BOARD_ROOM = 150, FOOT = 174;
 var EXIT_SLIDE = 0.55, EXIT_WIPE = 0.35;
 var ROW_H = 27, LIST_ROWS = 5;
 
+/* ---------------- the table around the board (sdk/UI.md 13) ----------------
+   The world keeps its 160 x 200 size, its board and every hit test. On a phone lo-game's fill canvas
+   grows a wooden table around it, so a fixed board never sits in paper bars. Pause, the dialogs and
+   the lists get flat lacquer and no props: their bands must not look like the board is still playable. */
+function bandCalm() {
+  var top = game.top ? game.top() : null;
+  if (top === levelsScene || top === lessonsScene || top === pagesScene) return true;
+  return top === tableScene && !!table && (table.ui === "menu" || table.ui === "confirm" || table.ui === "card");
+}
+/* fixed grain, so every frame and every screenshot looks the same */
+function bandWood(s, w, h) {
+  var y, x, off;
+  s.clear(s.DARK);
+  for (y = 3; y < h; y += 7) {
+    off = (y * 13) % 23;
+    for (x = -off; x < w; x += 29) {
+      s.rect(x, y, 7, 1, s.INK);
+      s.rect(x + 12, y + 3, 3, 1, s.MID);
+    }
+  }
+  for (y = 26; y < h; y += 47) {
+    s.rect(0, y, w, 1, s.INK);
+    for (x = 4; x < w; x += 31) s.rect(x, y + 1, 9, 1, s.MID);
+  }
+}
+/* a cup and a rolled scroll on the table above the board */
+function bandCup(s, x, y) {
+  s.rect(x, y, 10, 6, s.PAPER);
+  s.rect(x, y, 10, 1, s.MID);
+  s.rect(x + 10, y + 2, 2, 2, s.PAPER);
+  s.rect(x + 1, y + 6, 8, 1, s.INK);
+  s.rect(x + 2, y + 7, 8, 1, s.MID);
+  s.pixel(x + 2, y - 3, s.MID);
+  s.pixel(x + 4, y - 5, s.MID);
+  s.pixel(x + 7, y - 2, s.MID);
+}
+function bandScroll(s, x, y) {
+  s.rect(x, y, 26, 6, s.PAPER);
+  s.rect(x, y, 2, 6, s.INK);
+  s.rect(x + 24, y, 2, 6, s.INK);
+  s.rect(x + 4, y + 2, 18, 1, s.MID);
+  s.rect(x + 4, y + 4, 12, 1, s.MID);
+}
+/* a hanging lantern for the tall bands above the board, and a tea bowl on the near edge */
+function bandLantern(s, x, y) {
+  s.rect(x, 0, 1, y, s.MID);
+  s.rect(x - 4, y, 9, 2, s.INK);
+  s.rect(x - 5, y + 2, 11, 9, s.PAPER);
+  s.rect(x - 5, y + 2, 11, 1, s.MID);
+  s.rect(x - 5, y + 5, 11, 1, s.MID);
+  s.rect(x - 5, y + 8, 11, 1, s.MID);
+  s.rect(x - 4, y + 11, 9, 2, s.INK);
+  s.rect(x, y + 13, 1, 4, s.MID);
+  s.rect(x - 1, y + 17, 3, 1, s.MID);
+}
+function bandBowl(s, x, y) {
+  s.rect(x, y, 16, 4, s.PAPER);
+  s.rect(x, y, 16, 1, s.INK);
+  s.rect(x + 2, y + 4, 12, 1, s.MID);
+  s.rect(x + 4, y + 5, 8, 1, s.MID);
+  s.line(x + 18, y + 1, x + 25, y - 2, s.MID);
+  s.line(x + 19, y + 2, x + 27, y + 1, s.MID);
+}
+/* the tray's drawer in the near edge of the table, below the board */
+function bandDrawer(s, x, y) {
+  s.frame(x, y, 64, 11, s.INK);
+  s.rect(x + 2, y + 2, 60, 1, s.MID);
+  s.rect(x + 28, y + 5, 8, 2, s.MID);
+  s.pixel(x + 31, y + 5, s.INK);
+}
+function paintBands(s, st) {
+  var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
+  var calm = bandCalm(), topBand = y0, botBand = h - (y0 + wh);
+  var leftBand = x0, rightBand = w - (x0 + ww);
+  if (calm) s.clear(s.DARK);
+  else bandWood(s, w, h);
+  /* a lit bevel on the top and left, a shadow on the bottom and right: the paper board sits in the tray */
+  s.rect(x0 - 2, y0 - 2, ww + 4, 2, s.MID);
+  s.rect(x0 - 2, y0 - 2, 2, wh + 4, s.MID);
+  s.rect(x0 - 2, y0 + wh, ww + 4, 2, s.INK);
+  s.rect(x0 + ww, y0 - 2, 2, wh + 4, s.INK);
+  if (calm) return;
+  if (topBand >= 18) {
+    bandCup(s, x0 + 22, Math.max(2, topBand - 13));
+    bandScroll(s, x0 + ww - 48, Math.max(2, topBand - 13));
+    if (topBand >= 34) bandLantern(s, x0 + Math.floor(ww / 2), 6);
+  }
+  if (botBand >= 18) {
+    bandDrawer(s, x0 + Math.floor((ww - 64) / 2), y0 + wh + 4);
+    if (botBand >= 34) bandBowl(s, x0 + 14, y0 + wh + 7);
+  }
+  /* the side planks, with a nail at each end, when Safari's short stage makes the canvas wider */
+  if (leftBand >= 10) {
+    s.rect(x0 - 7, 0, 1, h, s.INK);
+    s.rect(x0 - 8, y0 + 16, 2, 2, s.MID);
+    s.rect(x0 - 8, y0 + wh - 18, 2, 2, s.MID);
+  }
+  if (rightBand >= 10) {
+    s.rect(x0 + ww + 6, 0, 1, h, s.INK);
+    s.rect(x0 + ww + 6, y0 + 16, 2, 2, s.MID);
+    s.rect(x0 + ww + 6, y0 + wh - 18, 2, 2, s.MID);
+  }
+}
+
 /* ---------------- pointer: lo-game keeps only the latest point in a tick, so a quick down+up can
-   lose where the finger started. These listeners keep both ends, for taps and for drags. ---------------- */
+   lose where the finger started. These listeners keep both ends, for taps and for drags.
+   Under fill the canvas is larger than the world: the mapping goes through game.stage (canvas pixels,
+   then the world inside them) and a press that starts in a band is dropped, so a table tap never
+   chooses a row or moves a piece (LO-GAME.md 2.1). PT is the app's only direct pointer read. ---------------- */
 var PT = (function () {
-  var st = { down: false, x0: 0, y0: 0, x: 0, y: 0, up: false, cancel: false, at: 0 };
+  var st = { down: false, inside: true, x0: 0, y0: 0, x: 0, y: 0, up: false, cancel: false, at: 0 };
   var canvas = typeof document !== "undefined" && document.querySelector ? document.querySelector("canvas") : null;
   function point(e) {
     var r = canvas.getBoundingClientRect();
-    var x = Math.floor((e.clientX - r.left) * 160 / (r.width || 1));
-    var y = Math.floor((e.clientY - r.top) * 200 / (r.height || 1));
-    return { x: Math.max(0, Math.min(159, x)), y: Math.max(0, Math.min(199, y)) };
+    var sg = game.stage || { w: 160, h: 200, k: 1, x: 0, y: 0 };
+    var px, py, wx, wy;
+    /* fill off keeps the old exact rect mapping; fill on has extra canvas columns or rows around the world */
+    if (sg.w === 160 && sg.h === 200 && sg.x === 0 && sg.y === 0) {
+      px = (e.clientX - r.left) * 160 / (r.width || 1);
+      py = (e.clientY - r.top) * 200 / (r.height || 1);
+      wx = px; wy = py;
+    } else {
+      var k = sg.k || 1;
+      px = (e.clientX - r.left) / k;
+      py = (e.clientY - r.top) / k;
+      wx = px - sg.x; wy = py - sg.y;
+    }
+    return {
+      x: Math.max(0, Math.min(159, Math.floor(wx))),
+      y: Math.max(0, Math.min(199, Math.floor(wy))),
+      inside: px >= sg.x && px < sg.x + 160 && py >= sg.y && py < sg.y + 200
+    };
   }
   if (canvas && canvas.addEventListener) {
     canvas.addEventListener("pointerdown", function (e) {
       if (e.isPrimary === false) return;
       var p = point(e);
-      st.down = true; st.up = false; st.cancel = false;
+      st.down = true; st.up = false; st.cancel = false; st.inside = p.inside;
       st.x0 = st.x = p.x; st.y0 = st.y = p.y;
       if (e.preventDefault) e.preventDefault();
       if (canvas.setPointerCapture && e.pointerId !== undefined) { try { canvas.setPointerCapture(e.pointerId); } catch (err) {} }
@@ -47,17 +169,17 @@ var PT = (function () {
   function take() {
     if (!st.up && !st.cancel) return null;
     var fresh = Date.now() - st.at < 400;
-    var cancelled = st.cancel;
+    var cancelled = st.cancel, inside = st.inside;
     var ev = {
       x0: st.x0, y0: st.y0, x: st.x, y: st.y,
       dx: st.x - st.x0, dy: st.y - st.y0,
       dist: Math.sqrt((st.x - st.x0) * (st.x - st.x0) + (st.y - st.y0) * (st.y - st.y0))
     };
-    st.up = false; st.cancel = false;
-    if (!fresh || cancelled) return null;
+    st.up = false; st.cancel = false; st.inside = true;
+    if (!fresh || cancelled || !inside) return null;
     return ev;
   }
-  function clear() { st.down = false; st.up = false; st.cancel = false; }
+  function clear() { st.down = false; st.up = false; st.cancel = false; st.inside = true; }
   return { take: take, clear: clear };
 })();
 
@@ -1222,8 +1344,9 @@ function drawCard(g) {
 }
 
 /* ---------------- title ---------------- */
-/* the picture fills the top; the four buttons sit in two rows under it */
-var TITLE_ART_X = 18, TITLE_ART_Y = 2, TITLE_MENU_Y = 130, TITLE_ROW = 28;
+/* the picture fills the top; the four buttons sit in two rows under it, the key hint on the footer line */
+var TITLE_ART_X = 18, TITLE_ART_Y = 1, TITLE_MENU_Y = 125, TITLE_ROW = 24, TITLE_BTN_H = 23;
+var TITLE_HINT_Y = 173, TITLE_RULE_Y = 172, TITLE_STATUS_Y = 187;
 var title = { sel: 0, items: [], loading: false };
 function titleItems() {
   return [
@@ -1264,21 +1387,22 @@ var titleScene = {
       bx = 18 + (i % 2) * 62; by = TITLE_MENU_Y + Math.floor(i / 2) * TITLE_ROW;
       if (!loaded) break;
       if (i === title.sel) {
-        g.rect(bx, by, 60, 26, g.INK);
-        g.text(title.items[i].label, bx + 30, by + 7, { align: "center", color: g.PAPER });
+        g.rect(bx, by, 60, TITLE_BTN_H, g.INK);
+        g.text(title.items[i].label, bx + 30, by + 5, { align: "center", color: g.PAPER });
       } else {
-        g.frame(bx, by, 60, 26, g.INK);
-        g.text(title.items[i].label, bx + 30, by + 7, { align: "center", color: g.INK });
+        g.frame(bx, by, 60, TITLE_BTN_H, g.INK);
+        g.text(title.items[i].label, bx + 30, by + 5, { align: "center", color: g.INK });
       }
     }
     if (!loaded) {
       g.text(T({ zh: "读取中…", en: "Loading..." }), 80, 150, { align: "center", color: g.INK });
     }
-    /* the progress line; the old "Arrows  A OK" hint gave its row to the picture */
-    g.rect(0, 186, 160, 1, g.DARK);
-    if (!canSave) g.text(T({ zh: "存档读不出，这次不存", en: "Save unreadable: no saving" }), 80, 187, { align: "center", color: g.INK });
+    /* the key line, then the progress line; both stay inside the 160-wide screen */
+    g.rect(0, TITLE_RULE_Y, 160, 1, g.DARK);
+    g.text(T({ zh: "↑↓←→ 选 · A 好", en: "arrows · A ok" }), 80, TITLE_HINT_Y, { align: "center", color: g.INK });
+    if (!canSave) g.text(T({ zh: "存档读不出，这次不存", en: "Save unreadable: no saving" }), 80, TITLE_STATUS_Y, { align: "center", color: g.INK });
     else g.text(T({ zh: "已通 {a}/{b}　课 {c}/{d}", en: "Cleared {a}/{b}  Lessons {c}/{d}" },
-      { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, 187, { align: "center", color: g.INK });
+      { a: clearedCount(), b: LEVELS.length, c: lessonsDone(), d: LESSONS.length }), 80, TITLE_STATUS_Y, { align: "center", color: g.INK });
   }
 };
 
