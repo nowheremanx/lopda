@@ -14,9 +14,10 @@ var Chords = (function () {
   var PICK_NAMES = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
   var LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-  /* The 19 qualities of version 1, in the order the picker lists them (section 2.1). iv: semitones above the root;
-     lab: how each interval is written; opt: intervals a voicing may leave out (the fifth). group: the picker's
-     heading; common: how readily identify() picks it when two names fit the same notes. */
+  /* The 25 qualities, in the order the picker lists them (section 2.1). iv: semitones above the root; lab: how each
+     interval is written; opt: intervals a voicing may leave out (the fifth). group: the picker's heading; common: how
+     readily identify() picks it when two names fit the same notes. A 9, 11 or 13 is stored as its mod-12 interval
+     (2, 5, 9); tones() stacks it an octave up. */
   var QUALS = [
     { id: "",      zh: "大三",   en: "major",       iv: [0, 4, 7],         lab: ["R", "3", "5"],                 opt: [],  group: 0, common: 1 },
     { id: "m",     zh: "小三",   en: "minor",       iv: [0, 3, 7],         lab: ["R", "b3", "5"],                opt: [],  group: 0, common: 1 },
@@ -36,10 +37,17 @@ var Chords = (function () {
     { id: "6",     zh: "大六",   en: "major 6",     iv: [0, 4, 7, 9],      lab: ["R", "3", "5", "6"],            opt: [7], group: 3, common: 0.4 },
     { id: "m6",    zh: "小六",   en: "minor 6",     iv: [0, 3, 7, 9],      lab: ["R", "b3", "5", "6"],           opt: [7], group: 3, common: 0.4 },
     { id: "9",     zh: "属九",   en: "dominant 9",  iv: [0, 2, 4, 7, 10],  lab: ["R", "9", "3", "5", "b7"],      opt: [7], group: 4, common: 0.4 },
-    { id: "m9",    zh: "小九",   en: "minor 9",     iv: [0, 2, 3, 7, 10],  lab: ["R", "9", "b3", "5", "b7"],     opt: [7], group: 4, common: 0.4 }
+    { id: "m9",    zh: "小九",   en: "minor 9",     iv: [0, 2, 3, 7, 10],  lab: ["R", "9", "b3", "5", "b7"],     opt: [7], group: 4, common: 0.4 },
+    { id: "maj9",  zh: "大九",   en: "major 9",     iv: [0, 2, 4, 7, 11],  lab: ["R", "9", "3", "5", "7"],       opt: [7], group: 4, common: 0.35 },
+    { id: "13",    zh: "十三",   en: "dominant 13",  iv: [0, 2, 4, 7, 9, 10], lab: ["R", "9", "3", "5", "13", "b7"], opt: [7, 2], group: 4, common: 0.3 },
+    { id: "7#9",   zh: "属七升九", en: "7 sharp 9", iv: [0, 3, 4, 7, 10],  lab: ["R", "#9", "3", "5", "b7"],     opt: [7], group: 5, common: 0.3 },
+    { id: "6/9",   zh: "六九",   en: "six-nine",    iv: [0, 2, 4, 7, 9],   lab: ["R", "9", "3", "5", "6"],       opt: [7], group: 3, common: 0.35 },
+    { id: "m11",   zh: "小十一", en: "minor 11",    iv: [0, 2, 3, 5, 7, 10], lab: ["R", "9", "b3", "11", "5", "b7"], opt: [7, 2], group: 4, common: 0.3 },
+    { id: "add11", zh: "加十一", en: "add11",       iv: [0, 4, 5, 7],     lab: ["R", "3", "11", "5"],          opt: [7], group: 3, common: 0.3 }
   ];
   var GROUPS = [{ zh: "三和弦", en: "Triads" }, { zh: "七和弦", en: "Sevenths" }, { zh: "挂留", en: "Suspended" },
-    { zh: "加音、六", en: "Added, sixths" }, { zh: "九和弦", en: "Ninths" }];
+    { zh: "加音、六", en: "Added, sixths" }, { zh: "九、十一、十三", en: "Ninths, elevenths, thirteenths" },
+    { zh: "变化属七", en: "Altered dominants" }];
   var QI = {};
   QUALS.forEach(function (q, i) { QI[q.id] = i; });
 
@@ -60,10 +68,20 @@ var Chords = (function () {
     "sus2": "sus2", "sus4": "sus4", "sus": "sus4", "7sus4": "7sus4", "7sus": "7sus4",
     "add9": "add9", "add2": "add9", "(add9)": "add9",
     "6": "6", "maj6": "6", "M6": "6", "m6": "m6", "min6": "m6", "-6": "m6",
-    "9": "9", "m9": "m9", "min9": "m9", "-9": "m9"
+    "9": "9", "m9": "m9", "min9": "m9", "-9": "m9",
+    "maj9": "maj9", "M9": "maj9", "Δ9": "maj9", "ma9": "maj9", "major9": "maj9",
+    "13": "13", "dom13": "13",
+    "7#9": "7#9", "7(#9)": "7#9",
+    "6/9": "6/9", "69": "6/9", "6add9": "6/9", "M6/9": "6/9",
+    "m11": "m11", "min11": "m11", "-11": "m11",
+    "add11": "add11", "add4": "add11", "(add11)": "add11",
+    /* not qualities of this book: a major 11 and a minor 6/9 must not fall through the lowercase aliases to
+       m11 and 6/9 (M/m stay apart, as the comment above says) */
+    "M11": null, "m6/9": null
   };
   var ALIAS_LOWER = {};
-  Object.keys(ALIAS).forEach(function (k) { if (k.length >= 3) ALIAS_LOWER[k.toLowerCase()] = ALIAS[k]; });
+  /* null entries are exact-only rejects (M11, m6/9): they must not shadow a valid lowercase alias */
+  Object.keys(ALIAS).forEach(function (k) { if (k.length >= 3 && ALIAS[k] !== null) ALIAS_LOWER[k.toLowerCase()] = ALIAS[k]; });
 
   function mod12(n) { return ((n % 12) + 12) % 12; }
   function pcOf(s) {
@@ -92,6 +110,10 @@ var Chords = (function () {
   function name(c) { var Q = qual(c.q); return NAMES[c.root] + (Q && Q.show ? Q.show : c.q) + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
   function qual(id) { return Object.prototype.hasOwnProperty.call(QI, id) ? QUALS[QI[id]] : null; }
 
+  /* the labs that name an extension (a 9, 11 or 13, plain or altered): stacked an octave up when a chord's tones are
+     read, so an add11 sounds at 17 semitones, above the 5th */
+  var EXTLAB = { "9": true, "b9": true, "#9": true, "11": true, "#11": true, "13": true, "b13": true };
+
   /* the chord's notes and how each is written, bass first when it is not a chord tone */
   function tones(c) {
     var Q = qual(c.q), out = [];
@@ -99,7 +121,7 @@ var Chords = (function () {
       out.push({ pc: c.bass, lab: "/", iv: null });
     /* listed as they stack up from the root: a 9 is a ninth (14 semitones), not a second, so it comes last */
     var up = [];
-    for (var i = 0; i < Q.iv.length; i++) up.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i], iv: Q.lab[i] === "9" ? Q.iv[i] + 12 : Q.iv[i] });
+    for (var i = 0; i < Q.iv.length; i++) up.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i], iv: Q.iv[i] + (EXTLAB[Q.lab[i]] ? 12 : 0) });
     up.sort(function (a, b) { return a.iv - b.iv; });
     return out.concat(up);
   }
@@ -151,6 +173,9 @@ var Chords = (function () {
     ["Em6", "022020", "023040"], ["C9", "x32333", "021333"], ["E9", "020102", "020103"],
     ["E5", "022xxx", "012000"], ["A5", "x022xx", "001200"], ["D5", "xx023x", "000120"],
     ["Edim7", "012020", "012030"], ["Ammaj7", "x02110", "003120"],
+    /* the colours of 1.4.7: their first shapes under Common, each naming itself first in the finder */
+    ["Cmaj9", "x3243x", "021430"], ["C13", "x30355", "010234"], ["E7#9", "076780", "021340"],
+    ["C6/9", "x32233", "021134"], ["Cm11", "x31311", "021311"], ["Cadd11", "x32011", "032011"],
     /* slash chords */
     ["D/F#", "2x0232", "T00132"], ["G/B", "x20003", "010003"], ["C/G", "332010", "432010"], ["C/E", "032010", "032010"],
     ["Am/G", "3x2210", "402310"], ["F/C", "x33211", "034211"], ["D/A", "x00232", "000132"], ["Am/E", "002210", "002310"]
@@ -361,7 +386,7 @@ var Chords = (function () {
   }
 
   /* ---------------- naming a voicing (section 3.4) ---------------- */
-  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 19.
+  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 25.
      The notes' pitch classes must hold every required tone of the quality and nothing outside it but the bass. */
   function identify(frets) {
     var notes = midiOf(frets);
@@ -393,7 +418,7 @@ var Chords = (function () {
 
   return {
     OPEN: OPEN, NAMES: NAMES, PICK_NAMES: PICK_NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
-    OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
+    OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT, EXTLAB: EXTLAB,
     parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
     fingerCount: fingerCount, assignFingers: assignFingers, barreFromFingers: barreFromFingers, position: position,

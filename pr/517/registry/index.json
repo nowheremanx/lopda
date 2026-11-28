@@ -27,9 +27,9 @@
         ".....000000.....",
         "................"
       ],
-      "version": "1.7.3",
+      "version": "1.7.4",
       "released": "2026-10-28",
-      "updated": "2026-11-27",
+      "updated": "2026-11-28",
       "description": "六十秒一关：钩金块、躲地雷，借爆炸开路；十关后老王也来抢。",
       "i18n": {
         "en": {
@@ -40,8 +40,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lao-zhang/index.html",
-      "sha256": "868911f209e8a30231a5fa9e1be8e976df6e64123263f466441b2f113038ec68",
-      "bytes": 214083
+      "sha256": "50fb0c5d1481f8669edc85f0b32e8557e05b9601e985dd8f6e4b850c0fe13b1e",
+      "bytes": 216017
     },
     {
       "spec": "lopda/1",
@@ -68,7 +68,7 @@
         "2222220333022222",
         "2222220333022222"
       ],
-      "version": "1.1.0",
+      "version": "1.1.1",
       "released": "2026-11-26",
       "updated": "2026-11-28",
       "description": "第一人称迷宫射击：空间站失联了，带着铆钉枪一层层往下，找门卡、躲光弹、关掉核心。",
@@ -81,8 +81,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/lost-deck/index.html",
-      "sha256": "bca65f628035cfb6f9eb764e9360ea69bb4b88cf12adf123d7cf3c9ab017703a",
-      "bytes": 179842
+      "sha256": "e3a847a67f3b43e44da3a1529eb413e6711f7eccc9024f9c0ac936603d157881",
+      "bytes": 180295
     },
     {
       "spec": "lopda/1",
@@ -131,7 +131,7 @@
       "glyph": "塔",
       "category": "game",
       "buttons": true,
-      "version": "0.4.5",
+      "version": "0.4.6",
       "released": "2026-10-10",
       "updated": "2026-11-28",
       "description": "仙侠序章，可通关。卡带内置 LX-3D 协处理器：三维小镇、山道、塔内与斗法。",
@@ -144,8 +144,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/zhenyao-tower/index.html",
-      "sha256": "8c667cdad394a8bc3671a7bf7180fa6cdd0a88a1f59b6d9700f548f5198a7116",
-      "bytes": 314824
+      "sha256": "1fe6617a45f50bf18e9e6919eb36c38cb770f05b793e6f5feab4c79d12ac5f21",
+      "bytes": 353425
     },
     {
       "spec": "lopda/1",
@@ -254,7 +254,7 @@
         "...000000000....",
         "................"
       ],
-      "version": "2.1.0",
+      "version": "2.1.1",
       "released": "2026-10-21",
       "updated": "2026-11-28",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
@@ -267,8 +267,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "83f10881f5f36befad38d22831145325d626b133f08c27f6968b129e22b3b19a",
-      "bytes": 210244
+      "sha256": "fbbbfbf8dd05e321cbbed6cef63ad75489f707299a47816fdd1ab3a9e372dbe2",
+      "bytes": 215748
     },
     {
       "spec": "lopda/1",
@@ -662,25 +662,25 @@
         "...1.1.1.1.1.1..",
         "................"
       ],
-      "version": "1.4.6",
+      "version": "1.4.7",
       "released": "2026-11-27",
       "updated": "2026-11-28",
-      "description": "吉他和弦字典：19 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。",
+      "description": "吉他和弦字典：25 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。",
       "i18n": {
         "zh": {
           "name": "和弦大全",
-          "description": "吉他和弦字典：19 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。"
+          "description": "吉他和弦字典：25 种和弦性质、斜线和弦、标准调弦 EADGBE、无 capo，多种按法，框图到即兴音阶，常见连接和为什么好听，也能反查。"
         },
         "en": {
           "name": "Chords",
-          "description": "EADGBE, no capo: 19 qualities, slash chords, shapes, scales, progressions."
+          "description": "EADGBE, no capo: 25 qualities, slash chords, shapes, scales, progressions."
         }
       },
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/chord-book/index.html",
-      "sha256": "467d6e36262920de8877421bd71d7bbbd2520f5249621439d42fd5e8c8f5742f",
-      "bytes": 117063
+      "sha256": "8f768aaf94673383a5114af772061945c047695c43410c3c51567a5f35b79176",
+      "bytes": 123104
     },
     {
       "spec": "lopda/1",
