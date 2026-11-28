@@ -429,9 +429,9 @@
         "................",
         "................"
       ],
-      "version": "1.6.3",
+      "version": "1.7.0",
       "released": "2026-10-17",
-      "updated": "2026-11-26",
+      "updated": "2026-11-28",
       "description": "拍一张照片，或从六张内置图片里挑一张，切成滑块拼图再拼回来。普通和街机两种玩法。",
       "i18n": {
         "zh": {
@@ -449,8 +449,8 @@
         "camera"
       ],
       "path": "apps/photo-puzzle/index.html",
-      "sha256": "654c49755e35f4cfac84ee8fdbc737add47cdcaeece66297af25b13992af34ce",
-      "bytes": 80555
+      "sha256": "4f3e1fc8ed7d564f1992b09c6a3220457c15751951e8f0b9787157c763a5487a",
+      "bytes": 88665
     },
     {
       "spec": "lopda/1",
