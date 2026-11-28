@@ -3288,8 +3288,10 @@ test("gamepad: a pad presses the chin keys, typing holds it out, and a blur keep
   /* the soft keyboard hides the chin pad; the controller must be quiet meanwhile */
   await p.evaluate(() => {
     const i = document.createElement("input"); i.id = "pad-probe"; document.body.appendChild(i); i.focus();
-    document.documentElement.classList.add("kb");
   });
+  /* the runtime's own focusin fit runs a moment later and would clear a class we add too early */
+  await p.waitForTimeout(120);
+  await p.evaluate(() => document.documentElement.classList.add("kb"));
   await p.evaluate(() => window.__padPress(0, false));
   await p.evaluate(() => window.__padPress(0, true));
   await p.waitForTimeout(80);
@@ -3299,6 +3301,16 @@ test("gamepad: a pad presses the chin keys, typing holds it out, and a blur keep
     const i = document.getElementById("pad-probe"); if (i) i.remove();
   });
   await p.evaluate(() => window.__padPress(0, false));
+  await p.waitForTimeout(40);
+  /* a focused field alone (no soft keyboard) must not mute the pad: notes search, calendar add and dict search use it */
+  await p.evaluate(() => {
+    const i = document.createElement("input"); i.id = "pad-probe2"; document.body.appendChild(i); i.focus();
+  });
+  await p.waitForTimeout(120);
+  await p.evaluate(() => window.__padPress(0, true));
+  await p.waitForFunction(() => document.querySelector('.gamepad [data-b="a"]').classList.contains("on"));
+  assert.equal(await lit(), true, "a focused field alone does not mute the controller");
+  await p.evaluate(() => { window.__padPress(0, false); const i = document.getElementById("pad-probe2"); if (i) i.remove(); });
   await p.waitForTimeout(40);
   /* a thumb and a controller are different sources: releasing one must not release the other */
   await p.evaluate(() => LP.setButton("a", true, "touch"));

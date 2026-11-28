@@ -175,6 +175,7 @@ test("gamepad: a physical key is stored by code; Shift and shortcuts are not bou
   t.openPage();
   t.row("up").onclick(); t.key("keydown", "w", { code: "KeyW" });
   assert.deepEqual(t.writes.at(-1).keys, { KeyW: "up" });
+  assert.equal(t.writes.at(-1).labels.KeyW, "W", "the label is the key the player sees, not the code");
   t.row("b").onclick(); t.key("keydown", "Shift", { code: "ShiftLeft" });
   assert.deepEqual(t.writes.at(-1).keys, { KeyW: "up" }, "Shift is a modifier, not a key");
   t.key("keydown", "w", { code: "KeyW", ctrlKey: true });
@@ -184,6 +185,14 @@ test("gamepad: a physical key is stored by code; Shift and shortcuts are not bou
   assert.deepEqual(t.calls, ["up+", "up-"], "the same physical key works after a layout change");
   t.key("keydown", "w", { code: "KeyW", isComposing: true });
   assert.deepEqual(t.calls, ["up+", "up-"], "an IME composition is not a game key");
+});
+
+test("gamepad: a bound key keeps the printed key as its label (AZERTY, not the code)", () => {
+  const t = boot();
+  t.openPage();
+  t.row("up").onclick(); t.key("keydown", "a", { code: "KeyQ" });
+  assert.deepEqual(t.writes.at(-1).keys, { KeyQ: "up" });
+  assert.equal(t.writes.at(-1).labels.KeyQ, "A", "the label is the printed A, not the US position Q");
 });
 
 test("gamepad: axes press at 0.6 and let go at 0.35", () => {
@@ -212,6 +221,22 @@ test("gamepad: a pad is quiet while a text field has the soft keyboard", () => {
   assert.deepEqual(t.calls, ["a+"]);
 });
 
+test("gamepad: a focused field without the soft keyboard still takes the chin keys", () => {
+  const t = boot();
+  t.document.activeElement = { nodeName: "INPUT" };
+  t.press(0, true);
+  assert.deepEqual(t.calls, ["a+"], "the notes search and the calendar add sheet keep using the pad");
+});
+
+test("gamepad: padLayout stops the loop when the pad hides and starts it again", () => {
+  const t = boot();
+  assert.equal(t.frames(), 1);
+  t.els.gamepad.hidden = true; t.page.padLayout();
+  assert.equal(t.frames(), 0, "the frame was cancelled");
+  t.els.gamepad.hidden = false; t.page.padLayout();
+  assert.equal(t.frames(), 1, "one loop on the way back");
+});
+
 test("gamepad: hiding and showing again leaves one animation loop", () => {
   const t = boot();
   assert.equal(t.frames(), 1, "one loop while the pad is shown");
@@ -231,7 +256,7 @@ test("gamepad: stored bindings load, junk is dropped, and reset forgets this con
   t.key("keydown", "k"); t.key("keyup", "k"); t.key("keydown", "q");
   assert.deepEqual(t.calls, ["b+", "b-"]);
   t.openPage(); t.els["set-pad-reset"].onclick();
-  assert.deepEqual(t.writes.at(-1), { v: 1, maps: {}, keys: {} });
+  assert.deepEqual(t.writes.at(-1), { v: 1, maps: {}, keys: {}, labels: {} });
 });
 
 test("gamepad: a six-axis raw pad shows its hat source as the D-pad", () => {

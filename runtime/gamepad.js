@@ -11,9 +11,10 @@
  *    the kind of controller (the W3C "standard" layout; a single Joy-Con, which the iPhone reports with an empty
  *    mapping); the player's own, from Settings -> 手柄 (tap a key, press a button), replace them for that controller's
  *    id. A keyboard key (a Bluetooth keyboard's WASD, a page turner's PageDown) can be bound too, next to core.js's
- *    arrows, X, Z, Enter, Shift, and is stored by e.code so a layout change does not move it.
- *    Stored in data/users/local/gamepad {v:1, maps:{<id>:{up:[...], ...}}, keys:{<key>:<lo-pda key>}}, so the backup
- *    carries it.
+ *    arrows, X, Z, Enter, Shift, and is stored by e.code so a layout change does not move it; e.key is kept as its
+ *    display label.
+ *    Stored in data/users/local/gamepad {v:1, maps:{<id>:{up:[...], ...}}, keys:{<key>:<lo-pda key>}, labels:{<key>:<name>}},
+ *    so the backup carries it.
  */
 (function(){
   "use strict";
@@ -22,7 +23,7 @@
   function tr(k,v){ return LP.tr ? LP.tr(k,v) : k; }
   var KEYS=["up","down","left","right","a","b","start","select"];
   var DOC="data/users/local/gamepad";
-  var store={maps:{}, keys:{}}, ref=null;
+  var store={maps:{}, keys:{}, labels:{}}, ref=null;
   var held={}, running=false, frame=0, slowTimer=0, activeId=null, touched={};
   var defCache={}, axisOn={};
 
@@ -101,15 +102,17 @@
   function padVisible(){ var g=$("gamepad"); return !!g && !g.hidden; }
   function padShown(){
     if(!padVisible()) return false;
-    if(document.documentElement && document.documentElement.classList && document.documentElement.classList.contains("kb")) return false;
-    return !typing(document.activeElement);
+    /* Only the soft keyboard closes the controller, not a focused field: the notes search, the calendar's add sheet
+       and the dictionary's search deliberately focus a field and still take the chin keys. The keyboard bindings
+       (keydown/up below) do keep their letters to a text field. */
+    return !(document.documentElement && document.documentElement.classList && document.documentElement.classList.contains("kb"));
   }
   function pads(){ try{ return HAS ? (navigator.getGamepads()||[]) : []; }catch(e){ return []; } }
   function hasPad(){ var l=pads(); for(var i=0;i<l.length;i++) if(l[i] && l[i].connected) return true; return false; }
   function padTouched(gp){
     var bt=gp.buttons||[];
     for(var b=0;b<bt.length;b++) if(pressed(bt[b])) return true;
-    var ax=gp.axes||[]; for(var a=0;a<ax.length;a++) if(Math.abs(ax[a])>0.5) return true;
+    var ax=gp.axes||[]; for(var a=0;a<ax.length;a++) if(Math.abs(ax[a])>0.6) return true;
     return false;
   }
   function tick(){
@@ -128,8 +131,12 @@
     });
     if(cap) capture(list);
     if(pageOpen()) livePage(list);
-    if(pageOpen() || (padVisible() && any)){ frame=requestAnimationFrame(tick); }
-    else { running=false; if(padVisible()) slowScan(); }
+    if(running && (pageOpen() || (padVisible() && any))){
+      if(!frame) frame=requestAnimationFrame(tick);
+    } else {
+      running=false;
+      if(padVisible() && !frame) slowScan();
+    }
   }
   function start(){ if(running || document.hidden || !HAS) return; running=true; stopSlow(); if(frame) cancelFrame(); frame=requestAnimationFrame(tick); }
   function stop(){ running=false; if(frame) cancelFrame(); }
@@ -163,7 +170,7 @@
 
   window.addEventListener("gamepadconnected",function(e){
     delete touched[e.gamepad.index]; forgetAxes(e.gamepad.index);
-    activeId=e.gamepad.id;
+    if(!activeId) activeId=e.gamepad.id;   /* a second pad does not take the page until it is actually pressed */
     LP.toast(tr("pad.connected"));
     wake(); if(pageOpen()) renderPage(null,cap?cap.key:null);
   });
@@ -198,6 +205,12 @@
     if(k.length===1) return k.toUpperCase();
     return k;
   }
+  function keyLabel(e){
+    var k=e.key||"";
+    if(k===" ") return "Space";
+    if(k.length===1) return k.toUpperCase();
+    return k || keyText(e.code||"");
+  }
   function boundKey(e){
     var ids=keyIds(e);
     for(var i=0;i<ids.length;i++) if(store.keys[ids[i]]) return {id:ids[i], b:store.keys[ids[i]]};
@@ -217,7 +230,7 @@
       if(e.ctrlKey || e.altKey || e.metaKey) return;   /* a shortcut is not a binding */
       if(!k || NOT_A_KEY.test(k) || NOT_A_KEY.test(e.key||"")) return;
       e.preventDefault(); e.stopPropagation();
-      if((e.key||"")==="Escape" || k==="Escape") cancel(); else bindKey(k,ids);
+      if((e.key||"")==="Escape" || k==="Escape") cancel(); else bindKey(k,ids,keyLabel(e));
       return;
     }
     var hit=boundKey(e);
@@ -235,13 +248,16 @@
   /* ---------- stored bindings ---------- */
   function docRef(){ if(!ref && LP.S && LP.S.db) ref=LP.S.db.doc(DOC); return ref; }
   function clean(d){
-    var out={maps:{}, keys:{}};
+    var out={maps:{}, keys:{}, labels:{}};
     if(d && d.maps && typeof d.maps==="object") Object.keys(d.maps).forEach(function(id){
       var m=d.maps[id], c={}; if(!m || typeof m!=="object") return;
       KEYS.forEach(function(k){ c[k]=Array.isArray(m[k]) ? m[k].filter(function(s){ return typeof s==="string"; }) : []; });
       out.maps[id]=c;
     });
     if(d && d.keys && typeof d.keys==="object") Object.keys(d.keys).forEach(function(x){ if(KEYS.indexOf(d.keys[x])>=0 && !NOT_A_KEY.test(x)) out.keys[x]=d.keys[x]; });
+    if(d && d.labels && typeof d.labels==="object") Object.keys(d.labels).forEach(function(x){
+      if(out.keys[x] && typeof d.labels[x]==="string") out.labels[x]=d.labels[x].slice(0,32);
+    });
     return out;
   }
   function load(){
@@ -251,7 +267,7 @@
       if(pageOpen()) renderPage();
     }).catch(function(){});
   }
-  function save(){ var r=docRef(); if(r) LP.put(r,{v:1, maps:store.maps, keys:store.keys}); }
+  function save(){ var r=docRef(); if(r) LP.put(r,{v:1, maps:store.maps, keys:store.keys, labels:store.labels}); }
 
   /* ---------- Settings -> 手柄: tap a key, then press what should be that key ---------- */
   var cap=null, capTimer=0;   /* {key, base:{<index>:{buttons, axes}}} while waiting for a press */
@@ -302,12 +318,12 @@
     store.maps[gp.id]=copy; save(); forgetAxes(gp.index);
     LP.sfx("ok"); renderPage(tr("pad.bound",{key:keyName(key), src:srcText(src,gp)}),key);
   }
-  function bindKey(k,ids){
+  function bindKey(k,ids,label){
     var key=cap.key; stopCap();
-    (ids||[k]).forEach(function(x){ if(x!==k) delete store.keys[x]; });   /* one physical key, one stored name */
-    Object.keys(store.keys).forEach(function(x){ if(store.keys[x]===key) delete store.keys[x]; });
-    store.keys[k]=key; save();
-    LP.sfx("ok"); renderPage(tr("pad.bound",{key:keyName(key), src:keyText(k)}),key);
+    (ids||[k]).forEach(function(x){ if(x!==k){ delete store.keys[x]; delete store.labels[x]; } });   /* one physical key, one stored name */
+    Object.keys(store.keys).forEach(function(x){ if(store.keys[x]===key){ delete store.keys[x]; delete store.labels[x]; } });
+    store.keys[k]=key; store.labels[k]=label||keyText(k); save();
+    LP.sfx("ok"); renderPage(tr("pad.bound",{key:keyName(key), src:store.labels[k]}),key);
   }
   function keyName(k){ return tr("pad.k."+k); }
 
@@ -326,7 +342,7 @@
         /* a raw pad's hat is the one that works; put it before the guessed button/axis names, which may not exist */
         raw.sort(function(a,b){ return (/^hat/.test(a)?0:1)-(/^hat/.test(b)?0:1); });
         var srcs=raw.map(function(s){ return srcText(s,gp); });
-        Object.keys(store.keys).forEach(function(x){ if(store.keys[x]===k) srcs.push(keyText(x)); });
+        Object.keys(store.keys).forEach(function(x){ if(store.keys[x]===k) srcs.push(store.labels[x]||keyText(x)); });
         state.textContent=srcs.length ? srcs.join(" / ") : "-";
       }
       btn.appendChild(name); btn.appendChild(state);
@@ -351,7 +367,7 @@
   if($("set-pad-reset")) $("set-pad-reset").onclick=function(){
     LP.sfx("tap"); stopCap();
     var gp=currentPad(); if(gp) delete store.maps[gp.id];
-    store.keys={}; save(); forgetAxes(); renderPage(tr("pad.reset.done"));
+    store.keys={}; store.labels={}; save(); forgetAxes(); renderPage(tr("pad.reset.done"));
   };
 
   LP.builtin({id:"set-pad", view:"set-pad",
