@@ -3,7 +3,9 @@
 //   <script data-src="src/x.js"> a source file of the app, verbatim </script>
 //   <script data-lo-3d="VERSION"> sdk/lo-3d.js, verbatim </script>
 //   <script data-lo-game="VERSION"> sdk/lo-game.js, verbatim </script>
+//   <script data-lo-title="VERSION"> sdk/lo-title.js, verbatim (the shared title screen) </script>
 //   <script data-lo-font="lopix12"> license notice + only the glyphs the app uses </script>
+//     after the lo-game block (LoGame.font), else after the lo-title block (LoTitle.font); with both, it feeds both
 import { readFileSync, existsSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -17,6 +19,9 @@ export const LIB_BLOCK = /<script data-lo-game="([^"]*)">\n?([\s\S]*?)<\/script>
 export const LIB3D = readFileSync(join(ROOT, "sdk", "lo-3d.js"), "utf8");
 export const LIB3D_VERSION = (LIB3D.match(VERSION_RE) || [])[1];
 export const LIB3D_BLOCK = /<script data-lo-3d="([^"]*)">\n?([\s\S]*?)<\/script>/;
+export const LIBT = readFileSync(join(ROOT, "sdk", "lo-title.js"), "utf8");
+export const LIBT_VERSION = (LIBT.match(VERSION_RE) || [])[1];
+export const LIBT_BLOCK = /<script data-lo-title="([^"]*)">\n?([\s\S]*?)<\/script>/;
 export const SRC_BLOCK = /<script data-src="([^"]*)">\n?([\s\S]*?)<\/script>/g;
 export const FONT_BLOCK = /\n?<script data-lo-font="[^"]*">[\s\S]*?<\/script>/;
 const FONT = JSON.parse(readFileSync(join(ROOT, "sdk", "fonts", "lopix12.json"), "utf8"));
@@ -34,7 +39,7 @@ export function released(name) {
 }
 
 /* the app with the framework blocks emptied: what the font subset is computed from */
-export function appText(html) { return html.replace(FONT_BLOCK, "").replace(LIB_BLOCK, "").replace(LIB3D_BLOCK, ""); }
+export function appText(html) { return html.replace(FONT_BLOCK, "").replace(LIB_BLOCK, "").replace(LIB3D_BLOCK, "").replace(LIBT_BLOCK, ""); }
 
 export function fontBlock(html) {
   const want = new Set(Array.from(appText(html)));
@@ -42,7 +47,11 @@ export function fontBlock(html) {
   const glyphs = {};
   [...want].sort().forEach((ch) => { if (FONT.glyphs[ch]) glyphs[ch] = FONT.glyphs[ch]; });
   const data = { name: FONT.name, cell: FONT.cell, line: FONT.line, glyphs };
-  return `<script data-lo-font="${FONT.name}">\n/*\n${FONT_NOTICE}*/\nLoGame.font(${JSON.stringify(data)});\n</script>`;
+  /* the call: LoGame.font for a lo-game app (as it has always been), LoTitle.font for an app with only the title
+     screen, and one shared value for both when an app has the two */
+  const game = LIB_BLOCK.test(html), title = LIBT_BLOCK.test(html), json = JSON.stringify(data);
+  const call = game && title ? `var LO_FONT = ${json};\nLoGame.font(LO_FONT);\nLoTitle.font(LO_FONT);` : `${game ? "LoGame" : "LoTitle"}.font(${json});`;
+  return `<script data-lo-font="${FONT.name}">\n/*\n${FONT_NOTICE}*/\n${call}\n</script>`;
 }
 
 /* why a data-src path is not allowed, or null */
@@ -74,7 +83,7 @@ export function fillSrc(html, dir) {
 
 /* does the app ask for anything the tool builds? */
 export function wantsBuild(html) {
-  return new RegExp(SRC_BLOCK.source).test(html) || LIB3D_BLOCK.test(html) || LIB_BLOCK.test(html);
+  return new RegExp(SRC_BLOCK.source).test(html) || LIB3D_BLOCK.test(html) || LIB_BLOCK.test(html) || LIBT_BLOCK.test(html);
 }
 
 /* fill data-src blocks (needs dir), then the lo-3d block, then the lo-game block, and (re)build the font block
@@ -88,11 +97,12 @@ export function build(html, dir) {
     out = r.html;
   }
   if (LIB3D_BLOCK.test(out)) out = out.replace(LIB3D_BLOCK, () => `<script data-lo-3d="${LIB3D_VERSION}">\n${LIB3D}</script>`);
-  if (LIB_BLOCK.test(out)) {
+  if (LIB_BLOCK.test(out) || LIBT_BLOCK.test(out)) {
     out = out.replace(FONT_BLOCK, "");
-    out = out.replace(LIB_BLOCK, () => `<script data-lo-game="${LIB_VERSION}">\n${LIB}</script>`);
+    if (LIB_BLOCK.test(out)) out = out.replace(LIB_BLOCK, () => `<script data-lo-game="${LIB_VERSION}">\n${LIB}</script>`);
+    if (LIBT_BLOCK.test(out)) out = out.replace(LIBT_BLOCK, () => `<script data-lo-title="${LIBT_VERSION}">\n${LIBT}</script>`);
     const font = fontBlock(out);
-    out = out.replace(LIB_BLOCK, (m) => m + "\n" + font);
+    out = out.replace(LIB_BLOCK.test(out) ? LIB_BLOCK : LIBT_BLOCK, (m) => m + "\n" + font);
   }
   return out;
 }

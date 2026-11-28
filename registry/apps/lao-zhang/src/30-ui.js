@@ -31,7 +31,6 @@ GM.ui = (function () {
     cv.addEventListener("pointerdown", onCanvas);
     ov.addEventListener("click", onOverlay);
     addEventListener("resize", fit);
-    addEventListener("resize", function () { if (lastScreen === "title") paintTitle(); });
     document.addEventListener("visibilitychange", onVis);
     if (typeof PAD !== "undefined" && PAD.on) PAD.on("press", onPad);
     fit();
@@ -94,29 +93,32 @@ GM.ui = (function () {
     return '<div class="sbody ' + cls + '">' + body + '</div><div class="ofoot">' + esc(footer) + "</div>";
   }
 
+  /* what the title menu shows: continue (only with a run in progress, its level and cash on the bar while it is
+     chosen), new run, the codex; the record or a save warning on the bar otherwise. The menu's index is not
+     state.menuCursor (0 continue, 1 new, 2 codex): without a run the menu starts at new. */
+  function titleOffset() { return state.run ? 0 : 1; }
+  function titleSpec() {
+    /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
+    var best = state.best.level > 0
+      ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
+      : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
+      : T.noBest;
+    var items = [{ label: T.menuNew }, { label: T.menuCodex }];
+    if (state.run) items.unshift({ label: T.menuContinue, status: GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) }) });
+    return {
+      items: items,
+      index: Math.max(0, state.menuCursor - titleOffset()),
+      note: state.saveMsg || state.runMsg || best,
+      hint: T.titleHint
+    };
+  }
+
   function render(screen) {
     var i, item, have, can, sel, price, rows, best, warn, extra, rec, next, target, short;
     if (screen === "title") {
-      /* a run that ended on level 1 still has its cash on record (recordBest keeps level 0 with a bank) */
-      best = state.best.level > 0
-        ? GM.fmt(T.best, { l: state.best.level, b: GM.money(state.best.bank) })
-        : state.best.bank > 0 ? GM.fmt(T.bestNoClear, { b: GM.money(state.best.bank) })
-        : T.noBest;
-      warn = (state.saveMsg ? '<p class="warn">' + esc(state.saveMsg) + "</p>" : "") +
-             (state.runMsg ? '<p class="warn">' + esc(state.runMsg) + "</p>" : "");
-      var runSub = state.run
-        ? GM.fmt(T.menuContinueAt, { n: state.run.level, b: GM.money(state.run.bank) })
-        : T.menuNoRun;
-      return shell("title center",
-        '<canvas id="logo" aria-hidden="true"></canvas>' +
-        '<h1 class="vh">' + esc(T.title) + "</h1>" +
-        '<div class="menu">' +
-          row(state.menuCursor === 0, "continue", T.menuContinue, runSub, !state.run) +
-          row(state.menuCursor === 1, "new", T.menuNew, T.menuNewSub, false) +
-          row(state.menuCursor === 2, "codex", T.menuCodex, T.menuCodexSub, false) +
-        "</div>" +
-        '<p class="best">' + esc(best) + "</p>" + warn,
-        T.menuFoot);
+      /* the shared title screen (sdk/lo-title.js): post("title") mounts it on this canvas; the menu turns by
+         itself, so a cursor move does not redraw the screen */
+      return '<canvas id="tt" class="lotitle"></canvas><h1 class="vh">' + esc(T.title) + "</h1>";
     }
     if (screen === "paused") {
       return shell("center",
@@ -227,7 +229,7 @@ GM.ui = (function () {
   function post(screen) {
     var i, c, spr;
     if (screen === "title") {
-      paintTitle();
+      mountTitle();
       return;
     }
     if (screen === "shop") {
@@ -251,33 +253,20 @@ GM.ui = (function () {
     }
   }
 
-  /* The title picture (the name is written in it), as large as the room above the menu allows, at most 3x, in
-     whole device pixels so every pixel stays square; on a screen too short for 1x it shrinks rather than push the
-     menu off. Written with putImageData only; the pixels for one size are kept, as every cursor move redraws. */
-  var titleImg = null;
-  function paintTitle() {
-    var logo = $("logo");
-    if (!logo || !ov) return;
-    var A = GM.titleArt, W = A.W, H = A.H, body = logo.parentNode, kids = body.children, used = 20, n = 0, i;
-    for (i = 0; i < kids.length; i++) if (kids[i] !== logo && kids[i].offsetHeight) { used += kids[i].offsetHeight; n++; }
-    used += n * 4 + (ov.lastElementChild && ov.lastElementChild !== body ? ov.lastElementChild.offsetHeight : 0);
-    var room = ov.clientHeight - used;
-    var d = window.devicePixelRatio || 1;
-    var fit = Math.max(0.25, Math.min((ov.clientWidth - 24) / W, room / H, 3)) * d, k = Math.max(1, Math.floor(fit));
-    logo.style.width = (W * (fit < 1 ? fit : k) / d) + "px";
-    logo.style.height = (H * (fit < 1 ? fit : k) / d) + "px";
-    if (!titleImg || titleImg.width !== W * k) {
-      var px = A.draw(LANG), tones = [[0xa3, 0xad, 0x7e], [0x7d, 0x8a, 0x58], [0x4a, 0x5a, 0x32], [0x1f, 0x2a, 0x14]];
-      titleImg = new ImageData(W * k, H * k);
-      var o = titleImg.data;
-      for (var y = 0; y < H * k; y++) for (var x = 0; x < W * k; x++) {
-        var t = tones[px[((y / k) | 0) * W + ((x / k) | 0)]], j = (y * W * k + x) * 4;
-        o[j] = t[0]; o[j + 1] = t[1]; o[j + 2] = t[2]; o[j + 3] = 255;
-      }
-    }
-    logo.width = W * k;
-    logo.height = H * k;
-    logo.getContext("2d").putImageData(titleImg, 0, 0);
+  /* The title screen: the picture, the name painted over its sky and the menu, all drawn by sdk/lo-title.js */
+  var titleMenu = null, titleArt = null;
+  function mountTitle() {
+    var c = $("tt");
+    if (!c || typeof LoTitle === "undefined") return;
+    if (!titleArt) titleArt = { w: GM.titleArt.W, h: GM.titleArt.H, px: GM.titleArt.draw(LANG, true) };
+    var spec = titleSpec(), name = GM.titleArt.words(LANG);
+    spec.art = titleArt;
+    /* the name on the sky left of the winch; the fog may cover the picture from the claw on the nugget down */
+    spec.title = { text: name.text, sub: name.sub, x: 17, y: 6, w: 86 };
+    spec.calm = 141;
+    spec.onMove = function (i) { state.menuCursor = i + titleOffset(); sfx("move"); };
+    spec.onPick = function (i) { state.menuCursor = i + titleOffset(); chooseMenu(); };
+    titleMenu = LoTitle.mount(c, spec);
   }
 
   function enter(screen) {
@@ -517,13 +506,7 @@ GM.ui = (function () {
   function onPad(btn) {
     var s = state.screen;
     if (s === "title") {
-      if (btn === "up" || btn === "down") {
-        state.menuCursor = (state.menuCursor + (btn === "down" ? 1 : 2) + 3) % 3;
-        sfx("move");
-        enter("title");
-        return;
-      }
-      if (btn === "a" || btn === "start") chooseMenu();
+      if (titleMenu) titleMenu.press(btn);
       return;
     }
     if (s === "confirm") {
