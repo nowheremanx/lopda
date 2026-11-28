@@ -9,6 +9,9 @@ var Chords = (function () {
   var MAX_FRET = 15, SPAN = 3, LIMIT = 24;
   /* the note names shown, the same set the four-track uses */
   var NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  /* the picker's root and bass labels: the book's names with the common enharmonic beside them (1.4.5). Only those two
+     grids read this; chord names, tone names, search and saves keep NAMES. */
+  var PICK_NAMES = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
   var LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
   /* The 19 qualities of version 1, in the order the picker lists them (section 2.1). iv: semitones above the root;
@@ -389,7 +392,7 @@ var Chords = (function () {
   }
 
   return {
-    OPEN: OPEN, NAMES: NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
+    OPEN: OPEN, NAMES: NAMES, PICK_NAMES: PICK_NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
     OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
     parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
     shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,

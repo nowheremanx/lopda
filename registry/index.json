@@ -661,7 +661,7 @@
         "...1.1.1.1.1.1..",
         "................"
       ],
-      "version": "1.4.4",
+      "version": "1.4.5",
       "released": "2026-11-27",
       "updated": "2026-11-28",
       "description": "吉他和弦字典：19 种和弦和斜线和弦，多种按法，框图、指板、度数图和即兴音阶，听扫弦和单音，常见和弦连接和为什么好听，也能从指板反查和弦。",
@@ -678,8 +678,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/chord-book/index.html",
-      "sha256": "0c17c4576f373e20decc8dc784b8735560793c84bbd26ed16a5ce93f14193b2c",
-      "bytes": 114675
+      "sha256": "467d6e36262920de8877421bd71d7bbbd2520f5249621439d42fd5e8c8f5742f",
+      "bytes": 117063
     },
     {
       "spec": "lopda/1",

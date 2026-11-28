@@ -13,6 +13,7 @@
     listen: "Play", noChord: "Not one of this book's 19 qualities", also: "also ", posLabel: "fret {n}",
     bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
     progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
+    tonicOnly: "Tonic only", allCards: "All",
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
     legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k} plus this chord's notes. ",
     noVoicing: "No voicing for this chord"
@@ -25,6 +26,7 @@
     listen: "听", noChord: "不是这一版的 19 种和弦", also: "也读作 ", posLabel: "{n} 品起",
     bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
     progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
+    tonicOnly: "只看主和弦", allCards: "全部",
     role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
     legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}和这个和弦的音选的。",
     noVoicing: "这个和弦没有按法"
@@ -349,7 +351,7 @@
   function buildPicker() {
     $("ptitle").textContent = Chords.name(pick);
     var roots = $("roots"); roots.innerHTML = "";
-    Chords.NAMES.forEach(function (n, pc) {
+    Chords.PICK_NAMES.forEach(function (n, pc) {
       roots.appendChild(choice(n, pick.root === pc, function () { pick.root = pc; if (pick.bass === pc) pick.bass = null; $("msg").textContent = ""; sfx("tick"); buildPicker(); }));
     });
     var quals = $("quals"); quals.innerHTML = "";
@@ -367,7 +369,7 @@
     });
     var bass = $("basses"); bass.innerHTML = "";
     bass.appendChild(choice(t("none"), pick.bass === null, function () { pick.bass = null; $("msg").textContent = ""; sfx("tick"); buildPicker(); }));
-    Chords.NAMES.forEach(function (n, pc) {
+    Chords.PICK_NAMES.forEach(function (n, pc) {
       if (pc === pick.root) return;
       bass.appendChild(choice(n, pick.bass === pc, function () { pick.bass = pc; $("msg").textContent = ""; sfx("tick"); buildPicker(); }));
     });
@@ -419,10 +421,17 @@
   });
 
   /* ---------------- the progressions (和弦连接, version 1.2) ---------------- */
-  var progs = $("progs"), gl = null, gfocus = 0, gkeyed = false, seq = { timer: 0, card: -1, i: -1 };
+  var progs = $("progs"), gl = null, gfocus = 0, gkeyed = false, gtonic = false, gshown = [];
+  var seq = { timer: 0, card: -1, i: -1 };
+  /* a card where the chord is the tonic of its key: the filter keeps only these (1.4.5) */
+  function isTonic(r) { return r.p.ch[r.at][0] === 0; }
+  function tonicCount() { return gl ? gl.filter(isTonic).length : 0; }
+  /* the cards on screen, in their order; a display index is what the sequence and the focus use */
+  function shownProgs() { return gtonic ? gl.filter(isTonic) : gl; }
   function openProgs() {
     var c = chord();
     gl = Progs.forChord(c);
+    gtonic = false;   /* every visit starts with all of them: the filter is not a remembered setting */
     gfocus = 0; gkeyed = false;
     $("gtitle").textContent = t("progTitle", { c: Chords.name(c) });
     buildProgs();
@@ -430,7 +439,7 @@
     $("glist").scrollTop = 0;
     sfx("tap");
   }
-  function closeProgs() { stopSeq(); progs.classList.remove("open"); gl = null; show(); }
+  function closeProgs() { stopSeq(); progs.classList.remove("open"); gl = null; gshown = []; show(); }
   /* the voicing each chord of a progression is played with: the one in view for the chord you came from, the nearest
      common one to its fret position for the others, so the hand would stay in one place */
   function voicingFor(r, i) {
@@ -440,7 +449,8 @@
   }
   function buildProgs() {
     var box = $("glist"); box.innerHTML = "";
-    gl.forEach(function (r, n) {
+    gshown = gl ? shownProgs() : [];
+    gshown.forEach(function (r, n) {
       var p = r.p, card = el("div", "card" + (gkeyed && n === gfocus ? " focus" : ""));
       var head = el("div", "ghead");
       head.appendChild(el("b", "", EN ? p.en : p.zh));
@@ -464,6 +474,28 @@
       card.appendChild(el("p", "why", EN ? p.why.en : p.why.zh));
       box.appendChild(card);
     });
+    showFilter();
+  }
+  /* the filter row's words are the action (show only where the chord is the tonic, or show all of them), and it is in
+     the on style while the list is filtered. The row appears only when there is a mix to choose between: a chord with no
+     tonic card (Bdim's only progression has it on vii°) would filter to nothing, and one whose cards are all tonic
+     (Cmaj7's two) would filter to the same list, so both hide the row and disable the button (1.4.5). */
+  function canFilter() { return !!gl && tonicCount() > 0 && tonicCount() < gl.length; }
+  function showFilter() {
+    var ok = canFilter();
+    $("gbar").style.display = ok ? "" : "none";
+    $("gfilter").disabled = !ok;
+    $("gfilter").textContent = t(gtonic ? "allCards" : "tonicOnly");
+    $("gfilter").classList.toggle("on", gtonic);
+  }
+  function toggleTonic() {
+    if (!canFilter()) return;
+    gtonic = !gtonic;
+    stopSeq(); Guitar.stop();
+    gfocus = 0; gkeyed = false;
+    sfx("tick");
+    buildProgs();
+    $("glist").scrollTop = 0;
   }
   function stopSeq() { clearTimeout(seq.timer); seq = { timer: 0, card: -1, i: -1 }; }
   /* one strum a bar, a second a bar; a chord holds for its p.bars[i] bars (the twelve-bar blues has four bars of I7),
@@ -472,7 +504,7 @@
     var again = seq.card === n;
     stopSeq(); Guitar.stop();
     if (again) { buildProgs(); return; }
-    var r = gl[n];
+    var r = gshown[n];
     /* the switch at Off means silence, not an error (1.4.1) */
     if (!Guitar.level()) return;
     function at(i, bar) {
@@ -492,7 +524,7 @@
   function jumpTo(r, i) {
     var v = voicingFor(r, i), c = r.chords[i], spelled = r.names[i];
     stopSeq();
-    progs.classList.remove("open"); gl = null;
+    progs.classList.remove("open"); gl = null; gshown = []; gtonic = false;
     if (!go(c, 0)) { show(); return; }   /* unreachable: every progression chord has a voicing */
     spelledName = spelled && spelled !== Chords.name(c) ? spelled : null;
     md = { name: Chords.name(c), i: -1, ctx: { key: r.key, minor: r.p.key === "min", label: t(r.p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName }) }, sc: null };
@@ -501,14 +533,15 @@
     sfx("ok"); store(); show();
   }
   function focusProg(d) {
-    if (!gl || !gl.length) return;
-    if (gkeyed) gfocus = (gfocus + d + gl.length) % gl.length;
+    if (!gshown.length) return;
+    if (gkeyed) gfocus = (gfocus + d + gshown.length) % gshown.length;
     gkeyed = true;
     sfx("tick"); buildProgs();
     var card = $("glist").children[gfocus];
     if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
   }
   $("prog").addEventListener("click", openProgs);
+  $("gfilter").addEventListener("click", toggleTonic);
   $("gback").addEventListener("click", function () { sfx("tap"); closeProgs(); });
   document.addEventListener("visibilitychange", function () { if (document.hidden) stopSeq(); });
 
@@ -655,6 +688,7 @@
   $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
   $("sortH").textContent = t("order");
   $("prog").textContent = t("progs"); $("gback").textContent = t("back");
+  $("gfilter").textContent = t("tonicOnly");
   $("fback").textContent = t("back"); $("wback").textContent = t("back");
   $("fplay").textContent = t("listen"); $("fsee").textContent = t("see");
   document.documentElement.lang = EN ? "en" : "zh";
