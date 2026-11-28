@@ -255,6 +255,22 @@ test("degree map: every place in the box's frets is named by its degree, the cho
   assert.equal(m.px[24 * m.w + 34 - 6], 3, "a note not played has a paper patch");
 });
 
+test("the x above a muted string is neither a note to play nor an open-row degree (1.4.3)", () => {
+  const c = C.parse("C"), v = C.voicings(c)[0];
+  assert.deepEqual([...v.frets], [-1, 3, 2, 0, 1, 0]);
+  /* the box starts at the nut, so the open row is there: the x above the muted low E plays nothing, the o's still play */
+  assert.equal(D.boxAt(v, 20, 6), null, "the x above the muted low E is not an open note");
+  assert.deepEqual({ ...D.boxAt(v, 20 + 3 * 14, 6) }, { s: 3, f: 0 }, "the open G is");
+  assert.deepEqual({ ...D.boxAt(v, 20 + 5 * 14, 6) }, { s: 5, f: 0 }, "the open high E is");
+  assert.deepEqual({ ...D.boxAt(v, 34, 58) }, { s: 1, f: 3 }, "a fretted string is unaffected");
+  /* the degree map: the muted low E's open row is an ink cross, with no degree tile or digit over it */
+  const m = D.map(v, c);
+  assert.equal(m.px[6 * m.w + 20], 0, "an ink cross at the open row");
+  assert.equal(m.px[4 * m.w + 20 - 1], 3, "no digit: the tile and its label are not drawn");
+  /* a fretted string keeps its open-row degree: the open high E (a possible position) still reads as 3 */
+  assert.ok(m.px[6 * m.w + 20 + 5 * 14] !== 0, "the open high E's degree is not a cross");
+});
+
 /* ---------------- the progressions (和弦连接, 1.2.0) ---------------- */
 
 test("progressions: every entry is whole, in both languages, and every chord in it is one the app knows", () => {

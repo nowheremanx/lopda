@@ -33,8 +33,11 @@ From top to bottom:
 - **Picture:** one of four views.
 - **Quality line:** the chord quality, or in the improv view the scale's name.
 - **Info line:** the frets, the voicing's number and its position, or in the improv view the scale's degrees.
-- **Bottom row:** one 44 x 44 cell per string, or in the improv view the why and the legend.
-- **Footer:** previous, strum, next.
+- **Bottom row:** one 44 x 44 cell per string, or in the improv view the why and the legend. A tap on the why opens it
+  in full on its own screen (`#whyfull`).
+- **Footer:** previous, strum, next, mute. In the improv view previous and next become Prev scale and Next scale, and
+  both are off when the chord has a single scale. Mute turns the guitar off, or back to the last level that made a sound
+  (mid by default; kept across restarts).
 
 The view button cycles through four views. The view is saved as `set.view`.
 
@@ -43,9 +46,11 @@ The view button cycles through four views. The view is saved as `set.view`.
 | `box` (框图) | The voicing on 6 strings x 5 frets, fingers in the dots, the root as a square | the note at that string and fret, among the five frets (and the open strings when the box starts at the nut) | voicing |
 | `neck` (指板) | The voicing on 15 frets, with the chord's notes elsewhere as small dots | the note anywhere on 15 frets | voicing |
 | `map` (度数) | The box's five frets with every place named by its degree | as `box` | voicing |
-| `scale` (即兴) | The chosen scale on 15 frets: root square, chord tone dot, tension ring, avoid cross | as `neck` | scale |
+| `scale` (即兴) | The chosen scale on 15 frets: root square, chord tone dot, tension ring, avoid cross | as `neck` | scale (both buttons off when there is only one) |
 
 A swipe slides the picture (`slide()` in app.js). The words and the hit tests change at once; only the picture moves.
+The finder opened from the picker starts from the pending chord's first voicing, and its Back returns to the picker
+(`finderFromPicker` in app.js); 看这个和弦 always goes to the main screen.
 
 ### Rules the screen depends on
 
@@ -72,7 +77,7 @@ below a chord tone. The tests check that every avoid note is a half step over a 
 
 ## Saved state
 
-`PAD.save("set", {v: 1, cur: {root, q, bass, i}, sort, view, vol, recent})`. `adopt()` in app.js reads older saves:
+`PAD.save("set", {v: 1, cur: {root, q, bass, i}, sort, view, vol, lastVol, recent})`. `adopt()` in app.js reads older saves:
 
 - 1.2.0's `map: true` becomes `view: "map"`.
 - Anything it does not know is dropped.

@@ -111,10 +111,12 @@ var Draw = (function () {
     else b.text(String(base), base < 10 ? SX - 11 : SX - 17, TOP + 5, INK);
     for (s = 0; s < 6; s++) {
       var x = SX + s * SS;
-      if (frets[s] < 0 && base > 1) b.cross(x, 6, INK);
+      /* a muted string is an x wherever the box starts, and it has no open note to name (1.4.3) */
+      if (frets[s] < 0) b.cross(x, 6, INK);
       for (i = 0; i < rows.length; i++) {
         var f = rows[i], y = mapY(f, base), d = Chords.degree(c, (Chords.OPEN[s] + f) % 12), w = d.lab.length * 4 - 1;
         var on = frets[s] === f;
+        if (f === 0 && frets[s] < 0) continue;
         b.rect(x - 6, y - 4, 13, 9, on ? INK : PAPER);
         b.small(d.lab, x - (w >> 1), y - 2, on ? PAPER : d.tone ? DARK : MID);
       }
@@ -128,7 +130,11 @@ var Draw = (function () {
     if (s < 0 || s > 5 || Math.abs(bx - (SX + s * SS)) > 7) return null;
     for (var i = 0; i < rows.length; i++) {
       var y = mapY(rows[i], base);
-      if (by >= y - (rows[i] === 0 ? 6 : FS / 2) && by < y + (rows[i] === 0 ? 5 : FS / 2)) return { s: s, f: rows[i] };
+      if (by >= y - (rows[i] === 0 ? 6 : FS / 2) && by < y + (rows[i] === 0 ? 5 : FS / 2)) {
+        /* the x above a muted string is not an open note to play (1.4.3) */
+        if (rows[i] === 0 && frets[s] < 0) return null;
+        return { s: s, f: rows[i] };
+      }
     }
     return null;
   }

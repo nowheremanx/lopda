@@ -214,7 +214,7 @@ test("chord-book: the picker chooses root, quality and bass in one visit; the ke
   }
 });
 
-test("chord-book: the finder names the frets, starts from the voicing in view and shows the chord it found", { skip, timeout: 60000 }, async (t) => {
+test("chord-book: the finder names the frets, starts from the picked chord and shows the chord it found", { skip, timeout: 60000 }, async (t) => {
   for (const size of [SMALL, LARGE]) {
     const { p, errors } = await open(t, { size });
     await tap(p, "#chord");
@@ -234,8 +234,8 @@ test("chord-book: the finder names the frets, starts from the voicing in view an
     /* a cluster is no chord, and Show is off */
     await tap(p, "#chord");
     await tap(p, "#tofind");
-    await tap(p, p.locator("#frets button").nth(2));
-    await tap(p, p.locator("#frets button").nth(4));
+    await tap(p, p.locator("#frets button").nth(0));
+    await tap(p, p.locator("#frets button").nth(1));
     assert.equal(await text(p, "#fname"), "不是这一版的 19 种和弦");
     assert.ok(await p.locator("#fsee").isDisabled());
     await tap(p, "#fback");
@@ -343,6 +343,7 @@ test("chord-book 1.4.1: with the sound off, a play is silent rather than an erro
   assert.deepEqual(await p.evaluate(() => window.__log), [], "Listen is silent too");
   /* the fourth play path: a progression's Play must return silently, not beep err (playProg) */
   await tap(p, "#fback");
+  await tap(p, "#pback");
   await tap(p, "#prog");
   await p.evaluate(() => { window.__log = []; });
   await tap(p, p.locator("#glist .card .gplay").first());
@@ -633,4 +634,154 @@ test("chord-book: a chord opened from a progression takes its mode from the key;
   assert.match(await text(p, "#qname"), /^C Mixolydian · 4 \/ 4$/);
   assert.match(await p.locator("#tones .why2 p").first().textContent(), /^按 F 大调和这个和弦的音选的。/);
   assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.3: the x above a muted string plays nothing, an o still plays its open note", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await p.evaluate(() => {
+    window.__notes = [];
+    const play = window.Guitar.play;
+    window.Guitar.play = (notes, gap, ring) => { window.__notes.push(notes.slice()); return play(notes, gap, ring); };
+  });
+  const at = async (bx, by) => {
+    const b = await p.locator("#pic").boundingBox(), w = await p.locator("#pic").evaluate((c) => [c.width, c.height]);
+    await p.touchscreen.tap(b.x + (bx + 0.5) * b.width / w[0], b.y + (by + 0.5) * b.height / w[1]);
+    await p.waitForTimeout(80);
+  };
+  /* C x32010: the x above the muted low E (x 20, y 6), then the open G and high E */
+  await at(20, 6);
+  assert.deepEqual(await p.evaluate(() => window.__notes), [], "the x is not an open note");
+  await at(20 + 3 * 14, 6);
+  assert.deepEqual(await p.evaluate(() => window.__notes.map((x) => x[0])), [55], "the open G plays");
+  await at(20 + 5 * 14, 6);
+  assert.deepEqual(await p.evaluate(() => window.__notes.map((x) => x[0])), [55, 64], "the open high E plays");
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.3: the finder starts from the picker's pending chord, and Back goes there again", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await tap(p, p.locator("#roots button", { hasText: /^C#$/ }).first());
+  await tap(p, p.locator("#quals button", { hasText: "m7b5" }).first());
+  assert.equal(await text(p, "#ptitle"), "C#m7b5");
+  await tap(p, "#tofind");
+  assert.ok(await p.locator("#finder").evaluate((e) => e.classList.contains("open")));
+  assert.equal(await text(p, "#fname"), "C#m7b5", "the finder starts from the picked chord, not the old one");
+  assert.equal(await text(p, "#xo"), "x····x");
+  const held = await p.evaluate(() => {
+    const out = {};
+    document.querySelectorAll("#frets button").forEach((b, i) => { if (b.classList.contains("sel")) out[i % 6] = b.textContent; });
+    return out;
+  });
+  assert.deepEqual(held, { 1: "4", 2: "5", 3: "4", 4: "5" }, "the grid is the chord's first voicing x4545x");
+  /* B goes back to the picker, on the same chord; its own Back then reaches the main screen */
+  await p.evaluate(() => window.__press("b"));
+  assert.ok(await p.locator("#picker").evaluate((e) => e.classList.contains("open")));
+  assert.equal(await text(p, "#ptitle"), "C#m7b5");
+  await p.evaluate(() => window.__press("b"));
+  assert.ok(!(await p.locator("#picker").evaluate((e) => e.classList.contains("open"))));
+  assert.equal(await text(p, "#cname"), "C#m7b5");
+  assert.match(await text(p, "#line"), /^x4545x · 1 \//);
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.3: one scale leaves the improv view's Prev and Next off, and they come back in the box", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t);
+  await tap(p, "#chord");
+  await p.locator("#q").fill("Edim7");
+  await tap(p, "#qgo");
+  await tap(p, "#view"); await tap(p, "#view"); await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "即兴");
+  assert.equal(await text(p, "#prev"), "上一种音阶");
+  assert.equal(await text(p, "#next"), "下一种音阶");
+  assert.ok(await p.locator("#prev").isDisabled());
+  assert.ok(await p.locator("#next").isDisabled());
+  await p.evaluate(() => { window.__log = []; });
+  await p.evaluate(() => window.__press("right"));
+  assert.deepEqual(await p.evaluate(() => window.__log), [], "a single scale is not an error");
+  /* the next view is the box: the old labels and both buttons are back */
+  await tap(p, "#view");
+  assert.equal(await text(p, "#view"), "框图");
+  assert.equal(await text(p, "#prev"), "上一个");
+  assert.equal(await text(p, "#next"), "下一个");
+  assert.equal(await p.locator("#prev").isDisabled(), false);
+  assert.equal(await p.locator("#next").isDisabled(), false);
+  assert.deepEqual(errors, []);
+});
+
+test("chord-book 1.4.3: the improv view's clipped why line opens in full, and B closes it", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    await tap(p, "#chord");
+    await p.locator("#q").fill("C7");
+    await tap(p, "#qgo");
+    await tap(p, "#view"); await tap(p, "#view"); await tap(p, "#view");
+    assert.equal(await text(p, "#view"), "即兴");
+    const full = await p.locator("#tones .why2 p").first().textContent();
+    assert.match(full, /别停在上面/, "the sentence the two lines cut");
+    assert.equal(await p.locator("#tones .why2").evaluate((e) => e.getBoundingClientRect().height), 44, "a 44 px tap target");
+    await tap(p, p.locator("#tones .why2"));
+    assert.ok(await p.locator("#whyfull").evaluate((e) => e.classList.contains("open")));
+    assert.equal(await text(p, "#wtext"), full, "the whole sentence");
+    assert.equal(await text(p, "#wlegend"), "■ 根音 ● 和弦音 ○ 延伸音 × 避免音");
+    await fits(p, "#whyfull", size, "the why screen");
+    /* B closes it; a second tap opens it again and the panel's own Back closes that */
+    await p.evaluate(() => window.__press("b"));
+    await p.waitForTimeout(80);
+    assert.ok(!(await p.locator("#whyfull").evaluate((e) => e.classList.contains("open"))));
+    await tap(p, p.locator("#tones .why2"));
+    assert.ok(await p.locator("#whyfull").evaluate((e) => e.classList.contains("open")));
+    await tap(p, "#wback");
+    assert.ok(!(await p.locator("#whyfull").evaluate((e) => e.classList.contains("open"))));
+    /* the main screen still works after the overlay: the view button turns */
+    await tap(p, "#view");
+    assert.equal(await text(p, "#view"), "框图");
+    assert.match(await text(p, "#line"), /^x32310 · /);
+    assert.deepEqual(errors, []);
+  }
+});
+
+test("chord-book 1.4.3: the footer's mute button turns the guitar off and back to the last level", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SMALL, LARGE]) {
+    const { p, errors } = await open(t, { size });
+    assert.equal(await text(p, "#mute"), "静音");
+    await fits(p, "body > footer", size, "the footer with four buttons");
+    await tap(p, "#mute");
+    assert.equal(await p.evaluate(() => window.Guitar.level()), 0);
+    assert.equal(await text(p, "#mute"), "开声");
+    await tap(p, "#mute");
+    assert.equal(await p.evaluate(() => window.Guitar.level()), 2, "back to the middle level");
+    assert.equal(await text(p, "#mute"), "静音");
+    /* the picker's 声音 row is the same state, and a non-zero level becomes the one Mute returns to */
+    await tap(p, "#chord");
+    assert.ok(!(await p.locator("#vol button").nth(0).evaluate((b) => b.classList.contains("sel"))));
+    assert.ok(await p.locator("#vol button").nth(2).evaluate((b) => b.classList.contains("sel")));
+    await tap(p, p.locator("#vol button").nth(0));
+    assert.equal(await p.evaluate(() => window.Guitar.level()), 0);
+    assert.equal(await text(p, "#mute"), "开声");
+    await tap(p, p.locator("#vol button").nth(1));
+    assert.equal(await p.evaluate(() => window.Guitar.level()), 1);
+    assert.equal(await text(p, "#mute"), "静音");
+    await tap(p, "#pback");
+    await tap(p, "#mute");
+    assert.equal(await p.evaluate(() => window.Guitar.level()), 0);
+    await tap(p, "#mute");
+    assert.equal(await p.evaluate(() => window.Guitar.level()), 1, "the last level that made a sound");
+    await fits(p, "body > footer", size, "the footer");
+    /* the last level is saved: off with 小 remembered, a reload's 开声 returns to 小, not Mid */
+    await p.waitForTimeout(400);
+    await tap(p, "#mute");
+    await p.waitForTimeout(400);
+    const s = await p.evaluate(() => window.__saves.set);
+    assert.equal(s.vol, 0);
+    assert.equal(s.lastVol, 1);
+    const again = await open(t, { size, saved: { ...s, vol: 0, lastVol: 1 } });
+    assert.equal(await text(again.p, "#mute"), "开声");
+    assert.equal(await again.p.evaluate(() => window.Guitar.level()), 0);
+    await tap(again.p, "#mute");
+    assert.equal(await again.p.evaluate(() => window.Guitar.level()), 1, "开声 goes back to the saved 小");
+    assert.equal(await text(again.p, "#mute"), "静音");
+    assert.deepEqual(again.errors, []);
+    assert.deepEqual(errors, []);
+  }
 });
