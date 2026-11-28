@@ -6,13 +6,13 @@
 <!-- Lo-PDA short story (lopda/1 + lo-game.js). The story is data in src/story.js; src/player.js reads it. MIT License. -->
 </head>
 <body>
-<script data-lo-game="1.4.0">
+<script data-lo-game="1.5.0">
 /*
- * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.5.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.5.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -23,7 +23,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -121,6 +121,38 @@ var LoGame = (function () {
     };
   }
 
+  /* Layout of a fill screen (1.5.0): the world keeps its size, the canvas around it covers the stage.
+     Returns {w, h, k, x, y}: canvas columns and rows, CSS pixels a canvas pixel, and where the world sits.
+     The caller works in CSS pixels from the stage's getBoundingClientRect (fractional on an iPhone). */
+  function fillLayout(stageW, stageH, worldW, worldH) {
+    var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
+    if (stageW > 0 && stageH > 0) {
+      k = stageW / worldW;
+      ch = Math.ceil(stageH / k);
+      if (ch < worldH) {
+        /* a stage too short for the world's width: fit by height and grow wider at the sides */
+        k = stageH / worldH;
+        cw = Math.max(worldW, Math.ceil(stageW / k));
+        ch = worldH;
+        x = Math.floor((cw - worldW) / 2);
+      } else {
+        /* the world's width fills the stage; the rows over it become scenery */
+        cw = worldW;
+        y = Math.floor((ch - worldH) / 2);
+      }
+    }
+    return { w: cw, h: ch, k: k, x: x, y: y };
+  }
+  /* The contain layout the framework has always used with fill off: the world stays whole, paper around it.
+     Returns {w, h, k} with the CSS size rounded, as the canvas style has always been set. */
+  function containLayout(stageW, stageH, worldW, worldH, dpr) {
+    dpr = dpr || 1;
+    var best = Math.min(stageW / worldW, stageH / worldH), k = Math.floor(best * dpr) / dpr;
+    if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+    k = Math.max(0.5, k);
+    return { w: Math.round(worldW * k), h: Math.round(worldH * k), k: k };
+  }
+
   /* ---------------- the game ---------------- */
   function create(opt) {
     opt = opt || {};
@@ -150,19 +182,41 @@ var LoGame = (function () {
     parent.appendChild(canvas);
     var ctx = canvas.getContext("2d");
     var image = ctx.createImageData(W, H);
+    var fill = !!opt.fill, bands = typeof opt.bands === "function" ? opt.bands : null;
+    var lay = { w: W, h: H, k: 1, x: 0, y: 0 };
+    var stageInfo = { w: W, h: H, k: 1, x: 0, y: 0, worldW: W, worldH: H };
+    var stageBuf = null, bandSurface = null, stageImage = null, lastFitW = -1, lastFitH = -1;
     function fit() {
+      if (fill) { fitFill(); return; }
       var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
-      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
-      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
-      k = Math.max(0.5, k);
-      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
-      game.scale = k;
+      var c = containLayout(aw, ah, W, H, window.devicePixelRatio || 1);
+      canvas.style.width = c.w + "px"; canvas.style.height = c.h + "px";
+      game.scale = c.k;
+      game.stage = { w: W, h: H, k: c.k, x: 0, y: 0 };
+    }
+    /* the stage's own box, fractional: the layout that leaves no paper at the sides, top or bottom */
+    function fitFill() {
+      var r = parent.getBoundingClientRect ? parent.getBoundingClientRect() : null;
+      var w = r ? r.width : 0, h = r ? r.height : 0;
+      if (!(w > 0) || !(h > 0)) { w = parent.clientWidth || innerWidth; h = parent.clientHeight || innerHeight; }
+      if (w === lastFitW && h === lastFitH && stageBuf) return;
+      lastFitW = w; lastFitH = h;
+      var L = fillLayout(w, h, W, H);
+      lay = L;
+      stageInfo.w = L.w; stageInfo.h = L.h; stageInfo.k = L.k; stageInfo.x = L.x; stageInfo.y = L.y;
+      canvas.width = L.w; canvas.height = L.h;
+      /* exact sizes, not rounded: a rounded width leaves a line of paper down each side on an iPhone */
+      canvas.style.width = (L.w * L.k) + "px"; canvas.style.height = (L.h * L.k) + "px";
+      stageBuf = new Uint8Array(L.w * L.h); stageBuf.fill(PAPER);
+      bandSurface = makeSurface({ buf: stageBuf, w: L.w, h: L.h });
+      stageImage = ctx.createImageData(L.w, L.h);
+      game.scale = L.k;
+      game.stage = { w: L.w, h: L.h, k: L.k, x: L.x, y: L.y };
+      if (stack.length) render();   /* canvas.width cleared it: draw straight away */
     }
 
     /* --- framebuffer and drawing --- */
     var buf = new Uint8Array(W * H);
-    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
-    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
 
     var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
     function fontCtx() {
@@ -210,108 +264,117 @@ var LoGame = (function () {
       return lines;
     }
 
-    var g = {
-      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
-      clear: function (c) { buf.fill(c == null ? PAPER : c); },
-      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
-      clip: function (x, y, w, h) {
-        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
-        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
-        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
-      },
-      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
-      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
-      rect: function (x, y, w, h, c) {
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
-        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
-      },
-      frame: function (x, y, w, h, c) {
-        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
-      },
-      line: function (x0, y0, x1, y1, c) {
-        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
-        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
-        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
-      },
-      circle: function (cx, cy, r, c, fill) {
-        cx = Math.round(cx); cy = Math.round(cy);
-        for (var y = -r; y <= r; y++) {
-          var span = Math.round(Math.sqrt(r * r + r - y * y));
-          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
-          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
-        }
-        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
-      },
-      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
-      dither: function (x, y, w, h, c, level) {
-        level = clamp(level == null ? 2 : level, 0, 4);
-        x = Math.round(x); y = Math.round(y);
-        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
-          var px = (x + xx) & 1, py = (y + yy) & 1;
-          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
-          if (on) put(x + xx + ox, y + yy + oy, c);
-        }
-      },
-      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
-      sprite: function (s, x, y, o) {
-        o = o || {};
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
-        for (var yy = 0; yy < h; yy++) {
-          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
-          var sy = o.flipY ? h - 1 - yy : yy;
-          for (var xx = 0; xx < w; xx++) {
-            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
-            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
-            if (v === CLEAR) continue;
-            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+    /* a drawing surface over any tone buffer: the world, and with fill a band canvas the app's `bands`
+       callback paints in stage coordinates. Both get the same methods and clip/origin state. */
+    function makeSurface(t) {
+      var sbuf = t.buf, SW = t.w, SH = t.h;
+      var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = SW, cy1 = SH;
+      function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) sbuf[y * SW + x] = c; }
+      var s = {
+        width: SW, height: SH, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+        clear: function (c) { sbuf.fill(c == null ? PAPER : c); },
+        origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+        clip: function (x, y, w, h) {
+          if (x == null) { cx0 = 0; cy0 = 0; cx1 = SW; cy1 = SH; return; }
+          cx0 = clamp(Math.round(x + ox), 0, SW); cy0 = clamp(Math.round(y + oy), 0, SH);
+          cx1 = clamp(Math.round(x + ox + w), 0, SW); cy1 = clamp(Math.round(y + oy + h), 0, SH);
+        },
+        pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+        get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= SW || y >= SH ? null : sbuf[y * SW + x]; },
+        rect: function (x, y, w, h, c) {
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+          for (var yy = ya; yy < yb; yy++) sbuf.fill(c, yy * SW + xa, yy * SW + Math.max(xa, xb));
+        },
+        frame: function (x, y, w, h, c) {
+          s.rect(x, y, w, 1, c); s.rect(x, y + h - 1, w, 1, c); s.rect(x, y, 1, h, c); s.rect(x + w - 1, y, 1, h, c);
+        },
+        line: function (x0, y0, x1, y1, c) {
+          x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+          var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+          for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+        },
+        circle: function (cx, cy, r, c, fill) {
+          cx = Math.round(cx); cy = Math.round(cy);
+          for (var y = -r; y <= r; y++) {
+            var span = Math.round(Math.sqrt(r * r + r - y * y));
+            if (fill) s.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+            else { s.pixel(cx - span, cy + y, c); s.pixel(cx + span, cy + y, c); }
+          }
+          if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); s.pixel(cx + x, cy - s2, c); s.pixel(cx + x, cy + s2, c); }
+        },
+        /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+        dither: function (x, y, w, h, c, level) {
+          level = clamp(level == null ? 2 : level, 0, 4);
+          x = Math.round(x); y = Math.round(y);
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+            var px = (x + xx) & 1, py = (y + yy) & 1;
+            var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+            if (on) put(x + xx + ox, y + yy + oy, c);
+          }
+        },
+        /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+        sprite: function (sp, x, y, o) {
+          o = o || {};
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var w = sp.w, h = sp.h, px = sp.px, one = o.color, map = o.map;
+          for (var yy = 0; yy < h; yy++) {
+            var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+            var sy = o.flipY ? h - 1 - yy : yy;
+            for (var xx = 0; xx < w; xx++) {
+              var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+              var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+              if (v === CLEAR) continue;
+              sbuf[dy * SW + dx] = one != null ? one : map ? map[v] : v;
+            }
+          }
+        },
+        /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+        text: function (str, x, y, o) {
+          o = o || {};
+          var color = o.color == null ? INK : o.color;
+          var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+          lines.forEach(function (ln) {
+            /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+            var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+            if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+            else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+            Array.from(ln).forEach(function (ch) {
+              var gl = glyph(ch);
+              for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+                if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+                put(xx + i + ox, yy + j + oy, color);
+              }
+              xx += gl.adv;
+            });
+            yy += FONT.line;
+          });
+          return lines.length * FONT.line;
+        },
+        measure: measure,
+        wrap: wrap,
+        lineHeight: FONT.line,
+        /* the standard window: paper inside, ink border with cut corners */
+        window: function (x, y, w, h, o) {
+          o = o || {};
+          s.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+          var c = o.border == null ? INK : o.border;
+          s.rect(x + 1, y, w - 2, 1, c); s.rect(x + 1, y + h - 1, w - 2, 1, c);
+          s.rect(x, y + 1, 1, h - 2, c); s.rect(x + w - 1, y + 1, 1, h - 2, c);
+          if (!o.thin) { s.rect(x + 2, y + 2, w - 4, 1, MID); }
+        },
+        /* a small arrow used by menus and "more" markers */
+        arrow: function (x, y, dir, c) {
+          c = c == null ? INK : c;
+          for (var i = 0; i < 4; i++) {
+            if (dir === "down") s.rect(x + i, y + i, 7 - 2 * i, 1, c);
+            else s.rect(x + i, y + i, 1, 7 - 2 * i, c);
           }
         }
-      },
-      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
-      text: function (str, x, y, o) {
-        o = o || {};
-        var color = o.color == null ? INK : o.color;
-        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
-        lines.forEach(function (ln) {
-          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
-          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
-          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
-          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
-          Array.from(ln).forEach(function (ch) {
-            var gl = glyph(ch);
-            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
-              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
-              put(xx + i + ox, yy + j + oy, color);
-            }
-            xx += gl.adv;
-          });
-          yy += FONT.line;
-        });
-        return lines.length * FONT.line;
-      },
-      measure: measure,
-      wrap: wrap,
-      lineHeight: FONT.line,
-      /* the standard window: paper inside, ink border with cut corners */
-      window: function (x, y, w, h, o) {
-        o = o || {};
-        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
-        var c = o.border == null ? INK : o.border;
-        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
-        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
-        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
-      },
-      /* a small arrow used by menus and "more" markers */
-      arrow: function (x, y, dir, c) {
-        c = c == null ? INK : c;
-        for (var i = 0; i < 4; i++) {
-          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
-          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
-        }
-      }
-    };
+      };
+      return s;
+    }
+    var g = makeSurface({ buf: buf, w: W, h: H });
 
     /* --- palette effects: every frame the indexed buffer goes through this map --- */
     var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
@@ -319,8 +382,23 @@ var LoGame = (function () {
       var map = pal.slice();
       if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
       if (flashT > 0) map = map.map(function (v) { return 3 - v; });
-      var d = image.data, n = W * H;
       if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      if (fill) {
+        if (!stageBuf || !stageImage) return 0;
+        var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
+        for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
+          var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
+          var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
+          sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
+        }
+        ctx.putImageData(stageImage, 0, 0);
+        return n2;
+      }
+      var d = image.data, n = W * H;
       for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
         var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
         var c = RGB[map[v]], o = (y * W + x) * 4;
@@ -340,10 +418,27 @@ var LoGame = (function () {
       addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
     }
     addEventListener("blur", function () { BUTTONS.forEach(up); });
-    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    var pointer = { x: 0, y: 0, stageX: 0, stageY: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
     function toScreen(e) {
       var r = canvas.getBoundingClientRect();
-      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+      if (fill) {
+        /* stage pixels (canvas pixels), then the world inside them; a tap in a band still lands on the near edge */
+        var px = (e.clientX - r.left) / (lay.k || 1), py = (e.clientY - r.top) / (lay.k || 1);
+        pointer.stageX = px; pointer.stageY = py;
+        pointer.x = clamp(Math.floor(px - lay.x), 0, W - 1);
+        pointer.y = clamp(Math.floor(py - lay.y), 0, H - 1);
+        return;
+      }
+      pointer.stageX = (e.clientX - r.left) * W / r.width;
+      pointer.stageY = (e.clientY - r.top) * H / r.height;
+      pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
+    }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
     }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
@@ -377,7 +472,8 @@ var LoGame = (function () {
     function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
 
     var game = {
-      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      VERSION: VERSION, width: W, height: H, stage: { w: W, h: H, k: 1, x: 0, y: 0 },
+      g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
       t: function (text, vars) { return pick(text, LANG, vars); },
       INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
 
@@ -414,8 +510,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -520,7 +616,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -552,13 +648,30 @@ var LoGame = (function () {
       game.time += STEP; game.frame++;
       inputEnd();
     }
+    /* the world into the stage: a plain copy, every frame, so the bands can be painted under it */
+    function compose() {
+      var sb = stageBuf, cw = lay.w, x0 = lay.x, y0 = lay.y;
+      for (var y = 0; y < H; y++) {
+        var src = y * W, dst = (y0 + y) * cw + x0;
+        for (var x = 0; x < W; x++) sb[dst + x] = buf[src + x];
+      }
+    }
     function render() {
+      if (fill) {
+        if (!stageBuf) return;
+        /* the app paints the full stage first: sky above the world, floor below, a HUD if it has one */
+        bandSurface.origin(0, 0); bandSurface.clip();
+        if (bands) bands(bandSurface, stageInfo);
+      }
       g.origin(0, 0); g.clip();
       for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      if (fill) compose();
       present();
     }
     function frame(ts) {
       requestAnimationFrame(frame);
+      /* the stage can settle after the app starts with no resize event (an iPhone's bars): check it every frame */
+      if (fill) fitFill();
       if (!last) last = ts;
       acc += Math.min(0.1, (ts - last) / 1000); last = ts;
       var n = 0;
@@ -578,6 +691,7 @@ var LoGame = (function () {
   return {
     VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
     create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    fillLayout: fillLayout, containLayout: containLayout,
     clamp: clamp, lerp: lerp, approach: approach, t: t
   };
 })();
@@ -1028,6 +1142,147 @@ function drawEndPicture(g) { drawPlatform(g, { rain: 0 }, { train: -200, dad: nu
 /* the title: the platform at night in the rain, nobody on it yet */
 function drawTitlePicture(g) { drawPlatform(g, { rain: 2 }, { train: -200, dad: null }, false); }
 
+/* ---------------- the station around the frame ----------------
+   The story keeps its 160 x 144 world: the picture in rows 0-88, the text box below it. On a phone
+   lo-game 1.5.0 grows the canvas around that world, and these rows are the station the story waits
+   in, not a second picture: the wet night above the shelter's roof, the platform's edge and its
+   puddles under the box. The title keeps the rain falling into the bands; the log, a chapter card
+   and a choice get a still frame so the words keep the eye; the end card gets first light, because
+   its picture is dawn. */
+function bandRain(s, x, y, w, h, n) {
+  var t = game.time;
+  for (var i = 0; i < n; i++) {
+    var rx = x + ((i * 53 + Math.floor(t * 40)) % (w + 10)) - 5;
+    var ry = y + ((i * 29 + Math.floor(t * 150)) % h);
+    var len = Math.min(6, y + h - ry);
+    if (len > 1) s.line(rx, ry, rx - 1, ry + len - 1, i % 8 ? s.DARK : s.MID);
+  }
+}
+function bandPuddles(s, w, y, h, tone, glint) {
+  var n = h >= 40 ? 3 : h >= 16 ? 2 : 1;
+  for (var i = 0; i < n; i++) {
+    var pw = Math.min(w - 16, 26 + (i * 17) % 34), px = (i * 47 + 11) % (w - pw);
+    var py = Math.min(y + h - 4, y + 3 + Math.round(h * (0.2 + 0.26 * (i % 2))));
+    if (pw < 8 || py < y) continue;
+    /* a shallow reflection: a narrow top, a wide middle, a narrow bottom, and the light lying in it */
+    s.dither(px + 4, py, pw - 8, 1, tone, 2);
+    s.dither(px, py + 1, pw, 2, tone, 2);
+    s.dither(px + 3, py + 3, pw - 6, 1, tone, 2);
+    s.rect(px + 3, py + 1, pw - 6, 1, glint);
+    s.pixel(px + Math.round(pw * 0.68), py + 2, glint);
+  }
+}
+function paintBands(s, stage) {
+  var w = s.width, h = s.height, top = stage.y, floorY = stage.y + stage.worldH, floorH = h - floorY;
+  var dawn = !titleOn && cur && cur.kind === "end";
+  var calm = !dawn && !titleOn && (view === "log" || (cur && (cur.kind === "chapter" || cur.kind === "choice")));
+  var x, y;
+  s.clear(dawn ? s.MID : s.INK);
+  if (top > 0) {
+    if (calm) {
+      /* nothing moves but the words: a flat seam against the frame */
+      if (top > 2) s.rect(0, top - 2, w, 2, s.DARK);
+    } else if (dawn) {
+      /* first light: a pale sky, the colour of the end picture, no rain */
+      if (top > 8) s.dither(0, top - 8, w, 8, s.PAPER, 2);
+      if (top > 40) { s.dither(4, 6, w - 8, 5, s.PAPER, 1); s.dither(20, 18, w - 40, 3, s.PAPER, 1); }
+    } else {
+      /* wet night over the shelter; the streaks carry on into the picture's own rain */
+      bandRain(s, 0, 0, w, top + 2, Math.min(120, Math.max(4, Math.round(w * top / 230))));
+      if (top > 6) s.dither(0, top - 4, w, 4, s.DARK, 1);
+      s.rect(0, top - 1, w, 1, s.DARK);
+      /* a platform lamp over the roof, when the night has room for it */
+      if (top >= 22) {
+        var lx = Math.round(w * 0.84), ly = Math.max(2, Math.round(top * 0.34));
+        s.rect(lx, ly, 1, top - ly, s.DARK);
+        s.rect(lx - 3, ly, 7, 1, s.DARK);
+        s.rect(lx - 1, ly + 1, 3, 3, s.MID);
+        s.pixel(lx, ly + 2, s.PAPER);
+        if (top - ly > 8) s.dither(lx - 4, ly + 4, 9, 3, s.DARK, 1);
+      }
+    }
+  }
+  if (floorH > 0) {
+    if (calm) {
+      s.rect(0, floorY, w, Math.min(2, floorH), s.DARK);
+      if (floorH > 6) s.dither(0, floorY + 2, w, floorH - 2, s.DARK, 1);
+    } else if (dawn) {
+      /* the platform in the first light: its pale edge, a wet shine, quiet puddles */
+      s.rect(0, floorY, w, floorH, s.DARK);
+      s.rect(0, floorY, w, 1, s.INK);
+      if (floorH > 1) {
+        s.rect(0, floorY + 1, w, 1, s.MID);
+        for (x = 3; x + 6 < w; x += 10) s.rect(x, floorY + 1, 6, 1, s.PAPER);
+      }
+      if (floorH > 2) s.dither(0, floorY + 2, w, floorH - 2, s.MID, 1);
+      if (floorH > 5) bandPuddles(s, w, floorY + 2, floorH - 2, s.MID, s.PAPER);
+    } else {
+      /* the wet platform under the box: its edge catches the light, puddles hold it */
+      s.rect(0, floorY, w, floorH, s.INK);
+      s.rect(0, floorY, w, 1, s.DARK);
+      if (floorH > 1) {
+        s.rect(0, floorY + 1, w, 1, s.MID);
+        for (x = 3; x + 6 < w; x += 10) s.rect(x, floorY + 1, 6, 1, s.PAPER);
+      }
+      if (floorH > 3) {
+        s.dither(0, floorY + 2, w, floorH - 2, s.DARK, 1);
+        bandPuddles(s, w, floorY + 2, floorH - 2, s.MID, s.PAPER);
+      }
+      /* a drop lands somewhere on the stone, on its own beat */
+      if (floorH > 8) for (y = 0; y < 2; y++) {
+        var q = (game.time * 0.6 + y * 0.43) % 1;
+        if (q < 0.16) s.pixel(Math.round(w * (0.18 + y * 0.55)), floorY + 3 + Math.round((floorH - 5) * ((y + 1) / 3)), s.MID);
+      }
+    }
+  }
+  /* a stage too short for the world's width grows wider than it: the columns beside the story are the
+     same station, never paper (348 x 323 still fits by width; this is the desktop/landscape case) */
+  if (stage.x > 0 || stage.x + stage.worldW < w) paintSides(s, stage, calm, dawn);
+}
+
+/* the columns beside the world on a wide stage: rain down to the picture's bottom, the platform
+   beside the text box, and a one-pixel seam where the station meets the story (lost-deck does the
+   same with its hull). Sides are rare on phones, so this stays inside the world's rows. */
+function paintSides(s, stage, calm, dawn) {
+  var top = stage.y, pic = stage.y + PIC_H, base = stage.y + stage.worldH;
+  var left = stage.x, right = stage.x + stage.worldW;
+  if (base <= top) return;
+  function column(x, cw, seamX) {
+    if (cw <= 0) return;
+    if (calm) {
+      s.rect(x, top, cw, base - top, s.INK);
+      s.rect(x, pic, cw, Math.min(2, base - pic), s.DARK);
+      if (base - pic > 6) s.dither(x, pic + 2, cw, base - pic - 2, s.DARK, 1);
+    } else if (dawn) {
+      s.rect(x, top, cw, pic - top, s.MID);
+      if (pic - top > 8) s.dither(x, pic - 8, cw, 8, s.PAPER, 2);
+      s.rect(x, pic, cw, base - pic, s.DARK);
+      s.rect(x, pic, cw, 1, s.INK);
+      if (base - pic > 1) {
+        s.rect(x, pic + 1, cw, 1, s.MID);
+        for (var dx2 = x + 3; dx2 + 6 < x + cw; dx2 += 10) s.rect(dx2, pic + 1, 6, 1, s.PAPER);
+      }
+      if (base - pic > 2) s.dither(x, pic + 2, cw, base - pic - 2, s.MID, 1);
+    } else {
+      s.rect(x, top, cw, pic - top, s.INK);
+      bandRain(s, x, top, cw, pic - top + 2, Math.max(2, Math.round(cw * (pic - top) / 230)));
+      if (pic - top > 6) s.dither(x, pic - 4, cw, 4, s.DARK, 1);
+      s.rect(x, pic, cw, base - pic, s.INK);
+      s.rect(x, pic, cw, 1, s.DARK);
+      if (base - pic > 1) {
+        s.rect(x, pic + 1, cw, 1, s.MID);
+        for (var dx = x + 3; dx + 6 < x + cw; dx += 10) s.rect(dx, pic + 1, 6, 1, s.PAPER);
+      }
+      if (base - pic > 3) s.dither(x, pic + 2, cw, base - pic - 2, s.DARK, 1);
+    }
+    s.rect(seamX, top, 1, base - top, dawn ? s.INK : s.DARK);
+  }
+  column(0, left, left - 1);
+  column(right, s.width - right, right);
+  if (left > 3) s.dither(0, top, 2, base - top, s.DARK, 1);
+  if (s.width - right > 3) s.dither(s.width - 2, top, 2, base - top, s.DARK, 1);
+}
+
 /* what you hear: rain, by scene, softer with the headphones on; none once the rain stops */
 var RAIN_LEVEL = { title: 0.4, outside: 0.7, waiting: 0.45, platform: 0.8, window: 0.6, berth: 0.25 };
 function hearing(scene, st) {
@@ -1325,7 +1580,9 @@ var END_SONG = {
    and the picture. Earlier versions of this app (a different story) saved under "vn" and "chapters";
    this one never reads, writes or removes those, so nothing a player had is lost. */
 
-var game = LoGame.create({ width: 160, height: 144, lang: "zh" });
+/* the story is always 160 x 144; on a phone lo-game's fill canvas grows the rainy station around it
+   (sdk/UI.md 13), painted by paintBands in scenes.js */
+var game = LoGame.create({ width: 160, height: 144, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
@@ -1337,7 +1594,7 @@ var BOX_Y = PIC_H, LINES = 3, SPEED = 28;
 var S = null;       /* { v, at, flags, scene, stage } */
 var cur = null;     /* what waits for the player: { kind: "chapter" | "say" | "choice" | "end", ... } */
 var log = [];       /* the backlog: { who, text } */
-var view = "play", logTop = 0;
+var view = "play", logTop = 0, titleOn = false;   /* titleOn: the backdrops' weather (scenes.js paintBands) */
 var canSave = true; /* false when the save could not be read: then nothing is written over it */
 var live = { train: -200, dad: null, moving: false, slide: 0 };
 var slideSince = -1, heard;
@@ -1444,6 +1701,15 @@ function choiceRow(k, n) {
 }
 function inside(r, x, y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 
+/* A tap counts only inside the world. With lo-game's fill layout the scenery bands are part of the
+   canvas, and the framework clamps a tap there to the near edge of the world: without this check a
+   tap on the rainy sky or the platform would press the title menu, a choice or the story. */
+function tapped() {
+  var p = game.pointer, s = game.stage;
+  return p.pressed && p.stageX >= s.x && p.stageX < s.x + game.width &&
+    p.stageY >= s.y && p.stageY < s.y + game.height;
+}
+
 function animate(dt) {
   var st = S.stage;
   var tx = st.train ? TRAIN_AT[st.train] : -200;
@@ -1469,7 +1735,7 @@ function animate(dt) {
 game.scene("play", {
   enter: function (saved) {
     S = valid(saved) ? saved : fresh();
-    view = "play"; heard = undefined;
+    view = "play"; titleOn = false; heard = undefined;
     game.musicStop();
     if (S.scene) { settle(); listen(S.scene, S.stage); }
     rebuildLog();
@@ -1480,7 +1746,7 @@ game.scene("play", {
     if (view === "log") {
       if (game.repeat("up")) logTop = Math.max(0, logTop - 1);
       if (game.repeat("down")) logTop = Math.min(Math.max(0, log.length - 1), logTop + 1);
-      if (game.pressed("b") || game.pressed("a") || game.pointer.pressed) { view = "play"; game.sfx("tap"); }
+      if (game.pressed("b") || game.pressed("a") || tapped()) { view = "play"; game.sfx("tap"); }
       return;
     }
     if (cur.kind === "say") cur.n += dt * SPEED;
@@ -1488,7 +1754,7 @@ game.scene("play", {
       var n = cur.items.length;
       if (game.repeat("up")) { cur.idx = (cur.idx + n - 1) % n; game.sfx("move"); }
       if (game.repeat("down")) { cur.idx = (cur.idx + 1) % n; game.sfx("move"); }
-      if (game.pointer.pressed) {
+      if (tapped()) {
         for (var k = 0; k < n; k++) if (inside(choiceRow(k, n), game.pointer.x, game.pointer.y)) { cur.idx = k; advance(); return; }
         /* a tap beside the rows never picks one (a branch cannot be taken back, #394), but it answers: a tick,
            and the box below says to tap a line */
@@ -1501,7 +1767,7 @@ game.scene("play", {
     }
     /* a card holds for a moment, so a tap meant for the line before does not skip it */
     if (cur.since !== undefined && game.time - cur.since < (cur.kind === "end" ? 1.5 : 0.5)) return;
-    if (game.pressed("a") || game.pressed("start") || game.pointer.pressed) advance();
+    if (game.pressed("a") || game.pressed("start") || tapped()) advance();
   },
   draw: function (g) {
     g.clear(g.PAPER);
@@ -1586,7 +1852,7 @@ var saved = null, loading = false, unreadable = false, newer = false, menuIdx = 
 function titleRow(k) { return { x: 28, y: BOX_Y + 3 + k * (ROW_H + ROW_GAP), w: 104, h: ROW_H }; }
 game.scene("title", {
   enter: function () {
-    saved = null; loading = true; unreadable = false; newer = false; menuIdx = 0; heard = undefined;
+    saved = null; loading = true; unreadable = false; newer = false; menuIdx = 0; titleOn = true; heard = undefined;
     listen("title", { rain: 2 });
     game.load(SAVE_KEY).then(function (v) {
       saved = valid(v) ? v : null;
@@ -1607,7 +1873,7 @@ game.scene("title", {
     if (loading) return;
     var n = saved ? 2 : 1;
     if (game.repeat("up") || game.repeat("down")) { if (n > 1) { menuIdx = (menuIdx + 1) % n; game.sfx("move"); } }
-    if (game.pointer.pressed) {
+    if (tapped()) {
       var hit = -1;
       for (var k = 0; k < n; k++) if (inside(titleRow(k), game.pointer.x, game.pointer.y)) hit = k;
       if (hit < 0) return;
