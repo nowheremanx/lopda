@@ -1,10 +1,25 @@
-/* Sisyphus: the game. Lo-PDA / lopda/1, lo-game.js 1.4.0.
+/* Sisyphus: the game. Lo-PDA / lopda/1, lo-game.js 1.5.0.
    Sound is synthesized (PAD.sfx / PAD.music / PAD.ambience) so it follows the handheld's
    volume and silent switch. A recorded sample can replace the heave later, when PAD.sample
    exists: see drafts/sisyphus/RESEARCH.md and drafts/sisyphus/ART-PROMPT.md. */
-var game = LoGame.create({ width: 160, height: 178, lang: "zh" });
+/* The world stays 160 x 178; the canvas grows around it into the phone's stage (sdk/UI.md 13),
+   with the mountain's sky above and its rock below, or its cliff at the sides on a short stage. */
+var game = LoGame.create({ width: 160, height: 178, lang: "zh", fill: true,
+  bands: function (s, st) { ART.paintBands(s, st, S, calmBands()); } });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+/* sdk/LO-GAME.md 2.1: with fill on, a tap in the bands around the world lands on the nearest
+   world edge (pointer.x/y are clamped), so a band tap or drag must not count as a tap. */
+function worldPoint() {
+  var p = game.pointer, st = game.stage;
+  return p.stageX >= st.x && p.stageX < st.x + game.width &&
+    p.stageY >= st.y && p.stageY < st.y + game.height;
+}
+function worldTap() { return game.pointer.pressed && worldPoint(); }
+function worldDown() { return game.pointer.down && worldPoint(); }
+/* the still screens (pause, the handbook, a quote, loading) keep the bands calm */
+function calmBands() { return !S.loaded || S.menuOpen || !!S.calm; }
 
 /* START is the handheld's menu key. The runtime sends it as a press; handling it here
    keeps it working from every scene that has a menu, and never from the title or a quote. */
@@ -39,7 +54,7 @@ var S = {
   heaveT: 0, breathT: 0, stepT: 0, slipT: 0, wasPush: false,
   warn: false, warned: false,
   descentT: 0, epi: 0, endT: 0, descendPhase: "far", farX: WORLD.SUMMIT_X, wipe: 0, baseT: 0,
-  menuIndex: 0, menuOpen: false,
+  menuIndex: 0, menuOpen: false, calm: false,
   galleryList: [], galleryIndex: 0, galleryStatus: null, gallerySaving: false, galleryDone: 0,
   loadingNote: null
 };
@@ -132,7 +147,7 @@ game.scene("title", {
     S.time = game.time;
     if (game.pressed("start")) { game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) }); return; }
     if (!S.loaded) return;
-    if (game.pressed("a") || game.pointer.pressed) {
+    if (game.pressed("a") || worldTap()) {
       SFX.click(game);
       game.go("climb", { reset: true, newLoop: false });
     }
@@ -183,7 +198,7 @@ game.scene("climb", {
     S.time = game.time;
     if (S.lock > 0) S.lock -= dt;
 
-    var pushing = (game.btn("a") || game.btn("b") || game.pointer.down) && S.lock <= 0;
+    var pushing = (game.btn("a") || game.btn("b") || worldDown()) && S.lock <= 0;
     if (!S.wasPush && pushing) {
       S.heaveT = 0.06; S.stepT = 0.25; S.idle = 0;
     }
@@ -382,7 +397,7 @@ function galleryTitle() { return T({ zh: "幸福手册", en: "The Manual" }); }
 
 function cardTap() {
   var p = game.pointer;
-  if (!p.pressed) return null;
+  if (!worldTap()) return null;
   if (p.y >= 150) return p.x < 80 ? "a" : "b";
   return "body";
 }
@@ -396,7 +411,9 @@ game.scene("quote", {
     S.quoteStatus = null;
     S.quoteSaving = false;
     S.doneT = 0;
+    S.calm = true;
   },
+  exit: function () { S.calm = false; },
   update: function (dt) {
     S.time = game.time;
     S.quoteT += dt;
@@ -404,7 +421,7 @@ game.scene("quote", {
     if (S.quoteSaving) return;
     if (S.quoteStatus === "saved" || S.quoteStatus === "denied") {
       S.doneT += dt;
-      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b") || game.pointer.pressed) game.pop(S.quoteStatus);
+      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b") || worldTap()) game.pop(S.quoteStatus);
       return;
     }
     if (S.quoteT < 0.72) return;
@@ -566,7 +583,7 @@ game.scene("menu", {
     if (game.pressed("down")) { S.menuIndex = (S.menuIndex + 1) % items.length; SFX.move(game); }
     /* touch: a tap on a row selects it and acts like A; a tap outside the window is B */
     var act = game.pressed("a");
-    if (game.pointer.pressed) {
+    if (worldTap()) {
       var p = game.pointer, row = Math.floor((p.y - 69) / 16);
       if (p.x >= 10 && p.x < 150 && p.y >= 46 && p.y < 134) {
         if (p.x >= 18 && p.x < 142 && row >= 0 && row < items.length && p.y < 69 + items.length * 16) { S.menuIndex = row; act = true; }
@@ -611,19 +628,21 @@ game.scene("gallery", {
     S.galleryStatus = null;
     S.gallerySaving = false;
     S.galleryDone = 0;
+    S.calm = true;
   },
+  exit: function () { S.calm = false; },
   update: function (dt) {
     S.time = game.time;
     if (S.gallerySaving) return;
     if (S.galleryStatus === "saved" || S.galleryStatus === "denied") {
       S.galleryDone += dt;
-      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
+      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b") || worldTap()) {
         S.galleryStatus = null; S.galleryDone = 0;
       }
       return;
     }
     if (!S.galleryList.length) {
-      if (game.pressed("b") || game.pressed("start") || game.pointer.pressed) { SFX.click(game); game.pop(); }
+      if (game.pressed("b") || game.pressed("start") || worldTap()) { SFX.click(game); game.pop(); }
       return;
     }
     /* touch: the hint row is A on its left half and B on its right; above it, the

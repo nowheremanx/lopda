@@ -4,19 +4,15 @@
 <meta charset="utf-8">
 <title>西西弗斯 / Sisyphus</title>
 <!-- Sisyphus: a Lo-PDA game after Albert Camus. MIT License. -->
-<style>
-  /* The game is a print on the LCD: the paper around the canvas is its matte. */
-  canvas { outline: 1px solid #1f2a14; outline-offset: 4px; }
-</style>
 </head>
 <body>
-<script data-lo-game="1.4.0">
+<script data-lo-game="1.5.0">
 /*
- * lo-game.js 1.4.0, a tiny game framework for Lo-PDA apps.
+ * lo-game.js 1.5.0, a tiny game framework for Lo-PDA apps.
  * MIT License. Copyright (c) 2026 Haowei Wu. See sdk/LICENSE.
  *
  * Paste-in library: an app carries its own copy inside a script tag marked
- * data-lo-game="1.4.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
+ * data-lo-game="1.5.0", and `node tools/lo-game.mjs registry/apps/<id>` fills it in.
  * The same tool adds a pixel-font block holding just the characters the app uses.
  * Do not edit the copy inside an app; the checker verifies it.
  *
@@ -27,7 +23,7 @@
 var LoGame = (function () {
   "use strict";
 
-  var VERSION = "1.4.0";
+  var VERSION = "1.5.0";
   var TONES = ["#1f2a14", "#4a5a32", "#7d8a58", "#a3ad7e"];
   var INK = 0, DARK = 1, MID = 2, PAPER = 3;
   var CLEAR = 255;
@@ -125,6 +121,38 @@ var LoGame = (function () {
     };
   }
 
+  /* Layout of a fill screen (1.5.0): the world keeps its size, the canvas around it covers the stage.
+     Returns {w, h, k, x, y}: canvas columns and rows, CSS pixels a canvas pixel, and where the world sits.
+     The caller works in CSS pixels from the stage's getBoundingClientRect (fractional on an iPhone). */
+  function fillLayout(stageW, stageH, worldW, worldH) {
+    var k = 1, cw = worldW, ch = worldH, x = 0, y = 0;
+    if (stageW > 0 && stageH > 0) {
+      k = stageW / worldW;
+      ch = Math.ceil(stageH / k);
+      if (ch < worldH) {
+        /* a stage too short for the world's width: fit by height and grow wider at the sides */
+        k = stageH / worldH;
+        cw = Math.max(worldW, Math.ceil(stageW / k));
+        ch = worldH;
+        x = Math.floor((cw - worldW) / 2);
+      } else {
+        /* the world's width fills the stage; the rows over it become scenery */
+        cw = worldW;
+        y = Math.floor((ch - worldH) / 2);
+      }
+    }
+    return { w: cw, h: ch, k: k, x: x, y: y };
+  }
+  /* The contain layout the framework has always used with fill off: the world stays whole, paper around it.
+     Returns {w, h, k} with the CSS size rounded, as the canvas style has always been set. */
+  function containLayout(stageW, stageH, worldW, worldH, dpr) {
+    dpr = dpr || 1;
+    var best = Math.min(stageW / worldW, stageH / worldH), k = Math.floor(best * dpr) / dpr;
+    if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
+    k = Math.max(0.5, k);
+    return { w: Math.round(worldW * k), h: Math.round(worldH * k), k: k };
+  }
+
   /* ---------------- the game ---------------- */
   function create(opt) {
     opt = opt || {};
@@ -154,19 +182,41 @@ var LoGame = (function () {
     parent.appendChild(canvas);
     var ctx = canvas.getContext("2d");
     var image = ctx.createImageData(W, H);
+    var fill = !!opt.fill, bands = typeof opt.bands === "function" ? opt.bands : null;
+    var lay = { w: W, h: H, k: 1, x: 0, y: 0 };
+    var stageInfo = { w: W, h: H, k: 1, x: 0, y: 0, worldW: W, worldH: H };
+    var stageBuf = null, bandSurface = null, stageImage = null, lastFitW = -1, lastFitH = -1;
     function fit() {
+      if (fill) { fitFill(); return; }
       var aw = parent.clientWidth || innerWidth, ah = parent.clientHeight || innerHeight;
-      var dpr = window.devicePixelRatio || 1, best = Math.min(aw / W, ah / H), k = Math.floor(best * dpr) / dpr;
-      if (k < best * 0.9) k = best;   /* small screens: size beats perfectly even pixels */
-      k = Math.max(0.5, k);
-      canvas.style.width = Math.round(W * k) + "px"; canvas.style.height = Math.round(H * k) + "px";
-      game.scale = k;
+      var c = containLayout(aw, ah, W, H, window.devicePixelRatio || 1);
+      canvas.style.width = c.w + "px"; canvas.style.height = c.h + "px";
+      game.scale = c.k;
+      game.stage = { w: W, h: H, k: c.k, x: 0, y: 0 };
+    }
+    /* the stage's own box, fractional: the layout that leaves no paper at the sides, top or bottom */
+    function fitFill() {
+      var r = parent.getBoundingClientRect ? parent.getBoundingClientRect() : null;
+      var w = r ? r.width : 0, h = r ? r.height : 0;
+      if (!(w > 0) || !(h > 0)) { w = parent.clientWidth || innerWidth; h = parent.clientHeight || innerHeight; }
+      if (w === lastFitW && h === lastFitH && stageBuf) return;
+      lastFitW = w; lastFitH = h;
+      var L = fillLayout(w, h, W, H);
+      lay = L;
+      stageInfo.w = L.w; stageInfo.h = L.h; stageInfo.k = L.k; stageInfo.x = L.x; stageInfo.y = L.y;
+      canvas.width = L.w; canvas.height = L.h;
+      /* exact sizes, not rounded: a rounded width leaves a line of paper down each side on an iPhone */
+      canvas.style.width = (L.w * L.k) + "px"; canvas.style.height = (L.h * L.k) + "px";
+      stageBuf = new Uint8Array(L.w * L.h); stageBuf.fill(PAPER);
+      bandSurface = makeSurface({ buf: stageBuf, w: L.w, h: L.h });
+      stageImage = ctx.createImageData(L.w, L.h);
+      game.scale = L.k;
+      game.stage = { w: L.w, h: L.h, k: L.k, x: L.x, y: L.y };
+      if (stack.length) render();   /* canvas.width cleared it: draw straight away */
     }
 
     /* --- framebuffer and drawing --- */
     var buf = new Uint8Array(W * H);
-    var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = W, cy1 = H;
-    function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) buf[y * W + x] = c; }
 
     var fc = document.createElement("canvas"), fx = null, glyphs = {}, baseline = 0;
     function fontCtx() {
@@ -214,108 +264,117 @@ var LoGame = (function () {
       return lines;
     }
 
-    var g = {
-      width: W, height: H, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
-      clear: function (c) { buf.fill(c == null ? PAPER : c); },
-      origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
-      clip: function (x, y, w, h) {
-        if (x == null) { cx0 = 0; cy0 = 0; cx1 = W; cy1 = H; return; }
-        cx0 = clamp(Math.round(x + ox), 0, W); cy0 = clamp(Math.round(y + oy), 0, H);
-        cx1 = clamp(Math.round(x + ox + w), 0, W); cy1 = clamp(Math.round(y + oy + h), 0, H);
-      },
-      pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
-      get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= W || y >= H ? null : buf[y * W + x]; },
-      rect: function (x, y, w, h, c) {
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
-        for (var yy = ya; yy < yb; yy++) buf.fill(c, yy * W + xa, yy * W + Math.max(xa, xb));
-      },
-      frame: function (x, y, w, h, c) {
-        g.rect(x, y, w, 1, c); g.rect(x, y + h - 1, w, 1, c); g.rect(x, y, 1, h, c); g.rect(x + w - 1, y, 1, h, c);
-      },
-      line: function (x0, y0, x1, y1, c) {
-        x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
-        var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
-        for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
-      },
-      circle: function (cx, cy, r, c, fill) {
-        cx = Math.round(cx); cy = Math.round(cy);
-        for (var y = -r; y <= r; y++) {
-          var span = Math.round(Math.sqrt(r * r + r - y * y));
-          if (fill) g.rect(cx - span, cy + y, span * 2 + 1, 1, c);
-          else { g.pixel(cx - span, cy + y, c); g.pixel(cx + span, cy + y, c); }
-        }
-        if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); g.pixel(cx + x, cy - s2, c); g.pixel(cx + x, cy + s2, c); }
-      },
-      /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
-      dither: function (x, y, w, h, c, level) {
-        level = clamp(level == null ? 2 : level, 0, 4);
-        x = Math.round(x); y = Math.round(y);
-        for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
-          var px = (x + xx) & 1, py = (y + yy) & 1;
-          var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
-          if (on) put(x + xx + ox, y + yy + oy, c);
-        }
-      },
-      /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
-      sprite: function (s, x, y, o) {
-        o = o || {};
-        x = Math.round(x) + ox; y = Math.round(y) + oy;
-        var w = s.w, h = s.h, px = s.px, one = o.color, map = o.map;
-        for (var yy = 0; yy < h; yy++) {
-          var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
-          var sy = o.flipY ? h - 1 - yy : yy;
-          for (var xx = 0; xx < w; xx++) {
-            var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
-            var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
-            if (v === CLEAR) continue;
-            buf[dy * W + dx] = one != null ? one : map ? map[v] : v;
+    /* a drawing surface over any tone buffer: the world, and with fill a band canvas the app's `bands`
+       callback paints in stage coordinates. Both get the same methods and clip/origin state. */
+    function makeSurface(t) {
+      var sbuf = t.buf, SW = t.w, SH = t.h;
+      var ox = 0, oy = 0, cx0 = 0, cy0 = 0, cx1 = SW, cy1 = SH;
+      function put(x, y, c) { if (x >= cx0 && y >= cy0 && x < cx1 && y < cy1) sbuf[y * SW + x] = c; }
+      var s = {
+        width: SW, height: SH, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
+        clear: function (c) { sbuf.fill(c == null ? PAPER : c); },
+        origin: function (x, y) { ox = Math.round(x || 0); oy = Math.round(y || 0); },
+        clip: function (x, y, w, h) {
+          if (x == null) { cx0 = 0; cy0 = 0; cx1 = SW; cy1 = SH; return; }
+          cx0 = clamp(Math.round(x + ox), 0, SW); cy0 = clamp(Math.round(y + oy), 0, SH);
+          cx1 = clamp(Math.round(x + ox + w), 0, SW); cy1 = clamp(Math.round(y + oy + h), 0, SH);
+        },
+        pixel: function (x, y, c) { put(Math.round(x) + ox, Math.round(y) + oy, c); },
+        get: function (x, y) { x = Math.round(x) + ox; y = Math.round(y) + oy; return x < 0 || y < 0 || x >= SW || y >= SH ? null : sbuf[y * SW + x]; },
+        rect: function (x, y, w, h, c) {
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var xa = Math.max(x, cx0), ya = Math.max(y, cy0), xb = Math.min(x + Math.round(w), cx1), yb = Math.min(y + Math.round(h), cy1);
+          for (var yy = ya; yy < yb; yy++) sbuf.fill(c, yy * SW + xa, yy * SW + Math.max(xa, xb));
+        },
+        frame: function (x, y, w, h, c) {
+          s.rect(x, y, w, 1, c); s.rect(x, y + h - 1, w, 1, c); s.rect(x, y, 1, h, c); s.rect(x + w - 1, y, 1, h, c);
+        },
+        line: function (x0, y0, x1, y1, c) {
+          x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+          var dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, e = dx + dy;
+          for (;;) { put(x0 + ox, y0 + oy, c); if (x0 === x1 && y0 === y1) break; var e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+        },
+        circle: function (cx, cy, r, c, fill) {
+          cx = Math.round(cx); cy = Math.round(cy);
+          for (var y = -r; y <= r; y++) {
+            var span = Math.round(Math.sqrt(r * r + r - y * y));
+            if (fill) s.rect(cx - span, cy + y, span * 2 + 1, 1, c);
+            else { s.pixel(cx - span, cy + y, c); s.pixel(cx + span, cy + y, c); }
+          }
+          if (!fill) for (var x = -r; x <= r; x++) { var s2 = Math.round(Math.sqrt(r * r + r - x * x)); s.pixel(cx + x, cy - s2, c); s.pixel(cx + x, cy + s2, c); }
+        },
+        /* level 0-4: 0 nothing, 2 checkerboard, 4 solid */
+        dither: function (x, y, w, h, c, level) {
+          level = clamp(level == null ? 2 : level, 0, 4);
+          x = Math.round(x); y = Math.round(y);
+          for (var yy = 0; yy < h; yy++) for (var xx = 0; xx < w; xx++) {
+            var px = (x + xx) & 1, py = (y + yy) & 1;
+            var on = level === 4 || (level === 3 && !(px && py)) || (level === 2 && px === py) || (level === 1 && !px && !py);
+            if (on) put(x + xx + ox, y + yy + oy, c);
+          }
+        },
+        /* opts: {flip, flipY, color (paint every opaque pixel one tone), map: [t0,t1,t2,t3]} */
+        sprite: function (sp, x, y, o) {
+          o = o || {};
+          x = Math.round(x) + ox; y = Math.round(y) + oy;
+          var w = sp.w, h = sp.h, px = sp.px, one = o.color, map = o.map;
+          for (var yy = 0; yy < h; yy++) {
+            var dy = y + yy; if (dy < cy0 || dy >= cy1) continue;
+            var sy = o.flipY ? h - 1 - yy : yy;
+            for (var xx = 0; xx < w; xx++) {
+              var dx = x + xx; if (dx < cx0 || dx >= cx1) continue;
+              var v = px[sy * w + (o.flip ? w - 1 - xx : xx)];
+              if (v === CLEAR) continue;
+              sbuf[dy * SW + dx] = one != null ? one : map ? map[v] : v;
+            }
+          }
+        },
+        /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
+        text: function (str, x, y, o) {
+          o = o || {};
+          var color = o.color == null ? INK : o.color;
+          var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
+          lines.forEach(function (ln) {
+            /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
+            var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
+            if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
+            else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
+            Array.from(ln).forEach(function (ch) {
+              var gl = glyph(ch);
+              for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
+                if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
+                put(xx + i + ox, yy + j + oy, color);
+              }
+              xx += gl.adv;
+            });
+            yy += FONT.line;
+          });
+          return lines.length * FONT.line;
+        },
+        measure: measure,
+        wrap: wrap,
+        lineHeight: FONT.line,
+        /* the standard window: paper inside, ink border with cut corners */
+        window: function (x, y, w, h, o) {
+          o = o || {};
+          s.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
+          var c = o.border == null ? INK : o.border;
+          s.rect(x + 1, y, w - 2, 1, c); s.rect(x + 1, y + h - 1, w - 2, 1, c);
+          s.rect(x, y + 1, 1, h - 2, c); s.rect(x + w - 1, y + 1, 1, h - 2, c);
+          if (!o.thin) { s.rect(x + 2, y + 2, w - 4, 1, MID); }
+        },
+        /* a small arrow used by menus and "more" markers */
+        arrow: function (x, y, dir, c) {
+          c = c == null ? INK : c;
+          for (var i = 0; i < 4; i++) {
+            if (dir === "down") s.rect(x + i, y + i, 7 - 2 * i, 1, c);
+            else s.rect(x + i, y + i, 1, 7 - 2 * i, c);
           }
         }
-      },
-      /* opts: {color, align: "left"|"center"|"right", width (wrap), shadow: tone} -> height drawn */
-      text: function (str, x, y, o) {
-        o = o || {};
-        var color = o.color == null ? INK : o.color;
-        var lines = o.width ? wrap(str, o.width) : String(str).split("\n"), yy = Math.round(y);
-        lines.forEach(function (ln) {
-          /* with a width, align inside x..x+width; without one, x is the centre or the right edge */
-          var lw = measure(ln), box = o.width || 0, xx = Math.round(x);
-          if (o.align === "center") xx = Math.round(box ? x + (box - lw) / 2 : x - lw / 2);
-          else if (o.align === "right") xx = Math.round(box ? x + box - lw : x - lw);
-          Array.from(ln).forEach(function (ch) {
-            var gl = glyph(ch);
-            for (var j = 0; j < gl.h; j++) for (var i = 0; i < gl.w; i++) if (gl.bits[j * gl.w + i]) {
-              if (o.shadow != null) put(xx + i + 1 + ox, yy + j + 1 + oy, o.shadow);
-              put(xx + i + ox, yy + j + oy, color);
-            }
-            xx += gl.adv;
-          });
-          yy += FONT.line;
-        });
-        return lines.length * FONT.line;
-      },
-      measure: measure,
-      wrap: wrap,
-      lineHeight: FONT.line,
-      /* the standard window: paper inside, ink border with cut corners */
-      window: function (x, y, w, h, o) {
-        o = o || {};
-        g.rect(x + 1, y + 1, w - 2, h - 2, o.fill == null ? PAPER : o.fill);
-        var c = o.border == null ? INK : o.border;
-        g.rect(x + 1, y, w - 2, 1, c); g.rect(x + 1, y + h - 1, w - 2, 1, c);
-        g.rect(x, y + 1, 1, h - 2, c); g.rect(x + w - 1, y + 1, 1, h - 2, c);
-        if (!o.thin) { g.rect(x + 2, y + 2, w - 4, 1, MID); }
-      },
-      /* a small arrow used by menus and "more" markers */
-      arrow: function (x, y, dir, c) {
-        c = c == null ? INK : c;
-        for (var i = 0; i < 4; i++) {
-          if (dir === "down") g.rect(x + i, y + i, 7 - 2 * i, 1, c);
-          else g.rect(x + i, y + i, 1, 7 - 2 * i, c);
-        }
-      }
-    };
+      };
+      return s;
+    }
+    var g = makeSurface({ buf: buf, w: W, h: H });
 
     /* --- palette effects: every frame the indexed buffer goes through this map --- */
     var pal = [0, 1, 2, 3], fadeLevel = 0, fadeTo = PAPER, flashT = 0, shakeT = 0, shakeA = 0, sx = 0, sy = 0;
@@ -323,8 +382,23 @@ var LoGame = (function () {
       var map = pal.slice();
       if (fadeLevel) for (var i = 0; i < 4; i++) map[i] = fadeTo === PAPER ? Math.min(3, i + fadeLevel) : Math.max(0, i - fadeLevel);
       if (flashT > 0) map = map.map(function (v) { return 3 - v; });
-      var d = image.data, n = W * H;
       if (shakeT > 0) { sx = Math.round((Math.random() * 2 - 1) * shakeA); sy = Math.round((Math.random() * 2 - 1) * shakeA); } else { sx = sy = 0; }
+      if (fill) {
+        if (!stageBuf || !stageImage) return 0;
+        var sd = stageImage.data, sw = lay.w, sh = lay.h, n2 = sw * sh;
+        for (var sy2 = 0; sy2 < sh; sy2++) for (var sx2 = 0; sx2 < sw; sx2++) {
+          /* a shake slides the stage under the screen: clamp at the edge, or the bright paper shows as a strip */
+          var srcX2 = sx2 - sx, srcY2 = sy2 - sy;
+          if (srcX2 < 0) srcX2 = 0; else if (srcX2 >= sw) srcX2 = sw - 1;
+          if (srcY2 < 0) srcY2 = 0; else if (srcY2 >= sh) srcY2 = sh - 1;
+          var v2 = stageBuf[srcY2 * sw + srcX2];
+          var c2 = RGB[map[v2]], o2 = (sy2 * sw + sx2) * 4;
+          sd[o2] = c2[0]; sd[o2 + 1] = c2[1]; sd[o2 + 2] = c2[2]; sd[o2 + 3] = 255;
+        }
+        ctx.putImageData(stageImage, 0, 0);
+        return n2;
+      }
+      var d = image.data, n = W * H;
       for (var y = 0; y < H; y++) for (var x = 0; x < W; x++) {
         var srcX = x - sx, srcY = y - sy, v = srcX < 0 || srcY < 0 || srcX >= W || srcY >= H ? PAPER : buf[srcY * W + srcX];
         var c = RGB[map[v]], o = (y * W + x) * 4;
@@ -344,10 +418,27 @@ var LoGame = (function () {
       addEventListener("keyup", function (e) { var b = KEYS[e.key]; if (b) up(b); });
     }
     addEventListener("blur", function () { BUTTONS.forEach(up); });
-    var pointer = { x: 0, y: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
+    var pointer = { x: 0, y: 0, stageX: 0, stageY: 0, down: false, pressed: false, released: false }, pQueued = false, pQueuedUp = false;
     function toScreen(e) {
       var r = canvas.getBoundingClientRect();
-      pointer.x = Math.floor((e.clientX - r.left) * W / r.width); pointer.y = Math.floor((e.clientY - r.top) * H / r.height);
+      if (fill) {
+        /* stage pixels (canvas pixels), then the world inside them; a tap in a band still lands on the near edge */
+        var px = (e.clientX - r.left) / (lay.k || 1), py = (e.clientY - r.top) / (lay.k || 1);
+        pointer.stageX = px; pointer.stageY = py;
+        pointer.x = clamp(Math.floor(px - lay.x), 0, W - 1);
+        pointer.y = clamp(Math.floor(py - lay.y), 0, H - 1);
+        return;
+      }
+      pointer.stageX = (e.clientX - r.left) * W / r.width;
+      pointer.stageY = (e.clientY - r.top) * H / r.height;
+      pointer.x = Math.floor(pointer.stageX); pointer.y = Math.floor(pointer.stageY);
+    }
+    /* with fill on, a press that starts in the bands around the world is not a world tap (1.5.0) */
+    function inWorldPress() {
+      if (!pointer.pressed) return false;
+      if (!fill) return true;
+      return pointer.stageX >= lay.x && pointer.stageX < lay.x + W &&
+             pointer.stageY >= lay.y && pointer.stageY < lay.y + H;
     }
     canvas.addEventListener("pointerdown", function (e) { e.preventDefault(); try { canvas.setPointerCapture(e.pointerId); } catch (x) {} toScreen(e); pointer.down = true; pQueued = true; });
     canvas.addEventListener("pointermove", function (e) { toScreen(e); });
@@ -381,7 +472,8 @@ var LoGame = (function () {
     function enter(s, args) { var e = { scene: s, args: args, resolve: null }; stack.push(e); if (s.enter) s.enter(args); return e; }
 
     var game = {
-      VERSION: VERSION, width: W, height: H, g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
+      VERSION: VERSION, width: W, height: H, stage: { w: W, h: H, k: 1, x: 0, y: 0 },
+      g: g, time: 0, frame: 0, scale: 1, pointer: pointer, lang: LANG,
       t: function (text, vars) { return pick(text, LANG, vars); },
       INK: INK, DARK: DARK, MID: MID, PAPER: PAPER,
 
@@ -418,8 +510,8 @@ var LoGame = (function () {
         delay = delay == null ? 0.32 : delay; rate = rate == null ? 0.09 : rate;
         var t = heldFor[b] - delay; return t >= 0 && Math.floor(t / rate) !== Math.floor((t - STEP) / rate);
       },
-      /* A, START or a tap: "carry on" */
-      ok: function () { return !!(pressedNow.a || pressedNow.start || pointer.pressed); },
+      /* A, START or a tap inside the world: "carry on" */
+      ok: function () { return !!(pressedNow.a || pressedNow.start || inWorldPress()); },
       /* the D-pad as a direction: {x, y}, one step per press with repeat */
       dir: function (delay, rate) {
         return { x: (game.repeat("right", delay, rate) ? 1 : 0) - (game.repeat("left", delay, rate) ? 1 : 0),
@@ -524,7 +616,7 @@ var LoGame = (function () {
           if (d.y) { sel = (sel + d.y + items.length) % items.length; game.sfx("move"); }
           if (game.pressed("a") || game.pressed("start")) { game.sfx("tap"); game.pop(sel); return; }
           if (cancel && game.pressed("b")) { game.sfx("miss"); game.pop(-1); return; }
-          if (pointer.pressed) {
+          if (inWorldPress()) {
             var r = Math.floor((pointer.y - y - pad - (o.title ? rowH : 0)) / rowH);
             if (pointer.x >= x && pointer.x < x + w && r >= 0 && r < items.length) { sel = r; game.sfx("tap"); game.pop(sel); }
             else if (cancel) { game.sfx("miss"); game.pop(-1); }
@@ -556,13 +648,30 @@ var LoGame = (function () {
       game.time += STEP; game.frame++;
       inputEnd();
     }
+    /* the world into the stage: a plain copy, every frame, so the bands can be painted under it */
+    function compose() {
+      var sb = stageBuf, cw = lay.w, x0 = lay.x, y0 = lay.y;
+      for (var y = 0; y < H; y++) {
+        var src = y * W, dst = (y0 + y) * cw + x0;
+        for (var x = 0; x < W; x++) sb[dst + x] = buf[src + x];
+      }
+    }
     function render() {
+      if (fill) {
+        if (!stageBuf) return;
+        /* the app paints the full stage first: sky above the world, floor below, a HUD if it has one */
+        bandSurface.origin(0, 0); bandSurface.clip();
+        if (bands) bands(bandSurface, stageInfo);
+      }
       g.origin(0, 0); g.clip();
       for (var i = 0; i < stack.length; i++) { var s = stack[i].scene; g.origin(0, 0); g.clip(); if (s.draw) s.draw(g); }
+      if (fill) compose();
       present();
     }
     function frame(ts) {
       requestAnimationFrame(frame);
+      /* the stage can settle after the app starts with no resize event (an iPhone's bars): check it every frame */
+      if (fill) fitFill();
       if (!last) last = ts;
       acc += Math.min(0.1, (ts - last) / 1000); last = ts;
       var n = 0;
@@ -582,6 +691,7 @@ var LoGame = (function () {
   return {
     VERSION: VERSION, TONES: TONES.slice(), font: font, INK: INK, DARK: DARK, MID: MID, PAPER: PAPER, BUTTONS: BUTTONS.slice(),
     create: create, sprite: sprite, sprites: sprites, tilemap: tilemap, camera: camera, rng: rng,
+    fillLayout: fillLayout, containLayout: containLayout,
     clamp: clamp, lerp: lerp, approach: approach, t: t
   };
 })();
@@ -923,15 +1033,27 @@ var ART = (function () {
     var wet = s.weather === "rain";
     return night ? 0.12 : 3.08 - 2.25 * day - (wet ? 0.28 : 0);
   }
-  function sky(g, s) {
+  /* the sky's two ends, shared by sky() and the bands around the world so they never drift apart */
+  function skyValues(s) {
     var night = s.mode === "descent";
     var day = night ? 1 : s.p;
     var wet = s.weather === "rain";
-    var topV = skyTop(s);
-    var horV = night ? 0.92 : 1.85 + 1.15 * Math.sin(day * Math.PI) - (wet ? 0.30 : 0);
-    var horizon = 116;
+    return {
+      night: night, day: day, wet: wet,
+      topV: skyTop(s),
+      horV: night ? 0.92 : 1.85 + 1.15 * Math.sin(day * Math.PI) - (wet ? 0.30 : 0)
+    };
+  }
+  /* the sky's tone at a row; above the world's top the same line is extrapolated, which
+     only makes the sky darker towards the zenith (or keeps it at paper at the foot) */
+  function skyAt(sv, y) {
+    return y < 116 ? sv.topV + (sv.horV - sv.topV) * (y / 116) : sv.horV;
+  }
+  function sky(g, s) {
+    var sv = skyValues(s);
+    var night = sv.night, day = sv.day, wet = sv.wet;
     for (var y = 0; y < H; y++) {
-      var v = y < horizon ? topV + (horV - topV) * (y / horizon) : horV;
+      var v = skyAt(sv, y);
       for (var x = 0; x < W; x++) px(g, x, y, v);
     }
 
@@ -1027,6 +1149,56 @@ var ART = (function () {
   }
 
   /* ---------------- the mountain and its ledge ---------------- */
+  /* The near cliff's tone at a world point below its ledge, and the far slope's beyond the
+     summit. terrain() and the bands around the world share them: the stage's rows below the
+     world and columns beside it are the same mountain, evaluated a little past the edge. */
+  function cliffTone(s, wx, wy) {
+    var night = s.mode === "descent";
+    var top = Math.max(WORLD.pathY(wx) - s.cam.y + 4, 0);
+    var d = (wy - top) / Math.max(1, H - top);
+    var v = night ? 0.72 - d * 0.68 : 1.38 - d * 1.30;
+    v += Math.sin(wx * 0.031 + wy * 0.14) * 0.055;
+    /* large diagonal facets, then the horizontal strata, then the deep cracks */
+    var facet = (wx * 0.55 + (wy - top) * 1.35) / 46;
+    v += ((Math.floor(facet) % 3) - 1) * 0.11;
+    if ((facet - Math.floor(facet)) * 46 < 1.4) v -= 0.30;
+    if ((wy + Math.floor(Math.sin(wx * 0.041) * 4)) % 22 === 0) v -= 0.42;
+    if (crack(wx, wy)) v = 0.02;
+    return v;
+  }
+  /* the other side: one narrow lit rim, then the far slope in the crest's shadow, then the
+     cloud sea lower down. The first pixels after the summit borrow the near cliff's value,
+     so the two faces meet on the ridge instead of at a vertical seam. */
+  function farTone(s, wx, wy) {
+    var night = s.mode === "descent";
+    var fy = WORLD.farPathY(wx) - s.cam.y;
+    var mix = Math.min(1, (wx - WORLD.SUMMIT_X) / 16);
+    var top0 = Math.max(fy + 4, 0);
+    var nearD = 1 / Math.max(1, H - top0);
+    var rim = Math.max(0, Math.min(H, fy + 2));
+    var foot = Math.max(0, Math.min(H, fy + 26));
+    var v;
+    if (wy < rim) {
+      /* the last light on the crest: at most three pixels */
+      v = wy < fy + 1 ? (night ? 2.0 : 2.9) : (night ? 1.3 : 1.9);
+    } else if (wy < foot) {
+      /* the far slope is in shadow, not a second lit wall */
+      var fd = (wy - rim) / Math.max(1, foot - rim);
+      v = night ? 0.92 - fd * 0.14 : 1.46 - fd * 0.10;
+    } else {
+      /* the cloud sea sits lower and stays close to mid */
+      var d3 = (wy - foot) / Math.max(1, H - foot);
+      v = night ? 0.82 - d3 * 0.22 : 2.02 - d3 * 0.34;
+      v += Math.sin(wx * 0.05 + wy * 0.19) * 0.14;
+    }
+    if (wy >= rim && mix < 1) {
+      var d0 = Math.max(0, wy - top0) * nearD;
+      var near = night ? 0.72 - d0 * 0.68 : 1.38 - d0 * 1.30;
+      v = near + (v - near) * mix;
+    }
+    if (wy >= rim && (wy + Math.floor(Math.sin(wx * 0.05) * 3)) % 9 === 0) v -= 0.28;
+    return v;
+  }
   function terrain(g, s) {
     var cam = s.cam;
     var night = s.mode === "descent";
@@ -1045,53 +1217,9 @@ var ART = (function () {
         px(g, x, py + 3, 0.15);
 
         /* cliff below the ledge */
-        var top = Math.max(py + 4, 0);
-        for (var y = top; y < H; y++) {
-          var d = (y - top) / Math.max(1, H - top);
-          var v = night ? 0.72 - d * 0.68 : 1.38 - d * 1.30;
-          v += Math.sin(wx * 0.031 + y * 0.14) * 0.055;
-          /* large diagonal facets, then the horizontal strata, then the deep cracks */
-          var facet = (wx * 0.55 + (y - top) * 1.35) / 46;
-          v += ((Math.floor(facet) % 3) - 1) * 0.11;
-          if ((facet - Math.floor(facet)) * 46 < 1.4) v -= 0.30;
-          if ((y + Math.floor(Math.sin(wx * 0.041) * 4)) % 22 === 0) v -= 0.42;
-          if (crack(wx, y)) v = 0.02;
-          px(g, x, y, v);
-        }
+        for (var y = Math.max(py + 4, 0); y < H; y++) px(g, x, y, cliffTone(s, wx, y));
       } else {
-        /* the other side: one narrow lit rim, then the far slope in the crest's
-           shadow, then the cloud sea lower down. The first pixels after the
-           summit borrow the near cliff's value, so the two faces meet on the
-           ridge instead of at a vertical seam. */
-        var fy = WORLD.farPathY(wx) - cam.y;
-        var mix = Math.min(1, (wx - WORLD.SUMMIT_X) / 16);
-        var top0 = Math.max(fy + 4, 0);
-        var nearD = 1 / Math.max(1, H - top0);
-        var rim = Math.max(0, Math.min(H, fy + 2));
-        var foot = Math.max(0, Math.min(H, fy + 26));
-        for (var y2 = Math.max(0, fy - 1); y2 < H; y2++) {
-          var v2;
-          if (y2 < rim) {
-            /* the last light on the crest: at most three pixels */
-            v2 = y2 < fy + 1 ? (night ? 2.0 : 2.9) : (night ? 1.3 : 1.9);
-          } else if (y2 < foot) {
-            /* the far slope is in shadow, not a second lit wall */
-            var fd = (y2 - rim) / Math.max(1, foot - rim);
-            v2 = night ? 0.92 - fd * 0.14 : 1.46 - fd * 0.10;
-          } else {
-            /* the cloud sea sits lower and stays close to mid */
-            var d3 = (y2 - foot) / Math.max(1, H - foot);
-            v2 = night ? 0.82 - d3 * 0.22 : 2.02 - d3 * 0.34;
-            v2 += Math.sin(wx * 0.05 + y2 * 0.19) * 0.14;
-          }
-          if (y2 >= rim && mix < 1) {
-            var d0 = Math.max(0, y2 - top0) * nearD;
-            var near = night ? 0.72 - d0 * 0.68 : 1.38 - d0 * 1.30;
-            v2 = near + (v2 - near) * mix;
-          }
-          if (y2 >= rim && (y2 + Math.floor(Math.sin(wx * 0.05) * 3)) % 9 === 0) v2 -= 0.28;
-          px(g, x, y2, v2);
-        }
+        for (var y2 = Math.max(0, WORLD.farPathY(wx) - cam.y - 1); y2 < H; y2++) px(g, x, y2, farTone(s, wx, y2));
       }
     }
 
@@ -1360,6 +1488,153 @@ var ART = (function () {
     }
   }
 
+  /* ---------------- the stage around the world ----------------
+     sdk/UI.md 13 and LO-GAME.md 2.1: the world keeps its 160 x 178 and the canvas grows around it.
+     The rows above the world are more sky, the rows below the cliff's foot, and on a stage too
+     short for the world's width the columns beside it are the same mountain, seen edge on.
+     Every band point is evaluated at the world-screen point just past the world's edge, with
+     the world's own dither, so the sky, the ridges, the ledge and the rock run on without a
+     seam and no paper is left anywhere. calm (pause, the handbook, a quote, loading) keeps the
+     stars from twinkling and the high cloud still. */
+  var bandStars = [];
+  (function () {
+    var seed = 0x73697379;   /* "sisy" */
+    function next() {
+      seed ^= seed << 13; seed >>>= 0; seed ^= seed >>> 17; seed ^= seed << 5; seed >>>= 0;
+      return seed / 4294967296;
+    }
+    /* in world coordinates, spread over the sky the bands can show, so a star sits in the same
+       place at every phone size; the ones over the world itself are covered by it */
+    for (var i = 0; i < 420; i++) {
+      bandStars.push({ x: Math.round(next() * 330 - 85), y: Math.round(next() * 300 - 105) });
+    }
+  })();
+
+  function paintBands(s, st, sg, calm) {
+    var sv = skyValues(sg), night = sv.night, day = sv.day;
+    var cam = sg.cam;
+    var x0 = -st.x, x1 = x0 + st.w;                 /* the stage in world-screen columns */
+    var y0 = -st.y, y1 = y0 + st.h;                 /* and in world rows */
+    var sy0 = Math.max(0, y0), sy1 = Math.min(H, y1);
+    var x, y, i, c, v;
+
+    function put(x, y, v) { s.pixel(st.x + x, st.y + y, tone(v, x, y)); }
+
+    /* 1. the sky: over the world's top, and on a short stage beside it */
+    for (y = y0; y < 0; y++) {
+      v = skyAt(sv, y);
+      for (x = x0; x < x1; x++) put(x, y, v);
+    }
+    for (x = x0; x < 0; x++) for (y = sy0; y < sy1; y++) put(x, y, skyAt(sv, y));
+    for (x = W; x < x1; x++) for (y = sy0; y < sy1; y++) put(x, y, skyAt(sv, y));
+
+    /* 2. stars, as the world draws them, and the same rule for when the sky is dark enough;
+       a calm screen holds the twinkle at a fixed phase instead of stopping on a random one */
+    if (night || day > 0.9) {
+      for (i = 0; i < bandStars.length; i++) {
+        if (Math.sin((calm ? 0 : sg.time) * 1.7 + i * 2.3) <= -0.72) continue;
+        put(bandStars[i].x, bandStars[i].y, i % 5 === 0 ? 3 : 2.4);
+      }
+    }
+
+    /* 3. high cloud drifting across the band over the world, at the weather's pace: a lit top,
+       a body, a shadowed underside, so it reads as cloud rather than a scanline */
+    var bandH = -y0;
+    if (bandH >= 8) {
+      var wind = sg.weather === "wind" ? 2.2 : 1;
+      var rows = bandH >= 44 ? [0.22, 0.50, 0.78] : (bandH >= 24 ? [0.30, 0.64] : [0.45]);
+      for (c = 0; c < rows.length; c++) {
+        var cy = y0 + Math.round(bandH * rows[c]);
+        var off = ((calm ? 0 : sg.time) * (3 + c) * wind + c * 57) % 240;
+        var cloudV = night ? 0.55 : 2.45;
+        for (x = x0; x < x1; x++) {
+          var u = (x + off) / 240;
+          var puff = Math.sin(u * 6.283 * 2 + c) * 0.5 + 0.5;
+          if (puff <= 0.70) continue;
+          put(x, cy, cloudV);
+          put(x, cy + 1, cloudV - 0.6);
+          if (puff > 0.80) put(x, cy - 1, cloudV + 0.3);
+          if (puff > 0.88) put(x, cy + 2, cloudV - 1.1);
+        }
+      }
+    }
+
+    /* 4. the world's three low cloud bands, continued into the columns beside it */
+    if (sy1 > 0) {
+      var wind2 = sg.weather === "wind" ? 2.2 : 1;
+      for (c = 0; c < 3; c++) {
+        var lcy = 58 + c * 15;
+        var loff = (sg.time * (4 + c) * wind2 + c * 57) % 240 - 40;
+        for (x = x0; x < x1; x++) {
+          if (x >= 0 && x < W) continue;
+          var lu = (x + loff) / 240;
+          if (Math.sin(lu * 6.283 * 2 + c) * 0.5 + 0.5 > 0.72) {
+            var lv = night ? 0.55 : 2.45;
+            put(x, lcy + Math.sin(x * 0.05 + c) * 1.2, lv);
+            put(x, lcy + 1 + Math.sin(x * 0.05 + c) * 1.2, lv - 0.5);
+          }
+        }
+      }
+    }
+
+    /* 5. the distant ridges under everything, the world's own two layers */
+    function ridges(x, ya, yb) {
+      for (var layer = 0; layer < 2; layer++) {
+        var base = 92 + layer * 16 - (cam.y - 180) * 0.035;
+        var wxs = x + cam.x * (0.10 + layer * 0.07);
+        var yy = base + Math.sin(wxs * 0.026 + layer * 2.1) * (5 + layer * 2)
+          + Math.sin(wxs * 0.071 + layer) * (2.5 + layer);
+        var top = Math.round(yy);
+        var rv = night ? (layer ? 0.18 : 0.42) : (layer ? 0.95 : 1.65);
+        for (var ry = Math.max(ya, top); ry < yb; ry++) put(x, ry, rv - (ry - top) * 0.002);
+      }
+    }
+
+    /* 6. the mountain itself: the near cliff's ledge and rock, or the far slope and its cloud sea */
+    function rock(x, ya, yb) {
+      var wx = cam.x + x;
+      if (wx <= WORLD.SUMMIT_X) {
+        var py = WORLD.pathY(wx) - cam.y;
+        /* the ledge's five pixels, the same the world draws: a pale top, a dark underside */
+        var ledge = [night ? 2.0 : 3.0, 2.0, 2.0, 1.1, 0.15];
+        for (var l = 0; l < ledge.length; l++) {
+          if (py - 1 + l >= ya && py - 1 + l < yb) put(x, py - 1 + l, ledge[l]);
+        }
+        for (y = Math.max(ya, py + 4, 0); y < yb; y++) put(x, y, cliffTone(sg, wx, y));
+      } else {
+        var fy = WORLD.farPathY(wx) - cam.y;
+        for (y = Math.max(ya, fy - 1, 0); y < yb; y++) put(x, y, farTone(sg, wx, y));
+      }
+    }
+
+    /* 7. the columns beside the world: ridges, then the rock the world would draw there */
+    if (sy1 > sy0) {
+      for (x = x0; x < 0; x++) ridges(x, sy0, sy1);
+      for (x = W; x < x1; x++) ridges(x, sy0, sy1);
+      /* 8. the cloud sea at the foot, under the ridges and over the cliff's foot */
+      for (i = 0; i < 4; i++) {
+        var scx = (i * 59 + sg.time * 2.5) % 210 - 30;
+        var scy = 124 + (i * 7) % 11;
+        var ww = 26 + (i % 2) * 12;
+        for (x = -ww; x <= ww; x++) {
+          var sx2 = scx + x;
+          if (sx2 < x0 || sx2 >= x1) continue;
+          if (sx2 >= 0 && sx2 < W) continue;   /* the world draws its own */
+          var edgeW = Math.sin((x / ww) * 1.5708);
+          var hh = Math.max(1, Math.round(edgeW * 3));
+          for (y = -hh; y <= 1; y++) put(sx2, scy + y, night ? 0.75 : 2.35);
+        }
+      }
+      for (x = x0; x < 0; x++) rock(x, sy0, sy1);
+      for (x = W; x < x1; x++) rock(x, sy0, sy1);
+    }
+    /* 9. the rows under the world: the ridges and then the mountain running on down */
+    if (y1 > H) {
+      for (x = x0; x < x1; x++) ridges(x, Math.max(H, y0), y1);
+      for (x = x0; x < x1; x++) rock(x, Math.max(H, y0), y1);
+    }
+  }
+
   function drawWorld(g, s) {
     sky(g, s);
     ridges(g, s);
@@ -1380,6 +1655,7 @@ var ART = (function () {
   return {
     W: W, H: H, tone: tone, px: px, disc: disc, line2: line2,
     sky: sky, skyTop: skyTop, ridges: ridges, cloudSea: cloudSea, terrain: terrain,
+    cliffTone: cliffTone, farTone: farTone, paintBands: paintBands,
     boulder: boulder, sisyphus: sisyphus, spawnDust: spawnDust, updateDust: updateDust, drawDust: drawDust,
     reveal: reveal, card: card, wipe: wipe, drawWorld: drawWorld
   };
@@ -1470,13 +1746,28 @@ var MUSIC = {
 };
 </script>
 <script data-src="src/main.js">
-/* Sisyphus: the game. Lo-PDA / lopda/1, lo-game.js 1.4.0.
+/* Sisyphus: the game. Lo-PDA / lopda/1, lo-game.js 1.5.0.
    Sound is synthesized (PAD.sfx / PAD.music / PAD.ambience) so it follows the handheld's
    volume and silent switch. A recorded sample can replace the heave later, when PAD.sample
    exists: see drafts/sisyphus/RESEARCH.md and drafts/sisyphus/ART-PROMPT.md. */
-var game = LoGame.create({ width: 160, height: 178, lang: "zh" });
+/* The world stays 160 x 178; the canvas grows around it into the phone's stage (sdk/UI.md 13),
+   with the mountain's sky above and its rock below, or its cliff at the sides on a short stage. */
+var game = LoGame.create({ width: 160, height: 178, lang: "zh", fill: true,
+  bands: function (s, st) { ART.paintBands(s, st, S, calmBands()); } });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
+
+/* sdk/LO-GAME.md 2.1: with fill on, a tap in the bands around the world lands on the nearest
+   world edge (pointer.x/y are clamped), so a band tap or drag must not count as a tap. */
+function worldPoint() {
+  var p = game.pointer, st = game.stage;
+  return p.stageX >= st.x && p.stageX < st.x + game.width &&
+    p.stageY >= st.y && p.stageY < st.y + game.height;
+}
+function worldTap() { return game.pointer.pressed && worldPoint(); }
+function worldDown() { return game.pointer.down && worldPoint(); }
+/* the still screens (pause, the handbook, a quote, loading) keep the bands calm */
+function calmBands() { return !S.loaded || S.menuOpen || !!S.calm; }
 
 /* START is the handheld's menu key. The runtime sends it as a press; handling it here
    keeps it working from every scene that has a menu, and never from the title or a quote. */
@@ -1511,7 +1802,7 @@ var S = {
   heaveT: 0, breathT: 0, stepT: 0, slipT: 0, wasPush: false,
   warn: false, warned: false,
   descentT: 0, epi: 0, endT: 0, descendPhase: "far", farX: WORLD.SUMMIT_X, wipe: 0, baseT: 0,
-  menuIndex: 0, menuOpen: false,
+  menuIndex: 0, menuOpen: false, calm: false,
   galleryList: [], galleryIndex: 0, galleryStatus: null, gallerySaving: false, galleryDone: 0,
   loadingNote: null
 };
@@ -1604,7 +1895,7 @@ game.scene("title", {
     S.time = game.time;
     if (game.pressed("start")) { game.say(aboutPages(), { name: T({ zh: "关于", en: "About" }) }); return; }
     if (!S.loaded) return;
-    if (game.pressed("a") || game.pointer.pressed) {
+    if (game.pressed("a") || worldTap()) {
       SFX.click(game);
       game.go("climb", { reset: true, newLoop: false });
     }
@@ -1655,7 +1946,7 @@ game.scene("climb", {
     S.time = game.time;
     if (S.lock > 0) S.lock -= dt;
 
-    var pushing = (game.btn("a") || game.btn("b") || game.pointer.down) && S.lock <= 0;
+    var pushing = (game.btn("a") || game.btn("b") || worldDown()) && S.lock <= 0;
     if (!S.wasPush && pushing) {
       S.heaveT = 0.06; S.stepT = 0.25; S.idle = 0;
     }
@@ -1854,7 +2145,7 @@ function galleryTitle() { return T({ zh: "幸福手册", en: "The Manual" }); }
 
 function cardTap() {
   var p = game.pointer;
-  if (!p.pressed) return null;
+  if (!worldTap()) return null;
   if (p.y >= 150) return p.x < 80 ? "a" : "b";
   return "body";
 }
@@ -1868,7 +2159,9 @@ game.scene("quote", {
     S.quoteStatus = null;
     S.quoteSaving = false;
     S.doneT = 0;
+    S.calm = true;
   },
+  exit: function () { S.calm = false; },
   update: function (dt) {
     S.time = game.time;
     S.quoteT += dt;
@@ -1876,7 +2169,7 @@ game.scene("quote", {
     if (S.quoteSaving) return;
     if (S.quoteStatus === "saved" || S.quoteStatus === "denied") {
       S.doneT += dt;
-      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b") || game.pointer.pressed) game.pop(S.quoteStatus);
+      if (S.doneT > 0.95 || game.pressed("a") || game.pressed("b") || worldTap()) game.pop(S.quoteStatus);
       return;
     }
     if (S.quoteT < 0.72) return;
@@ -2038,7 +2331,7 @@ game.scene("menu", {
     if (game.pressed("down")) { S.menuIndex = (S.menuIndex + 1) % items.length; SFX.move(game); }
     /* touch: a tap on a row selects it and acts like A; a tap outside the window is B */
     var act = game.pressed("a");
-    if (game.pointer.pressed) {
+    if (worldTap()) {
       var p = game.pointer, row = Math.floor((p.y - 69) / 16);
       if (p.x >= 10 && p.x < 150 && p.y >= 46 && p.y < 134) {
         if (p.x >= 18 && p.x < 142 && row >= 0 && row < items.length && p.y < 69 + items.length * 16) { S.menuIndex = row; act = true; }
@@ -2083,19 +2376,21 @@ game.scene("gallery", {
     S.galleryStatus = null;
     S.gallerySaving = false;
     S.galleryDone = 0;
+    S.calm = true;
   },
+  exit: function () { S.calm = false; },
   update: function (dt) {
     S.time = game.time;
     if (S.gallerySaving) return;
     if (S.galleryStatus === "saved" || S.galleryStatus === "denied") {
       S.galleryDone += dt;
-      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
+      if (S.galleryDone > 0.8 || game.pressed("a") || game.pressed("b") || worldTap()) {
         S.galleryStatus = null; S.galleryDone = 0;
       }
       return;
     }
     if (!S.galleryList.length) {
-      if (game.pressed("b") || game.pressed("start") || game.pointer.pressed) { SFX.click(game); game.pop(); }
+      if (game.pressed("b") || game.pressed("start") || worldTap()) { SFX.click(game); game.pop(); }
       return;
     }
     /* touch: the hint row is A on its left half and B on its right; above it, the
