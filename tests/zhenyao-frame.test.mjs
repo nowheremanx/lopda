@@ -16,11 +16,11 @@ const SIZES = [[331, 359], [346, 518], [386, 606], [348, 323], [386, 738]];
 const DPRS = [1, 3];
 
 /* the largest square of bare paper outside the window: no blank paper, only highlights on the frame */
-function largestPaperBlock(w, h, view) {
+function largestPaperBlock(w, h, view, plain) {
   const x0 = Math.round(view.x), y0 = Math.round(view.y);
   const x1 = Math.round(view.x + view.w), y1 = Math.round(view.y + view.h);
   const inView = (x, y) => x >= x0 && x < x1 && y >= y0 && y < y1;
-  const buf = Frame.paint(w, h, view), dp = new Uint16Array(w * h);
+  const buf = Frame.paint(w, h, view, plain), dp = new Uint16Array(w * h);
   let best = 0;
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     if (inView(x, y) || buf[y * w + x] !== PAPER) continue;
@@ -48,7 +48,7 @@ for (const [w, h] of SIZES) for (const dpr of DPRS) {
     assert.ok(Number.isInteger(v.w) && Number.isInteger(v.h), "no fractional window size");
     assert.ok(v.k >= 1, "the window is not shrunk below its own pixels");
 
-    const buf = Frame.paint(w, h, v);
+    const buf = Frame.paint(w, h, v, false);
     assert.equal(buf.length, w * h);
     for (const tone of buf) assert.ok(tone >= INK && tone <= PAPER, `tone ${tone} is one of the four`);
     /* the outermost pixel is the frame's ink band, not a stripe of bare paper */
@@ -69,10 +69,27 @@ for (const [w, h] of SIZES) for (const dpr of DPRS) {
       if (buf[y * w + x] === PAPER) paper++;
     }
     assert.ok(paper / outside < 0.12, `${(paper / outside * 100).toFixed(1)}% paper outside the window`);
-    assert.ok(largestPaperBlock(w, h, v) <= 12, "no blank paper block");
+    assert.ok(largestPaperBlock(w, h, v, false) <= 12, "no blank paper block");
     /* the shrine's name board is painted in the top margin at every size */
     let topPaper = 0;
     for (let y = 0; y < y0; y++) for (let x = 0; x < w; x++) if (buf[y * w + x] === PAPER) topPaper++;
     assert.ok(topPaper > 100, "the plaque is in the top margin");
   });
 }
+
+test("the title board is textless: a brass coin, not the shrine's name", () => {
+  const v = Frame.viewRect(331, 359, 3);
+  const play = Frame.paint(331, 359, v, false), title = Frame.paint(331, 359, v, true);
+  let diff = 0, playPaper = 0, titlePaper = 0;
+  for (let y = 0; y < v.y; y++) for (let x = 0; x < 331; x++) {
+    const i = y * 331 + x;
+    if (play[i] !== title[i]) diff++;
+    if (play[i] === PAPER) playPaper++;
+    if (title[i] === PAPER) titlePaper++;
+  }
+  assert.ok(diff > 50, "the board changes with the scene");
+  assert.ok(titlePaper > 100, "the coin and its rim are painted");
+  assert.ok(titlePaper < playPaper, "the title board carries no name glyphs");
+  /* the title board is still scenery: the edges and the no-paper rule do not move */
+  assert.equal(largestPaperBlock(331, 359, v, true) <= 12, true);
+});

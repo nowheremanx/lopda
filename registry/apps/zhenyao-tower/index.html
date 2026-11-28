@@ -5212,6 +5212,9 @@ var ZTFrame = (function () {
   /* the view wrapper is inset from the stage on every side, so even a wide stage keeps its side posts.
      The wrapper is what lo-game measures; the canvas centres in it as it always has. */
   var INSET = 4;
+  /* the title screen has its own 镇妖塔·序章 window: the frame's board turns blank there, so the two
+     names never read as one doubled title. Every other scene keeps the shrine's name. */
+  var titleMode = true, repaint = null;
 
   /* the 12 x 12 lopix blocks of 镇妖塔, copied from the app's font (first row is the font's blank top).
      The plaque is the one piece of text on the frame: the title of the shrine. */
@@ -5310,8 +5313,9 @@ var ZTFrame = (function () {
     grain(buf, w, h, 0, 0, w, bottom, u, rand, DARK, Math.round(w / (u * 14)));
   }
 
-  /* the shrine's name board: a gold rim, an ink lacquer field and the old characters */
-  function plaque(buf, w, h, cx, bottom, u, scale, tight) {
+  /* the shrine's name board: a gold rim, an ink lacquer field and the old characters; with `plain`,
+     the title screen's board carries a brass coin instead of the name */
+  function plaque(buf, w, h, cx, bottom, u, scale, tight, plain) {
     var glyphW = 12 * scale, gap = tight ? 0 : scale, pad = tight ? 1 : 3 * scale;
     var rim = tight ? 1 : Math.max(1, Math.round(u * 0.8));
     var pw = glyphW * 3 + gap * 2 + pad * 2, ph = glyphW + pad * 2;
@@ -5320,11 +5324,21 @@ var ZTFrame = (function () {
     rect(buf, w, h, x, y, pw, ph, PAPER);
     rect(buf, w, h, x + rim, y + rim, pw - rim * 2, ph - rim * 2, INK);
     rect(buf, w, h, x + rim * 2, y + rim * 2, pw - rim * 4, Math.max(1, Math.round(rim / 2)), MID);
-    for (var k = 0; k < 3; k++) {
-      var gx = x + pad + k * (glyphW + gap), gy = y + pad;
-      var rows = GLYPHS[["镇", "妖", "塔"][k]];
-      for (var r = 0; r < rows.length; r++) for (var c = 0; c < rows[r].length; c++) {
-        if (rows[r][c] === "#") rect(buf, w, h, gx + c * scale, gy + r * scale, scale, scale, PAPER);
+    if (plain) {
+      var r = Math.max(2, Math.min(Math.round(ph / 2) - 2, Math.round(4.5 * scale)));
+      var cy = y + Math.round(ph / 2), hole = Math.max(2, Math.round(r * 0.9));
+      disc(buf, w, h, cx, cy, r, MID, true);
+      disc(buf, w, h, cx, cy, r, DARK, false);
+      rect(buf, w, h, cx - hole / 2, cy - hole / 2, hole, hole, INK);
+      put(buf, w, h, cx, cy - r, PAPER); put(buf, w, h, cx, cy + r, PAPER);
+      put(buf, w, h, cx - r, cy, PAPER); put(buf, w, h, cx + r, cy, PAPER);
+    } else {
+      for (var k = 0; k < 3; k++) {
+        var gx = x + pad + k * (glyphW + gap), gy = y + pad;
+        var rows = GLYPHS[["镇", "妖", "塔"][k]];
+        for (var r2 = 0; r2 < rows.length; r2++) for (var c = 0; c < rows[r2].length; c++) {
+          if (rows[r2][c] === "#") rect(buf, w, h, gx + c * scale, gy + r2 * scale, scale, scale, PAPER);
+        }
       }
     }
     return { x0: x, y0: y, x1: x + pw, y1: y + ph };
@@ -5399,7 +5413,7 @@ var ZTFrame = (function () {
     grain(buf, w, h, x0, y0, x1, y1, u, rand, MID, 2);
   }
 
-  function topPanel(buf, w, h, x0, y0, x1, u, rand) {
+  function topPanel(buf, w, h, x0, y0, x1, u, rand, plain) {
     var t = y0;
     if (t < 3) return;
     /* a short stage keeps a compact name board: the lintel and the shrine's title, no more */
@@ -5417,7 +5431,7 @@ var ZTFrame = (function () {
 
     if (compact) {
       rect(buf, w, h, 0, 0, w, Math.max(1, Math.round(u / 2)), PAPER);
-      if (lintel - 14 >= 1) plaque(buf, w, h, (x0 + x1) / 2, lintel, u, 1, true);
+      if (lintel - 14 >= 1) plaque(buf, w, h, (x0 + x1) / 2, lintel, u, 1, true, plain);
       rect(buf, w, h, 0, 0, Math.max(1, u), Math.max(1, u), MID);
       rect(buf, w, h, w - Math.max(1, u), 0, Math.max(1, u), Math.max(1, u), MID);
       return;
@@ -5439,14 +5453,14 @@ var ZTFrame = (function () {
     var s = clamp(Math.floor((wallBot - wallTop - u * 4) / 18), 1, 3), mark = null;
     while (s >= 1) {
       if (wallBot - u * 2 - 18 * s >= wallTop + u * 2) {
-        mark = plaque(buf, w, h, (x0 + x1) / 2, wallBot - u * 2, u, s, false);
+        mark = plaque(buf, w, h, (x0 + x1) / 2, wallBot - u * 2, u, s, false, plain);
         if (mark) break;
       }
       s--;
     }
     /* a wall too shallow for the padded board still carries the tight one */
-    if (!mark && wallBot - u - 14 >= wallTop) mark = plaque(buf, w, h, (x0 + x1) / 2, wallBot - u, u, 1, true);
-    if (!mark) mark = plaque(buf, w, h, (x0 + x1) / 2, lintel, u, 1, true);
+    if (!mark && wallBot - u - 14 >= wallTop) mark = plaque(buf, w, h, (x0 + x1) / 2, wallBot - u, u, 1, true, plain);
+    if (!mark) mark = plaque(buf, w, h, (x0 + x1) / 2, lintel, u, 1, true, plain);
     var pw = mark ? mark.x1 - mark.x0 : Math.round((x1 - x0) * 0.5);
     var leftPost = (x0 + x1) / 2 - pw / 2 - u * 3;
     var rightPost = (x0 + x1) / 2 + pw / 2 + u * 3;
@@ -5539,6 +5553,15 @@ var ZTFrame = (function () {
         /* a bowl with two ears, three feet and a live ember */
         rect(buf, w, h, w / 2 - cw / 2, cy, cw, chh, MID);
         rect(buf, w, h, w / 2 - cw / 2, cy, cw, Math.max(1, Math.round(u / 2)), INK);
+        /* the belly falls dark, with a lit rim and three studs so it is not a blank pale box */
+        rect(buf, w, h, w / 2 - cw / 2, cy + Math.round(chh * 0.55), cw, chh - Math.round(chh * 0.55), DARK);
+        rect(buf, w, h, w / 2 + cw / 2 - Math.max(2, u * 2), cy + u, Math.max(2, u * 2), chh - u, INK);
+        rect(buf, w, h, w / 2 - cw / 2 + Math.max(1, u / 2), cy + u, Math.max(1, u), chh - u * 2, MID);
+        rect(buf, w, h, w / 2 - cw / 2, cy + Math.round(chh * 0.5), cw, Math.max(1, Math.round(u / 2)), INK);
+        for (var k2 = -1; k2 <= 1; k2++) {
+          rect(buf, w, h, w / 2 + k2 * u * 3, cy + u, Math.max(1, u), Math.max(1, u), INK);
+          rect(buf, w, h, w / 2 + k2 * u * 3, cy + u + Math.max(1, u), Math.max(1, u), Math.max(1, Math.round(u / 2)), DARK);
+        }
         rect(buf, w, h, w / 2 - cw / 2, cy + chh - u, cw, u, DARK);
         rect(buf, w, h, w / 2 - cw / 2 - u, cy + u, u * 2, Math.max(1, Math.round(u / 2)), MID);
         rect(buf, w, h, w / 2 + cw / 2 - u, cy + u, u * 2, Math.max(1, Math.round(u / 2)), MID);
@@ -5625,8 +5648,9 @@ var ZTFrame = (function () {
   }
 
   /* paint the whole stage: the view is left alone (the game canvas covers it), everything else is scenery */
-  function paint(W, H, view) {
+  function paint(W, H, view, onTitle) {
     W = Math.max(1, Math.round(W)); H = Math.max(1, Math.round(H));
+    if (onTitle == null) onTitle = titleMode;
     var buf = new Uint8Array(W * H);
     buf.fill(INK);
     var u = Math.max(1, Math.round(view.k || 1));
@@ -5634,7 +5658,7 @@ var ZTFrame = (function () {
     var x1 = clamp(Math.round(view.x + view.w), 0, W), y1 = clamp(Math.round(view.y + view.h), 0, H);
     var rand = rng(W * 73856093 ^ H * 19349663 ^ x0 * 83492791 ^ y0 * 2654435761);
     if (x1 > x0 && y1 > y0) {
-      topPanel(buf, W, H, x0, y0, x1, u, rand);
+      topPanel(buf, W, H, x0, y0, x1, u, rand, onTitle);
       bottomPanel(buf, W, H, y1, u, rand);
       sidePanel(buf, W, H, 0, x0, y0, y1, u, rand, true);
       sidePanel(buf, W, H, x1, W, y0, y1, u, rand, false);
@@ -5658,7 +5682,7 @@ var ZTFrame = (function () {
       var key = [W, H, Math.round(v.x * 4), Math.round(v.y * 4), Math.round(v.w * 4), Math.round(v.h * 4)].join(",");
       if (key === last) return;
       last = key;
-      var buf = paint(W, H, v), img;
+      var buf = paint(W, H, v, titleMode), img;
       if (art.width !== W) art.width = W;
       if (art.height !== H) art.height = H;
       var ctx = art.getContext("2d");
@@ -5673,8 +5697,10 @@ var ZTFrame = (function () {
       }
       ctx.putImageData(img, 0, 0);
       art.__paint = W + "x" + H;
+      art.__title = titleMode ? "1" : "0";
     }
-    function sync() { last = ""; draw(); }
+    repaint = function () { last = ""; draw(); };
+    function sync() { repaint(); }
     /* lo-game fits once when it starts; paint after the first layout and again after the font settles */
     raf(function () { draw(); raf(draw); });
     window.addEventListener("resize", sync);
@@ -5686,7 +5712,14 @@ var ZTFrame = (function () {
     return { draw: sync };
   }
 
-  return { paint: paint, viewRect: viewRect, attach: attach, TONES: TONES, INSET: INSET };
+  function setTitle(on) {
+    var next = !!on;
+    if (next === titleMode) return;
+    titleMode = next;
+    if (repaint) repaint();
+  }
+
+  return { paint: paint, viewRect: viewRect, attach: attach, setTitle: setTitle, TONES: TONES, INSET: INSET };
 })();
 </script>
 <script data-src="src/main.js">
@@ -5874,7 +5907,8 @@ function titleDrawMenu(g) {
   g.text(hint, 80, 130, { align: "center" });
 }
 var TITLE = scene("title", {
-  enter: function () { busy = false; titleMenu = false; titleSel = 0; Snd.music("title"); Snd.amb(null); },
+  enter: function () { busy = false; titleMenu = false; titleSel = 0; ZTFrame.setTitle(true); Snd.music("title"); Snd.amb(null); },
+  exit: function () { ZTFrame.setTitle(false); },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);

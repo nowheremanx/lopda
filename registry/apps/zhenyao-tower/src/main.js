@@ -182,7 +182,8 @@ function titleDrawMenu(g) {
   g.text(hint, 80, 130, { align: "center" });
 }
 var TITLE = scene("title", {
-  enter: function () { busy = false; titleMenu = false; titleSel = 0; Snd.music("title"); Snd.amb(null); },
+  enter: function () { busy = false; titleMenu = false; titleSel = 0; ZTFrame.setTitle(true); Snd.music("title"); Snd.amb(null); },
+  exit: function () { ZTFrame.setTitle(false); },
   draw: function (g) {
     var a = game.time * 0.12, T = town.def.tower;
     frame(g, { x: T.x, y: 4, z: -T.y, yaw: a, pitch: -0.22, dist: 17, time: game.time, fogCull: true }, []);

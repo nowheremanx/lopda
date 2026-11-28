@@ -73,6 +73,7 @@ for (const dpr of [1, 3]) {
     p.on("pageerror", (e) => errors.push(e.message));
     await p.goto(`${base}/registry/apps/zhenyao-tower/index.html`, { waitUntil: "load" });
     await p.waitForFunction(() => window.ZTFrame && document.getElementById("frame-art").__paint === "331x359");
+    assert.equal(await p.evaluate(() => document.getElementById("frame-art").__title), "1", "the title board starts blank");
 
     for (const [w, h] of SIZES) {
       await p.setViewportSize({ width: w, height: h });
@@ -112,6 +113,10 @@ for (const dpr of [1, 3]) {
       await p.waitForTimeout(40);
       assert.equal(await p.evaluate(() => window.__viewTaps), 1, `${w}x${h}: the window still takes the tap`);
     }
+    /* leaving the title puts the shrine's name back on the board */
+    await p.evaluate(() => ZT.goto("town", { entered: true }));
+    await p.waitForFunction(() => document.getElementById("frame-art").__title === "0", null, { timeout: 5000 });
+    assert.equal(await p.evaluate(() => document.getElementById("frame-art").__title), "0", "the name board returns outside the title");
     assert.deepEqual(errors, []);
   });
 }
