@@ -16,6 +16,7 @@ const skip = pw ? false : "playwright is not installed";
 
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json" };
 const SMALL = { width: 331, height: 473 };   // the smallest LCD without the chin pad, sdk/UI.md section 1
+const SHORT = { width: 331, height: 359 };   // a stage shrunk by Safari's bars: the short layout must still fit
 const LARGE = { width: 386, height: 738 };
 let server, base, browser;
 
@@ -74,15 +75,17 @@ async function hear(p, hz, n = 8) {
 }
 
 test("string-tuner: the start screen shows the box art and opens the mic only on a tap", { skip, timeout: 60000 }, async (t) => {
-  for (const size of [SMALL, LARGE]) {
+  for (const size of [SHORT, SMALL, LARGE]) {
     const { p, errors } = await open(t, { size, start: false });
     await p.waitForTimeout(200);
     assert.deepEqual(await p.evaluate(() => window.__log), [], "no mic before the tap");
     const r = await p.evaluate(() => {
       const a = document.getElementById("art").getBoundingClientRect(), g = document.getElementById("go").getBoundingClientRect();
-      return { w: a.width, whole: a.width % 160 === 0, inside: a.top >= 0 && g.bottom <= innerHeight && a.right <= innerWidth, go: g.height >= 44 };
+      return { w: a.width, whole: a.width % 160 === 0, inside: a.top >= 0 && g.bottom <= innerHeight && a.right <= innerWidth && a.left >= 0, go: g.height >= 44 };
     });
     assert.ok(r.whole && r.inside && r.go && r.w >= 160, JSON.stringify(r));
+    /* the largest whole-pixel copy: one on the short stage, two on the others (sdk/UI.md 1) */
+    assert.equal(r.w, size.width === 331 && size.height === 359 ? 160 : 320, `${size.width}x${size.height}`);
     assert.equal(await p.textContent("#go"), "点一下，开话筒");
     await p.tap("#art");
     await p.waitForTimeout(80);
@@ -93,21 +96,73 @@ test("string-tuner: the start screen shows the box art and opens the mic only on
   }
 });
 
-test("string-tuner: everything fits at 331x473 and 386x738, every control is 44 px or more, and nothing scrolls", { skip, timeout: 60000 }, async (t) => {
-  for (const size of [SMALL, LARGE]) {
+test("string-tuner: the art follows a stage that is resized while the splash is up", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { size: SHORT, start: false });
+  const art = () => p.evaluate(() => {
+    const a = document.getElementById("art").getBoundingClientRect(), g = document.getElementById("go").getBoundingClientRect();
+    return { w: a.width, gap: Math.round(g.top - a.bottom), fits: a.top >= 0 && g.bottom <= innerHeight };
+  });
+  assert.deepEqual(await art(), { w: 160, gap: 12, fits: true });
+  await p.setViewportSize(SMALL);
+  await p.waitForTimeout(150);
+  assert.deepEqual(await art(), { w: 320, gap: 12, fits: true }, "the bigger stage gets the bigger copy");
+  await p.setViewportSize(LARGE);
+  await p.waitForTimeout(150);
+  assert.deepEqual(await art(), { w: 320, gap: 12, fits: true });
+  await p.setViewportSize(SHORT);
+  await p.waitForTimeout(150);
+  assert.deepEqual(await art(), { w: 160, gap: 12, fits: true }, "and back down again");
+  assert.deepEqual(errors, []);
+});
+
+test("string-tuner: everything fits at 331x359, 331x473 and 386x738, every control is 44 px or more, and nothing scrolls", { skip, timeout: 60000 }, async (t) => {
+  for (const size of [SHORT, SMALL, LARGE]) {
     const { p, errors } = await open(t, { size });
     const r = await p.evaluate(() => {
       const els = [...document.querySelectorAll("header button, main button, footer button, #meter")];
+      /* the screen's rows must not overlap one another, however tight the stage is */
+      const rows = ["#tuning", "#mwrap", "#read", "#msg", "#strings", "#auto", "#tone"].map((s) => document.querySelector(s).getBoundingClientRect());
+      let over = 0;
+      for (let i = 0; i < rows.length; i++) for (let j = i + 1; j < rows.length; j++) {
+        const a = rows[i], c = rows[j];
+        if (a.left < c.right && c.left < a.right && a.top < c.bottom && c.top < a.bottom) over++;
+      }
+      const m = document.getElementById("meter").getBoundingClientRect(), box = document.getElementById("mwrap").getBoundingClientRect();
       return {
         scroll: document.documentElement.scrollHeight - innerHeight,
         cut: els.filter((e) => { const b = e.getBoundingClientRect(); return b.bottom > innerHeight + 0.5 || b.right > innerWidth + 0.5 || b.left < -0.5; }).length,
         small: [...document.querySelectorAll("button")].filter((b) => b.offsetParent && b.getBoundingClientRect().height < 44).length,
+        over,
+        meter: [Math.round(m.height), Math.round(box.height)],
         strings: document.querySelectorAll("#strings button").length
       };
     });
-    assert.deepEqual(r, { scroll: 0, cut: 0, small: 0, strings: 6 }, `${size.width}x${size.height}`);
+    const { meter, ...rest } = r;
+    assert.deepEqual(rest, { scroll: 0, cut: 0, small: 0, over: 0, strings: 6 }, `${size.width}x${size.height}`);
+    assert.ok(Math.abs(meter[0] - meter[1]) <= 2, `the meter fills its band at ${size.width}x${size.height}: ${meter}`);
     assert.deepEqual(errors, []);
   }
+});
+
+test("string-tuner: a refused mic's long message still fits the short 331x359 stage", { skip, timeout: 60000 }, async (t) => {
+  const { p, errors } = await open(t, { size: SHORT, mic: "denied" });
+  await p.waitForFunction(() => /没开话筒/.test(document.getElementById("msg").textContent));
+  await p.waitForTimeout(150);
+  const r = await p.evaluate(() => {
+    const rows = ["#tuning", "#mwrap", "#read", "#msg", "#strings", "#auto", "#tone"].map((s) => document.querySelector(s).getBoundingClientRect());
+    let over = 0;
+    for (let i = 0; i < rows.length; i++) for (let j = i + 1; j < rows.length; j++) {
+      const a = rows[i], c = rows[j];
+      if (a.left < c.right && c.left < a.right && a.top < c.bottom && c.top < a.bottom) over++;
+    }
+    const msg = document.getElementById("msg").getBoundingClientRect();
+    return { over, msgH: msg.height, bottom: Math.max(...rows.map((b) => b.bottom)), scroll: document.documentElement.scrollHeight - innerHeight };
+  });
+  assert.equal(r.over, 0, JSON.stringify(r));
+  assert.ok(r.msgH >= 44, "the message stays a 44 px target: " + r.msgH);
+  assert.ok(r.bottom <= 359, JSON.stringify(r));
+  assert.equal(r.scroll, 0);
+  assert.deepEqual(errors, []);
 });
 
 test("string-tuner: the mic opens at once; a sharp A shows A2 and its cents, an in-tune low E an octave up lights the lamp", { skip, timeout: 60000 }, async (t) => {
