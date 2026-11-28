@@ -1,0 +1,1793 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>和弦大全</title>
+<!-- Lo-PDA app (lopda/1): a guitar chord dictionary for standard tuning. Every voicing comes from a hand-written table
+of common shapes or from a generator in src/chords.js; nothing is taken from an outside chord database.
+docs/design/chord-book.md. Tap-driven, so no chin pad (sdk/UI.md 1).
+Copyright (c) 2026 Haowei Wu. MIT License. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;color:#1f2a14;font-family:monospace;user-select:none;-webkit-user-select:none}
+body{display:flex;flex-direction:column}
+button{font-family:monospace;font-size:15px;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;box-shadow:3px 3px 0 #1f2a14;
+  min-height:44px;padding:0 8px;cursor:pointer;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #1f2a14}
+button.on,button.sel{background:#1f2a14;color:#a3ad7e}
+button:disabled{color:#4a5a32;border-style:dashed;box-shadow:none}
+header{flex:none;display:flex;gap:8px;padding:8px 12px 0;align-items:stretch}
+#chord{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:4px;text-align:left}
+#cname{font-size:20px;font-weight:bold;overflow-wrap:anywhere}
+#prog,#view{min-width:56px;padding:0 6px}
+main{flex:1;min-height:0;display:flex;flex-direction:column;gap:6px;padding:10px 12px 6px}
+/* the picture takes the height that is left; Draw.paint scales it by a whole number to fit */
+#pwrap{flex:1;min-height:110px;display:flex;align-items:center;justify-content:center;touch-action:pan-y;cursor:pointer;position:relative;overflow:hidden}
+.ghost{position:absolute;pointer-events:none}
+#pic{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+/* every row around the picture has a fixed height, so the space left for it, and so its whole-number scale, is the
+   same for every voicing of every chord: a longer line or a muted string must not shrink the picture (owner, 1.2.0) */
+#qname,#line{font-size:15px;text-align:center;flex:none;height:20px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#line{font-weight:bold}
+#line.tight{font-size:12px}
+#line.deg{font-weight:normal}
+#line.deg b{font-weight:bold}
+#line.deg s{color:#4a5a32}
+.why2{width:100%;max-width:330px;font-size:12px;line-height:14px;text-align:center}
+.why2 p{margin:0;overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.why2 .legend{-webkit-line-clamp:1;white-space:nowrap;color:#4a5a32}
+#tones{display:flex;justify-content:center;align-items:center;gap:6px;flex:none;height:44px}
+/* one cell per string, low E first; a sounding string is a button that plays it alone */
+.tone{display:flex;flex-direction:column;align-items:center;justify-content:center;box-sizing:border-box;width:44px;min-width:44px;
+  height:44px;padding:2px 0;line-height:1.15}
+.tone.mute{font-size:15px;color:#4a5a32}
+.tone b{font-size:15px}
+.tone span{font-size:13px;color:#4a5a32}
+footer{flex:none;display:flex;gap:8px;padding:0 12px 12px}
+footer button{flex:1;min-width:0}
+#strum{flex:1.4;font-weight:bold}
+/* screens over the main one: the picker and the finder */
+.screen{position:fixed;inset:0;background:#a3ad7e;display:none;flex-direction:column}
+.screen.open{display:flex}
+.screen header{align-items:center;padding:8px 12px}
+.screen header b{flex:1;font-size:17px;text-align:center;overflow-wrap:anywhere}
+.screen .body{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 12px 12px}
+.screen h3{font-size:13px;color:#4a5a32;margin:12px 0 6px;font-weight:normal}
+#sbar{display:flex;gap:8px}
+#q{flex:1;min-width:0;font-family:monospace;font-size:16px;color:#1f2a14;background:#a3ad7e;border:2px solid #1f2a14;
+  padding:0 8px;min-height:44px;box-sizing:border-box;border-radius:0;outline:none}
+#q::placeholder{color:#4a5a32}
+#msg{font-size:15px;min-height:20px;margin-top:6px}
+.grid4,.grid3,.grid2{display:grid;gap:8px}
+.grid4{grid-template-columns:repeat(4,1fr)}
+.grid3{grid-template-columns:repeat(3,1fr)}
+.grid2{grid-template-columns:repeat(2,1fr)}
+.grid4 button,.grid3 button,.grid2 button{min-width:0;padding:0 4px;box-shadow:none}
+.qual{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2px 4px;line-height:1.15}
+.qual b{font-size:15px}
+.qual span{font-size:13px}
+#tofind{width:100%;margin-top:16px}
+#vol{margin-top:0}
+/* the finder: x / o over each string, then five frets of six cells */
+#fdown,#fup{min-width:48px;font-size:20px;font-weight:bold}
+.six{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-top:6px}
+.six button{min-width:0;padding:0;box-shadow:none}
+.six .cell{font-size:13px;color:#4a5a32}
+.six .cell.sel{color:#a3ad7e;font-size:15px;font-weight:bold}
+.six .xo{font-weight:bold}
+#fres{flex:none;text-align:center;padding:0 12px;min-height:44px}
+#fname{font-size:20px;font-weight:bold;overflow-wrap:anywhere}
+#falt{font-size:15px;min-height:20px;overflow-wrap:anywhere}
+#fact{flex:none;display:flex;gap:8px;padding:8px 12px 12px}
+#fact button{flex:1;min-width:0}
+#fsee{flex:2}
+/* the progressions: one card each, the chord you came from underlined, the one sounding filled */
+.card{border-top:2px solid #1f2a14;padding:10px 0 12px}
+.card:first-child{border-top:0;padding-top:4px}
+.card.focus{outline:2px dashed #4a5a32;outline-offset:2px}
+.ghead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.ghead b{font-size:17px;overflow-wrap:anywhere}
+.ghead span{font-size:14px;color:#4a5a32;flex:none}
+.grn{font-size:14px;color:#4a5a32;margin-top:2px;overflow-wrap:anywhere}
+.chips{margin-top:8px}
+.chips button{font-size:14px}
+.chips button.me{font-weight:bold;text-decoration:underline;text-underline-offset:3px}
+.grow{display:flex;align-items:center;gap:8px;margin-top:8px}
+.grole{flex:1;font-size:14px;overflow-wrap:anywhere}
+.gplay{min-width:72px;box-shadow:none}
+.why{font-size:14px;line-height:1.45;margin:8px 0 0}
+</style>
+</head>
+<body>
+<header><button id="chord"><span id="cname"></span><span>▾</span></button><button id="prog"></button><button id="view"></button></header>
+<main>
+  <div id="pwrap"><canvas id="pic" width="104" height="104"></canvas></div>
+  <div id="qname"></div>
+  <div id="line"></div>
+  <div id="tones"></div>
+</main>
+<footer><button id="prev"></button><button id="strum"></button><button id="next"></button></footer>
+
+<div id="picker" class="screen">
+  <header><button id="pback"></button><b id="ptitle"></b><button id="pok"></button></header>
+  <div class="body" id="pmain">
+    <div id="sbar"><input id="q" type="text" autocomplete="off" autocapitalize="off" spellcheck="false"><button id="qgo"></button></div>
+    <div id="msg"></div>
+    <h3 id="rootH"></h3><div id="roots" class="grid4"></div>
+    <div id="quals"></div>
+    <h3 id="bassH"></h3><div id="basses" class="grid4"></div>
+    <h3 id="recentH"></h3><div id="recent" class="grid4"></div>
+    <button id="tofind"></button>
+    <h3 id="sortH"></h3><div id="sorts" class="grid2"></div>
+    <h3 id="volH"></h3><div id="vol" class="grid3"></div>
+  </div>
+</div>
+
+<div id="progs" class="screen">
+  <header><button id="gback"></button><b id="gtitle"></b></header>
+  <div class="body" id="glist"></div>
+</div>
+<div id="finder" class="screen">
+  <header><button id="fback"></button><button id="fdown">-</button><b id="fpos"></b><button id="fup">+</button></header>
+  <div id="fres"><div id="fname"></div><div id="falt"></div></div>
+  <div class="body">
+    <div id="xo" class="six"></div>
+    <div id="frets" class="six"></div>
+  </div>
+  <div id="fact"><button id="fplay"></button><button id="fsee"></button></div>
+</div>
+
+<script data-src="src/chords.js">
+/* 和弦大全 / Chords: the chord maths, free of the DOM and of PAD so tests/chord-book.test.mjs runs it in Node.
+   Standard tuning only. Every voicing is either from the hand-written table of common shapes below or computed by
+   generate(); nothing comes from an outside chord database (docs/design/chord-book.md section 2).
+   MIT License. Copyright (c) 2026 Haowei Wu. */
+var Chords = (function () {
+  "use strict";
+
+  var OPEN = [40, 45, 50, 55, 59, 64];          /* E2 A2 D3 G3 B3 E4, low string first */
+  var MAX_FRET = 15, SPAN = 3, LIMIT = 24;
+  /* the note names shown, the same set the four-track uses */
+  var NAMES = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  var LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+
+  /* The 19 qualities of version 1, in the order the picker lists them (section 2.1). iv: semitones above the root;
+     lab: how each interval is written; opt: intervals a voicing may leave out (the fifth). group: the picker's
+     heading; common: how readily identify() picks it when two names fit the same notes. */
+  var QUALS = [
+    { id: "",      zh: "大三",   en: "major",       iv: [0, 4, 7],         lab: ["R", "3", "5"],                 opt: [],  group: 0, common: 1 },
+    { id: "m",     zh: "小三",   en: "minor",       iv: [0, 3, 7],         lab: ["R", "b3", "5"],                opt: [],  group: 0, common: 1 },
+    { id: "dim",   zh: "减三",   en: "diminished",  iv: [0, 3, 6],         lab: ["R", "b3", "b5"],               opt: [],  group: 0, common: 0.4 },
+    { id: "aug",   zh: "增三",   en: "augmented",   iv: [0, 4, 8],         lab: ["R", "3", "#5"],                opt: [],  group: 0, common: 0.4 },
+    { id: "5",     zh: "强力",   en: "power",       iv: [0, 7],            lab: ["R", "5"],                      opt: [],  group: 0, common: 0.5 },
+    { id: "7",     zh: "属七",   en: "dominant 7",  iv: [0, 4, 7, 10],     lab: ["R", "3", "5", "b7"],           opt: [7], group: 1, common: 0.8 },
+    { id: "maj7",  zh: "大七",   en: "major 7",     iv: [0, 4, 7, 11],     lab: ["R", "3", "5", "7"],            opt: [7], group: 1, common: 0.7 },
+    { id: "m7",    zh: "小七",   en: "minor 7",     iv: [0, 3, 7, 10],     lab: ["R", "b3", "5", "b7"],          opt: [7], group: 1, common: 0.8 },
+    { id: "m7b5",  zh: "半减七", en: "half-dim",    iv: [0, 3, 6, 10],     lab: ["R", "b3", "b5", "b7"],         opt: [],  group: 1, common: 0.5 },
+    { id: "dim7",  zh: "减七",   en: "dim 7",       iv: [0, 3, 6, 9],      lab: ["R", "b3", "b5", "bb7"],        opt: [],  group: 1, common: 0.5 },
+    { id: "mmaj7", zh: "小大七", en: "minor maj7",  iv: [0, 3, 7, 11],     lab: ["R", "b3", "5", "7"],           opt: [7], group: 1, common: 0.3 },
+    { id: "sus2",  zh: "挂二",   en: "sus2",        iv: [0, 2, 7],         lab: ["R", "2", "5"],                 opt: [],  group: 2, common: 0.6 },
+    { id: "sus4",  zh: "挂四",   en: "sus4",        iv: [0, 5, 7],         lab: ["R", "4", "5"],                 opt: [],  group: 2, common: 0.6 },
+    { id: "7sus4", zh: "属七挂四", en: "7sus4",     iv: [0, 5, 7, 10],     lab: ["R", "4", "5", "b7"],           opt: [7], group: 2, common: 0.5 },
+    { id: "add9",  zh: "加九",   en: "add9",        iv: [0, 2, 4, 7],      lab: ["R", "9", "3", "5"],            opt: [7], group: 3, common: 0.5 },
+    { id: "6",     zh: "大六",   en: "major 6",     iv: [0, 4, 7, 9],      lab: ["R", "3", "5", "6"],            opt: [7], group: 3, common: 0.4 },
+    { id: "m6",    zh: "小六",   en: "minor 6",     iv: [0, 3, 7, 9],      lab: ["R", "b3", "5", "6"],           opt: [7], group: 3, common: 0.4 },
+    { id: "9",     zh: "属九",   en: "dominant 9",  iv: [0, 2, 4, 7, 10],  lab: ["R", "9", "3", "5", "b7"],      opt: [7], group: 4, common: 0.4 },
+    { id: "m9",    zh: "小九",   en: "minor 9",     iv: [0, 2, 3, 7, 10],  lab: ["R", "9", "b3", "5", "b7"],     opt: [7], group: 4, common: 0.4 }
+  ];
+  var GROUPS = [{ zh: "三和弦", en: "Triads" }, { zh: "七和弦", en: "Sevenths" }, { zh: "挂留", en: "Suspended" },
+    { zh: "加音、六", en: "Added, sixths" }, { zh: "九和弦", en: "Ninths" }];
+  var QI = {};
+  QUALS.forEach(function (q, i) { QI[q.id] = i; });
+
+  /* Names people write for each quality (section 2.2). Looked up as written first, then lower-cased for the
+     longer ones, so "Cmaj7" and "CMAJ7" both work but "CM" (major) and "Cm" (minor) stay apart. */
+  var ALIAS = {
+    "": "", "maj": "", "M": "", "major": "",
+    "m": "m", "min": "m", "-": "m", "minor": "m",
+    "dim": "dim", "°": "dim", "o": "dim",
+    "aug": "aug", "+": "aug", "+5": "aug", "#5": "aug",
+    "5": "5",
+    "7": "7", "dom7": "7",
+    "maj7": "maj7", "M7": "maj7", "Δ": "maj7", "Δ7": "maj7", "ma7": "maj7", "j7": "maj7",
+    "m7": "m7", "min7": "m7", "-7": "m7",
+    "m7b5": "m7b5", "ø": "m7b5", "ø7": "m7b5", "m7-5": "m7b5", "-7b5": "m7b5", "min7b5": "m7b5",
+    "dim7": "dim7", "°7": "dim7", "o7": "dim7",
+    "mmaj7": "mmaj7", "mM7": "mmaj7", "m(maj7)": "mmaj7", "mΔ": "mmaj7", "mΔ7": "mmaj7", "-Δ7": "mmaj7", "minmaj7": "mmaj7",
+    "sus2": "sus2", "sus4": "sus4", "sus": "sus4", "7sus4": "7sus4", "7sus": "7sus4",
+    "add9": "add9", "add2": "add9", "(add9)": "add9",
+    "6": "6", "maj6": "6", "M6": "6", "m6": "m6", "min6": "m6", "-6": "m6",
+    "9": "9", "m9": "m9", "min9": "m9", "-9": "m9"
+  };
+  var ALIAS_LOWER = {};
+  Object.keys(ALIAS).forEach(function (k) { if (k.length >= 3) ALIAS_LOWER[k.toLowerCase()] = ALIAS[k]; });
+
+  function mod12(n) { return ((n % 12) + 12) % 12; }
+  function pcOf(s) {
+    var m = /^([A-Ga-g])([#b]*)$/.exec(s);
+    if (!m) return null;
+    var pc = LETTER[m[1].toUpperCase()];
+    for (var i = 0; i < m[2].length; i++) pc += m[2][i] === "#" ? 1 : -1;
+    return mod12(pc);
+  }
+  /* "C#m7b5", "d/f#", "Bb maj7", "E♭m" -> {root, q, bass} with bass null for a plain chord; null if it is not a chord */
+  function parse(text) {
+    if (typeof text !== "string") return null;
+    var s = text.replace(/\s+/g, "").replace(/♯/g, "#").replace(/♭/g, "b");
+    var m = /^([A-Ga-g])(#|bb|b)?(.*?)(?:\/([A-Ga-g](?:#|b)?))?$/.exec(s);
+    if (!m) return null;
+    var root = pcOf(m[1] + (m[2] || ""));
+    var q = Object.prototype.hasOwnProperty.call(ALIAS, m[3]) ? ALIAS[m[3]]
+      : Object.prototype.hasOwnProperty.call(ALIAS_LOWER, m[3].toLowerCase()) && m[3].length >= 3 ? ALIAS_LOWER[m[3].toLowerCase()] : null;
+    if (root === null || q === null) return null;
+    var bass = m[4] ? pcOf(m[4]) : null;
+    if (m[4] && bass === null) return null;
+    if (bass === root) bass = null;
+    return { root: root, q: q, bass: bass };
+  }
+  function name(c) { return NAMES[c.root] + c.q + (c.bass === null || c.bass === undefined ? "" : "/" + NAMES[c.bass]); }
+  function qual(id) { return Object.prototype.hasOwnProperty.call(QI, id) ? QUALS[QI[id]] : null; }
+
+  /* the chord's notes and how each is written, bass first when it is not a chord tone */
+  function tones(c) {
+    var Q = qual(c.q), out = [];
+    if (c.bass !== null && c.bass !== undefined && Q.iv.map(function (i) { return mod12(c.root + i); }).indexOf(c.bass) < 0)
+      out.push({ pc: c.bass, lab: "/", iv: null });
+    /* listed as they stack up from the root: a 9 is a ninth (14 semitones), not a second, so it comes last */
+    var up = [];
+    for (var i = 0; i < Q.iv.length; i++) up.push({ pc: mod12(c.root + Q.iv[i]), lab: Q.lab[i], iv: Q.lab[i] === "9" ? Q.iv[i] + 12 : Q.iv[i] });
+    up.sort(function (a, b) { return a.iv - b.iv; });
+    return out.concat(up);
+  }
+
+  /* the degree of any pitch class above the chord's root: the chord's own tones as the chord writes them (4 in a sus4,
+     6 in a 6 chord), every other note as an upper extension, the way a player looks for one to add (11, not 4) */
+  var EXT = ["R", "b9", "9", "b3", "3", "11", "#11", "5", "b13", "13", "b7", "7"];
+  function degree(c, pc) {
+    var Q = qual(c.q);
+    for (var i = 0; i < Q.iv.length; i++) if (mod12(c.root + Q.iv[i]) === pc) return { lab: Q.lab[i], tone: true };
+    return { lab: EXT[mod12(pc - c.root)], tone: false };
+  }
+
+  /* what each string of a voicing sounds, low E first: null for a muted string, else its pitch and the degree it is in the
+     chord (R, 3, 5, b7, 9...), "/" for a slash chord's extra bass. An open C is x, R, 3, 5, R, 3: five notes, not three. */
+  function strings(frets, c) {
+    var ts = tones(c), out = [];
+    for (var s = 0; s < 6; s++) {
+      if (frets[s] < 0) { out.push(null); continue; }
+      var m = OPEN[s] + frets[s], pc = mod12(m), lab = "";
+      for (var i = 0; i < ts.length; i++) if (ts[i].pc === pc) { lab = ts[i].lab; break; }
+      out.push({ s: s, midi: m, pc: pc, lab: lab });
+    }
+    return out;
+  }
+
+  /* ---------------- the hand-written shapes (section 2.3) ---------------- */
+  function fr(s) {
+    var out = [], i = 0;
+    while (i < s.length) {
+      if (s[i] === "(") { var j = s.indexOf(")", i); out.push(parseInt(s.slice(i + 1, j), 10)); i = j + 1; }
+      else { out.push(s[i] === "x" ? -1 : parseInt(s[i], 10)); i++; }
+    }
+    return out;
+  }
+  /* open chords: [chord, frets, fingers] in the order they are best known; T in fingers is the thumb */
+  var OPENS = [
+    ["C", "x32010", "032010"], ["A", "x02220", "001230"], ["G", "320003", "210003"], ["G", "320033", "210034"],
+    ["E", "022100", "023100"], ["D", "xx0232", "000132"],
+    ["Am", "x02210", "002310"], ["Em", "022000", "023000"], ["Dm", "xx0231", "000231"],
+    ["C7", "x32310", "032410"], ["A7", "x02020", "002030"], ["G7", "320001", "320001"], ["E7", "020100", "020100"],
+    ["D7", "xx0212", "000213"], ["B7", "x21202", "021304"],
+    ["Am7", "x02010", "002010"], ["Em7", "022030", "023040"], ["Em7", "020000", "020000"], ["Dm7", "xx0211", "000211"],
+    ["Cmaj7", "x32000", "032000"], ["Amaj7", "x02120", "002130"], ["Gmaj7", "320002", "320001"], ["Emaj7", "021100", "031200"],
+    ["Dmaj7", "xx0222", "000111"], ["Fmaj7", "xx3210", "003210"],
+    ["Asus2", "x02200", "001200"], ["Dsus2", "xx0230", "000130"], ["Esus4", "022200", "023400"], ["Asus4", "x02230", "001230"],
+    ["Dsus4", "xx0233", "000134"], ["A7sus4", "x02030", "002030"], ["E7sus4", "020200", "020300"],
+    ["Cadd9", "x32030", "021030"], ["D6", "xx0202", "000203"], ["A6", "x02222", "001111"], ["Am6", "x02212", "002314"],
+    ["Em6", "022020", "023040"], ["C9", "x32333", "021333"], ["E9", "020102", "020103"],
+    ["E5", "022xxx", "012000"], ["A5", "x022xx", "001200"], ["D5", "xx023x", "000120"],
+    ["Edim7", "012020", "012030"], ["Ammaj7", "x02110", "003120"],
+    /* slash chords */
+    ["D/F#", "2x0232", "T00132"], ["G/B", "x20003", "010003"], ["C/G", "332010", "432010"], ["C/E", "032010", "032010"],
+    ["Am/G", "3x2210", "402310"], ["F/C", "x33211", "034211"], ["D/A", "x00232", "000132"], ["Am/E", "002210", "002310"]
+  ];
+  /* movable shapes: [quality, string the root is on (0 = low E), offsets from the root's fret (null = muted),
+     fingers, tier]. E and A shapes are the barre chords everyone learns (tier 80); D and C shapes less so (60). */
+  var MOVABLE = [
+    ["", 0, [0, 2, 2, 1, 0, 0], "134211", 80], ["m", 0, [0, 2, 2, 0, 0, 0], "134111", 80],
+    ["7", 0, [0, 2, 0, 1, 0, 0], "131211", 80], ["m7", 0, [0, 2, 0, 0, 0, 0], "131111", 80],
+    ["maj7", 0, [0, null, 1, 1, 0, null], "103420", 80], ["7sus4", 0, [0, 2, 0, 2, 0, 0], "131411", 80],
+    ["m7b5", 0, [0, null, 0, 0, -1, null], "203410", 80], ["5", 0, [0, 2, 2, null, null, null], "134000", 80],
+    ["dim7", 0, [0, null, -1, 0, -1, null], "201310", 80],
+    ["", 1, [null, 0, 2, 2, 2, 0], "013331", 80], ["m", 1, [null, 0, 2, 2, 1, 0], "013421", 80],
+    ["7", 1, [null, 0, 2, 0, 2, 0], "013141", 80], ["m7", 1, [null, 0, 2, 0, 1, 0], "013121", 80],
+    ["maj7", 1, [null, 0, 2, 1, 2, 0], "013241", 80], ["sus2", 1, [null, 0, 2, 2, 0, 0], "013411", 80],
+    ["sus4", 1, [null, 0, 2, 2, 3, 0], "012341", 80], ["6", 1, [null, 0, 2, 2, 2, 2], "013333", 80],
+    ["9", 1, [null, 0, -1, 0, 0, 0], "021333", 80], ["m9", 1, [null, 0, -2, 0, 0, 0], "021333", 80],
+    ["dim7", 1, [null, 0, 1, -1, 1, null], "023140", 80], ["m7b5", 1, [null, 0, 1, 0, 1, null], "013240", 80],
+    ["dim", 1, [null, 0, 1, 2, 1, null], "012430", 80], ["aug", 1, [null, 0, -1, -2, -2, null], "032110", 80],
+    ["mmaj7", 1, [null, 0, 2, 1, 1, 0], "014231", 80], ["m6", 1, [null, 0, null, -1, 1, 0], "020143", 80],
+    ["add9", 1, [null, 0, -1, -3, 0, null], "032140", 80], ["5", 1, [null, 0, 2, 2, null, null], "013400", 80],
+    ["", 2, [null, null, 0, 2, 3, 2], "001243", 60], ["m", 2, [null, null, 0, 2, 3, 1], "001342", 60],
+    ["", 1, [null, 3, 2, 0, 1, 0], "043121", 60]
+  ];
+  /* the C shape's root sits on the A string three frets above its lowest fret: its offsets are counted from that
+     lowest fret, and ROOT_AT says where the root is */
+  var ROOT_AT = { 29: 3 };
+
+  function fingersOf(s) { return s.split("").map(function (c) { return c === "T" ? 5 : parseInt(c, 10); }); }
+
+  var SHAPES = null;   /* chord key -> list of {frets, fingers, tier, order}, built once */
+  function key(c) { return c.root + ":" + c.q + ":" + (c.bass === null || c.bass === undefined ? "" : c.bass); }
+  function addShape(c, frets, fingers, tier, order) {
+    var k = key(c);
+    (SHAPES[k] = SHAPES[k] || []).push({ frets: frets, fingers: fingers, tier: tier, order: order });
+  }
+  function shapes() {
+    if (SHAPES) return SHAPES;
+    SHAPES = {};
+    OPENS.forEach(function (o, i) { addShape(parse(o[0]), fr(o[1]), fingersOf(o[2]), 100, i); });
+    MOVABLE.forEach(function (m, mi) {
+      var Q = qual(m[0]), s = m[1], off = m[2], rootAt = ROOT_AT[mi] || 0;
+      var low = Math.min.apply(null, off.filter(function (o) { return o !== null; }));
+      for (var root = 0; root < 12; root++) {
+        var r = mod12(root - OPEN[s] - rootAt);
+        if (r + low < 0) r += 12;
+        for (; r + Math.max.apply(null, off.filter(function (o) { return o !== null; })) <= MAX_FRET; r += 12) {
+          var frets = off.map(function (o) { return o === null ? -1 : r + o; });
+          /* a shape that lands on the nut with every fret open is an open chord already in OPENS, or not a shape */
+          if (frets.every(function (f) { return f <= 0; })) continue;
+          addShape({ root: root, q: Q.id, bass: null }, frets, fingersOf(m[3]).map(function (f, i) { return frets[i] === 0 ? 0 : f; }), m[4], 1000 + mi);
+        }
+      }
+    });
+    return SHAPES;
+  }
+
+  /* ---------------- the generator (section 2.4) ---------------- */
+  function midiOf(frets) { var out = []; for (var i = 0; i < 6; i++) if (frets[i] >= 0) out.push(OPEN[i] + frets[i]); return out; }
+  /* which fingers a hand needs: a barre on the lowest fret when two or more strings share it and nothing between
+     them is lower (an open or muted string cannot sit under a barre); one finger for every other fretted note */
+  function fingerCount(frets) {
+    var lo = Infinity, i, n = 0;
+    for (i = 0; i < 6; i++) if (frets[i] > 0) { n++; if (frets[i] < lo) lo = frets[i]; }
+    if (!n) return { n: 0, barre: null };
+    var a = -1, z = -1;
+    for (i = 0; i < 6; i++) if (frets[i] === lo) { if (a < 0) a = i; z = i; }
+    var count = 0;
+    for (i = a; i <= z; i++) if (frets[i] === lo) count++;
+    if (count >= 2) {
+      var ok = true;
+      for (i = a; i <= z; i++) if (frets[i] < lo) ok = false;
+      if (ok) return { n: n - count + 1, barre: { fret: lo, from: a, to: z } };
+    }
+    return { n: n, barre: null };
+  }
+  /* The barre a shape's own fingers show (1.4.1): the lowest fret where finger 1 holds two or more sounding strings,
+     spanning the first and the last of them. A string under that span that is open, muted or lower than the barre means
+     the finger cannot be lying across it, so there is no barre. Hand-written shapes know their fingering; fingerCount
+     guesses from the frets alone, which would turn D xx0232 (three separate fingers) into a barre. */
+  function barreFromFingers(frets, fingers) {
+    var held = [], best = Infinity, i, j, a = -1, z = -1;
+    for (i = 0; i < 6; i++) if (frets[i] > 0 && fingers[i] === 1) held.push(i);
+    for (i = 0; i < held.length; i++) {
+      var f = frets[held[i]], n = 0;
+      for (j = 0; j < held.length; j++) if (frets[held[j]] === f) n++;
+      if (n >= 2 && f < best) best = f;
+    }
+    if (best === Infinity) return null;
+    for (i = 0; i < 6; i++) if (frets[i] === best && fingers[i] === 1) { if (a < 0) a = i; z = i; }
+    for (i = a; i <= z; i++) if (frets[i] < best) return null;
+    return { fret: best, from: a, to: z };
+  }
+  /* fingers for a computed voicing: index on the barre, then the other notes by fret and string */
+  function assignFingers(frets) {
+    var fc = fingerCount(frets), out = [0, 0, 0, 0, 0, 0], notes = [], i, f = 1;
+    for (i = 0; i < 6; i++) if (frets[i] > 0) {
+      if (fc.barre && frets[i] === fc.barre.fret && i >= fc.barre.from && i <= fc.barre.to) out[i] = 1;
+      else notes.push(i);
+    }
+    if (fc.barre) f = 2;
+    notes.sort(function (x, y) { return frets[x] - frets[y] || x - y; });
+    for (i = 0; i < notes.length; i++) out[notes[i]] = Math.min(4, f + i);
+    return out;
+  }
+  function position(frets) {
+    var lo = Infinity, hi = 0, open = false;
+    for (var i = 0; i < 6; i++) { if (frets[i] > 0) { lo = Math.min(lo, frets[i]); hi = Math.max(hi, frets[i]); } if (frets[i] === 0) open = true; }
+    if (lo === Infinity) return 0;
+    return open && hi <= 4 ? 0 : lo;
+  }
+  /* how easy and familiar a voicing is: higher is more common (weights of section 2.4) */
+  function score(frets) {
+    var sounding = 0, lo = Infinity, hi = 0, open = 0, i, first = -1, gaps = 0;
+    for (i = 0; i < 6; i++) {
+      if (frets[i] >= 0) { sounding++; if (first < 0) first = i; }
+      if (frets[i] > 0) { lo = Math.min(lo, frets[i]); hi = Math.max(hi, frets[i]); }
+      if (frets[i] === 0) open++;
+    }
+    for (i = first; i < 6; i++) if (frets[i] < 0) gaps++;
+    var fc = fingerCount(frets), span = lo === Infinity ? 0 : hi - lo, low = lo === Infinity ? 0 : lo;
+    var s = sounding - 0.7 * fc.n - 0.8 * span - 0.25 * low - 2 * gaps;
+    if (open && low <= 3) s += 2.5;
+    if (fc.barre) s -= 1;
+    return s;
+  }
+  /* every voicing of a chord within a 4-fret hand position: the lowest note is the bass (the root, or a slash chord's
+     bass), every note is a chord tone, every required tone is there, at least 4 strings (2 for a power chord), muted
+     strings only at the low side plus one in the middle, at most 4 fingers. */
+  function generate(c) {
+    var Q = qual(c.q), bass = c.bass === null || c.bass === undefined ? c.root : c.bass;
+    var allowed = [], need = [], i;
+    for (i = 0; i < 12; i++) allowed.push(false);
+    Q.iv.forEach(function (v) { allowed[mod12(c.root + v)] = true; if (Q.opt.indexOf(v) < 0) need.push(mod12(c.root + v)); });
+    allowed[bass] = true;
+    if (need.indexOf(bass) < 0) need.push(bass);
+    var minStrings = Q.id === "5" ? 2 : Math.min(4, Q.iv.length + 1);
+    var seen = {}, out = [], frets = [0, 0, 0, 0, 0, 0];
+    function finish() {
+      var notes = midiOf(frets);
+      if (notes.length < minStrings) return;
+      var lowest = Math.min.apply(null, notes);
+      if (mod12(lowest) !== bass) return;
+      var have = {};
+      notes.forEach(function (n) { have[mod12(n)] = true; });
+      for (var k = 0; k < need.length; k++) if (!have[need[k]]) return;
+      if (fingerCount(frets).n > 4) return;
+      var id = frets.join(",");
+      if (seen[id]) return;
+      seen[id] = true;
+      out.push(frets.slice());
+    }
+    function walk(s, lo, hi, started, gaps) {
+      if (s === 6) { finish(); return; }
+      /* muted */
+      if (!started || gaps === 0) { frets[s] = -1; walk(s + 1, lo, hi, started, started ? gaps + 1 : 0); }
+      /* open */
+      if (allowed[mod12(OPEN[s])]) { frets[s] = 0; walk(s + 1, lo, hi, true, gaps); }
+      for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) { frets[s] = f; walk(s + 1, lo, hi, true, gaps); }
+    }
+    for (var start = 1; start + SPAN <= MAX_FRET; start++) walk(0, start, start + SPAN, false, 0);
+    return out;
+  }
+
+  var CACHE = {};
+  /* the voicings of a chord, most common first (section 2.5): the hand-written shapes by tier, then the computed ones
+     by score, at most LIMIT. Each is {frets, fingers, tier, pos, rank, barre}. */
+  function voicings(c) {
+    var k = key(c);
+    if (CACHE[k]) return CACHE[k];
+    var list = [], seen = {};
+    (shapes()[k] || []).forEach(function (s) {
+      var id = s.frets.join(",");
+      if (seen[id]) return;
+      seen[id] = true;
+      /* among the barre shapes the one lower on the neck wins: Bm is x24432 before 799777 */
+      list.push({ frets: s.frets, fingers: s.fingers, tier: s.tier,
+        rank: s.tier - s.order * 0.001 + (s.tier === 100 ? 0 : score(s.frets) - 0.3 * position(s.frets)) });
+    });
+    generate(c).forEach(function (f) {
+      var id = f.join(",");
+      if (seen[id]) return;
+      seen[id] = true;
+      list.push({ frets: f, fingers: assignFingers(f), tier: 0, rank: score(f) });
+    });
+    list.sort(function (a, b) { return b.rank - a.rank; });
+    list = list.slice(0, LIMIT);
+    list.forEach(function (v) {
+      v.pos = position(v.frets);
+      v.barre = v.tier > 0 ? barreFromFingers(v.frets, v.fingers) : fingerCount(v.frets).barre;
+    });
+    CACHE[k] = list;
+    return list;
+  }
+  /* the same voicings in "position" order: open chords first, then up the neck, the common ones first at each fret */
+  function byPosition(list) {
+    return list.slice().sort(function (a, b) { return a.pos - b.pos || b.rank - a.rank; });
+  }
+  function fretText(frets) {
+    return frets.map(function (f) { return f < 0 ? "x" : f < 10 ? String(f) : "(" + f + ")"; }).join("");
+  }
+
+  /* ---------------- naming a voicing (section 3.4) ---------------- */
+  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 19.
+     The notes' pitch classes must hold every required tone of the quality and nothing outside it but the bass. */
+  function identify(frets) {
+    var notes = midiOf(frets);
+    if (notes.length < 2) return [];
+    var bass = mod12(Math.min.apply(null, notes)), have = {}, set = [];
+    notes.forEach(function (n) { if (!have[mod12(n)]) { have[mod12(n)] = true; set.push(mod12(n)); } });
+    var found = [];
+    for (var root = 0; root < 12; root++) {
+      if (!have[root]) continue;
+      for (var qi = 0; qi < QUALS.length; qi++) {
+        var Q = QUALS[qi], want = {}, ok = true, missing = 0;
+        Q.iv.forEach(function (v) { want[mod12(root + v)] = true; });
+        for (var j = 0; j < Q.iv.length; j++) {
+          if (!have[mod12(root + Q.iv[j])]) { if (Q.opt.indexOf(Q.iv[j]) >= 0) missing++; else ok = false; }
+        }
+        if (!ok) continue;
+        var slash = bass !== root, extra = 0;
+        set.forEach(function (pc) { if (!want[pc] && !(slash && pc === bass)) extra++; });
+        if (extra) continue;
+        /* a bass that is not a chord tone may appear only once, as the bass */
+        if (Q.id === "5" && set.length > 2) continue;
+        var s = (slash ? -1 : 2) + Q.common - 0.5 * missing;
+        found.push({ root: root, q: Q.id, bass: slash ? bass : null, score: s });
+      }
+    }
+    found.sort(function (a, b) { return b.score - a.score; });
+    return found.slice(0, 3);
+  }
+
+  return {
+    OPEN: OPEN, NAMES: NAMES, QUALS: QUALS, GROUPS: GROUPS, LIMIT: LIMIT, MAX_FRET: MAX_FRET,
+    OPENS: OPENS, MOVABLE: MOVABLE, ROOT_AT: ROOT_AT,
+    parse: parse, name: name, qual: qual, tones: tones, strings: strings, degree: degree, mod12: mod12, fr: fr,
+    shapes: shapes, generate: generate, voicings: voicings, byPosition: byPosition, score: score,
+    fingerCount: fingerCount, assignFingers: assignFingers, barreFromFingers: barreFromFingers, position: position,
+    midiOf: midiOf, fretText: fretText,
+    identify: identify
+  };
+})();
+</script>
+<script data-src="src/draw.js">
+/* 和弦大全 / Chords: the pictures, drawn as tone buffers (0 ink, 1 dark, 2 mid, 3 paper) and put on a canvas with
+   putImageData at one canvas pixel per buffer pixel; CSS scales the canvas by a whole number (sdk/UI.md 11).
+   MIT License. Copyright (c) 2026 Haowei Wu. */
+var Draw = (function () {
+  "use strict";
+  var INK = 0, DARK = 1, MID = 2, PAPER = 3;
+  var RGB = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
+
+  /* 5 x 7 digits, and T for the thumb */
+  var GLYPH = {
+    "0": ["01110", "10001", "10011", "10101", "11001", "10001", "01110"],
+    "1": ["00100", "01100", "00100", "00100", "00100", "00100", "01110"],
+    "2": ["01110", "10001", "00001", "00010", "00100", "01000", "11111"],
+    "3": ["11110", "00001", "00001", "01110", "00001", "00001", "11110"],
+    "4": ["00010", "00110", "01010", "10010", "11111", "00010", "00010"],
+    "5": ["11111", "10000", "11110", "00001", "00001", "10001", "01110"],
+    "6": ["00110", "01000", "10000", "11110", "10001", "10001", "01110"],
+    "7": ["11111", "00001", "00010", "00100", "01000", "01000", "01000"],
+    "8": ["01110", "10001", "10001", "01110", "10001", "10001", "01110"],
+    "9": ["01110", "10001", "10001", "01111", "00001", "00010", "01100"],
+    "T": ["11111", "00100", "00100", "00100", "00100", "00100", "00100"]
+  };
+
+  /* 3 x 5 letters for the degree map, so "b13" fits between two strings */
+  var SMALL = {
+    "1": ["010", "110", "010", "010", "111"], "2": ["110", "001", "010", "100", "111"], "3": ["110", "001", "010", "001", "110"],
+    "4": ["101", "101", "111", "001", "001"], "5": ["111", "100", "110", "001", "110"], "6": ["011", "100", "110", "101", "010"],
+    "7": ["111", "001", "010", "010", "010"], "9": ["010", "101", "011", "001", "110"],
+    "R": ["110", "101", "110", "101", "101"], "b": ["100", "100", "110", "101", "110"], "#": ["101", "111", "101", "111", "101"]
+  };
+
+  function Buf(w, h) { this.w = w; this.h = h; this.px = new Uint8Array(w * h); this.px.fill(PAPER); }
+  Buf.prototype.set = function (x, y, t) { if (x >= 0 && y >= 0 && x < this.w && y < this.h) this.px[y * this.w + x] = t; };
+  Buf.prototype.rect = function (x, y, w, h, t) { for (var j = 0; j < h; j++) for (var i = 0; i < w; i++) this.set(x + i, y + j, t); };
+  Buf.prototype.disc = function (cx, cy, r, t) {
+    for (var y = -r; y <= r; y++) for (var x = -r; x <= r; x++) if (x * x + y * y <= r * r + r) this.set(cx + x, cy + y, t);
+  };
+  Buf.prototype.ring = function (cx, cy, r, t) {
+    for (var y = -r; y <= r; y++) for (var x = -r; x <= r; x++) {
+      var d = x * x + y * y;
+      if (d <= r * r + r && d > (r - 1) * (r - 1) + (r - 1)) this.set(cx + x, cy + y, t);
+    }
+  };
+  Buf.prototype.text = function (s, x, y, t) {
+    for (var k = 0; k < s.length; k++) {
+      var g = GLYPH[s[k]];
+      if (g) for (var j = 0; j < 7; j++) for (var i = 0; i < 5; i++) if (g[j][i] === "1") this.set(x + k * 6 + i, y + j, t);
+    }
+  };
+  Buf.prototype.small = function (s, x, y, t) {
+    for (var k = 0; k < s.length; k++) {
+      var g = SMALL[s[k]];
+      if (g) for (var j = 0; j < 5; j++) for (var i = 0; i < 3; i++) if (g[j][i] === "1") this.set(x + k * 4 + i, y + j, t);
+    }
+  };
+  Buf.prototype.cross = function (cx, cy, t) { for (var i = -3; i <= 3; i++) { this.set(cx + i, cy + i, t); this.set(cx + i, cy - i, t); } };
+
+  /* the first fret the box shows: the nut for anything that fits in the first five frets */
+  function baseFret(frets) {
+    var lo = Infinity, hi = 0;
+    for (var i = 0; i < 6; i++) if (frets[i] > 0) { lo = Math.min(lo, frets[i]); hi = Math.max(hi, frets[i]); }
+    return hi <= 5 ? 1 : lo;
+  }
+
+  /* The chord box: strings upright, low E at the left, five frets. x and o above the nut; a dot with the finger's
+     number for each fretted note, a square for the root; a bar for a barre. 104 x 104. */
+  var BOX_W = 104, BOX_H = 104, SX = 20, SS = 14, TOP = 16, FS = 17;
+  function box(v, rootPc) {
+    var b = new Buf(BOX_W, BOX_H), frets = v.frets, base = baseFret(frets), i, s;
+    for (s = 0; s < 6; s++) b.rect(SX + s * SS, TOP, 1, 5 * FS + 1, INK);
+    for (i = 0; i <= 5; i++) b.rect(SX, TOP + i * FS, 5 * SS + 1, 1, INK);
+    if (base === 1) b.rect(SX, TOP - 3, 5 * SS + 1, 4, INK);
+    else b.text(String(base), base < 10 ? SX - 11 : SX - 17, TOP + 5, INK);
+    for (s = 0; s < 6; s++) {
+      var x = SX + s * SS;
+      if (frets[s] < 0) b.cross(x, 6, INK);
+      else if (frets[s] === 0) b.ring(x, 6, 3, INK);
+    }
+    /* the barre first, so the dots sit on it */
+    if (v.barre) {
+      var by = TOP + (v.barre.fret - base) * FS + FS / 2 | 0;
+      b.rect(SX + v.barre.from * SS - 3, by - 4, (v.barre.to - v.barre.from) * SS + 7, 9, INK);
+    }
+    for (s = 0; s < 6; s++) {
+      if (frets[s] <= 0) continue;
+      var cx = SX + s * SS, cy = TOP + (frets[s] - base) * FS + FS / 2 | 0;
+      var root = (Chords.OPEN[s] + frets[s]) % 12 === rootPc;
+      if (root) b.rect(cx - 5, cy - 5, 11, 11, INK); else b.disc(cx, cy, 5, INK);
+      var f = v.fingers ? v.fingers[s] : 0;
+      var inBarre = v.barre && frets[s] === v.barre.fret && s > v.barre.from && s <= v.barre.to;
+      if (f && !inBarre) b.text(f === 5 ? "T" : String(f), cx - 2, cy - 3, PAPER);
+    }
+    return b;
+  }
+
+  /* The degree map (1.2.0): the box's five frets (and the open strings when the box starts at the nut) with every place
+     named by its degree above the root, so a note to add can be found by the hand: the notes the voicing plays in ink
+     tiles, the chord's other tones in dark, every other note in mid. The grid is mid so the names read over it. */
+  function rowsOf(frets) {
+    var base = baseFret(frets), out = [];
+    if (base === 1) out.push(0);
+    for (var f = base; f < base + 5; f++) out.push(f);
+    return out;
+  }
+  function mapY(f, base) { return f === 0 ? 6 : TOP + (f - base) * FS + FS / 2 | 0; }
+  function map(v, c) {
+    var b = new Buf(BOX_W, BOX_H), frets = v.frets, base = baseFret(frets), rows = rowsOf(frets), s, i;
+    for (s = 0; s < 6; s++) b.rect(SX + s * SS, TOP, 1, 5 * FS + 1, MID);
+    for (i = 0; i <= 5; i++) b.rect(SX, TOP + i * FS, 5 * SS + 1, 1, MID);
+    if (base === 1) b.rect(SX, TOP - 3, 5 * SS + 1, 4, INK);
+    else b.text(String(base), base < 10 ? SX - 11 : SX - 17, TOP + 5, INK);
+    for (s = 0; s < 6; s++) {
+      var x = SX + s * SS;
+      if (frets[s] < 0 && base > 1) b.cross(x, 6, INK);
+      for (i = 0; i < rows.length; i++) {
+        var f = rows[i], y = mapY(f, base), d = Chords.degree(c, (Chords.OPEN[s] + f) % 12), w = d.lab.length * 4 - 1;
+        var on = frets[s] === f;
+        b.rect(x - 6, y - 4, 13, 9, on ? INK : PAPER);
+        b.small(d.lab, x - (w >> 1), y - 2, on ? PAPER : d.tone ? DARK : MID);
+      }
+    }
+    return b;
+  }
+  /* which string and fret a point of the box or the map (in buffer pixels) is on, or null: the same five frets, and the
+     open strings above the nut when the box starts there */
+  function boxAt(v, bx, by) {
+    var frets = v.frets, base = baseFret(frets), rows = rowsOf(frets), s = Math.round((bx - SX) / SS);
+    if (s < 0 || s > 5 || Math.abs(bx - (SX + s * SS)) > 7) return null;
+    for (var i = 0; i < rows.length; i++) {
+      var y = mapY(rows[i], base);
+      if (by >= y - (rows[i] === 0 ? 6 : FS / 2) && by < y + (rows[i] === 0 ? 5 : FS / 2)) return { s: s, f: rows[i] };
+    }
+    return null;
+  }
+
+  /* The neck: low E at the bottom as you look down at a guitar on your lap, the nut at the left, 15 frets. Every
+     place the chord's notes lie is a small mid dot (a dark one for the root); the voicing shown is in big ink dots. */
+  var NECK_W = 150, NECK_H = 72, NX = 12, NF = 9, NS = 10, NY = 6;
+  /* the empty neck: inlays, strings, nut, frets and the fret numbers under it */
+  function neckFrame() {
+    var b = new Buf(NECK_W, NECK_H), s, f, bottom = NY + 5 * NS;
+    /* inlays between the middle strings */
+    [3, 5, 7, 9, 15].forEach(function (k) { b.disc(NX + (k - 1) * NF + 4, NY + 2 * NS + 5, 1, MID); });
+    b.disc(NX + 11 * NF + 4, NY + NS + 5, 1, MID); b.disc(NX + 11 * NF + 4, NY + 3 * NS + 5, 1, MID);
+    for (s = 0; s < 6; s++) b.rect(NX, NY + s * NS, 15 * NF + 1, 1, DARK);
+    b.rect(NX - 2, NY, 2, 5 * NS + 1, INK);
+    for (f = 1; f <= 15; f++) b.rect(NX + f * NF, NY, 1, 5 * NS + 1, DARK);
+    [3, 5, 7, 9, 12, 15].forEach(function (k) {
+      var t = String(k), cx = NX + (k - 1) * NF + 5;
+      b.text(t, cx - t.length * 3 + 1, bottom + 6, DARK);
+    });
+    return b;
+  }
+  function neckX(f) { return f === 0 ? NX - 7 : NX + (f - 1) * NF + 5; }
+  function neck(v, tones, rootPc) {
+    var b = neckFrame(), s, f, i, bottom = NY + 5 * NS;
+    var want = {};
+    for (i = 0; i < tones.length; i++) want[tones[i].pc] = true;
+    for (s = 0; s < 6; s++) {
+      var y = bottom - s * NS;
+      for (f = 0; f <= 15; f++) {
+        var pc = (Chords.OPEN[s] + f) % 12;
+        if (!want[pc]) continue;
+        var x = f === 0 ? NX - 7 : NX + (f - 1) * NF + 5;
+        if (v && v.frets[s] === f) continue;
+        b.disc(x, y, 1, pc === rootPc ? DARK : MID);
+      }
+      if (!v) continue;
+      var vf = v.frets[s];
+      if (vf < 0) { for (i = -2; i <= 2; i++) { b.set(NX - 7 + i, y + i, INK); b.set(NX - 7 + i, y - i, INK); } }
+      else if (vf === 0) b.ring(NX - 7, y, 3, INK);
+      else {
+        var vx = NX + (vf - 1) * NF + 5;
+        if ((Chords.OPEN[s] + vf) % 12 === rootPc) b.rect(vx - 3, y - 3, 7, 7, INK); else b.disc(vx, y, 3, INK);
+      }
+    }
+    return b;
+  }
+
+  /* The improv view (1.4.0): the neck with every note of a scale and the chord's tones, by kind, on all 15 frets and the
+     open strings: the root a square, a chord tone a dot (land on these), a tension a ring (colour you can hold), an avoid
+     note a small cross (pass through it). notes: Scales' [{pc, kind}]. */
+  function scale(notes) {
+    var b = neckFrame(), kind = {}, s, f, bottom = NY + 5 * NS;
+    notes.forEach(function (n) { kind[n.pc] = n.kind; });
+    for (s = 0; s < 6; s++) {
+      var y = bottom - s * NS;
+      for (f = 0; f <= 15; f++) {
+        var k = kind[(Chords.OPEN[s] + f) % 12], x = neckX(f);
+        if (!k) continue;
+        if (f === 0) b.rect(x - 3, y - 3, 7, 7, PAPER);
+        if (k === "r") b.rect(x - 3, y - 3, 7, 7, INK);
+        else if (k === "c") b.disc(x, y, 3, INK);
+        else if (k === "t") { b.disc(x, y, 3, PAPER); b.ring(x, y, 3, INK); }
+        else { b.disc(x, y, 2, PAPER); for (var i = -2; i <= 2; i++) { b.set(x + i, y + i, DARK); b.set(x + i, y - i, DARK); } }
+      }
+    }
+    return b;
+  }
+
+  /* which string and fret a point of the neck is on, or null: the open strings left of the nut, then frets 1 to 15 */
+  function neckAt(bx, by) {
+    var s = Math.round((NY + 5 * NS - by) / NS);
+    if (s < 0 || s > 5 || Math.abs(NY + 5 * NS - s * NS - by) > NS / 2) return null;
+    if (bx < NX - 12 || bx >= NX + 15 * NF) return null;
+    return { s: s, f: bx < NX ? 0 : Math.floor((bx - NX) / NF) + 1 };
+  }
+
+  /* the buffer onto the canvas, and the canvas to the biggest whole scale that fits maxW x maxH css pixels */
+  function paint(canvas, b, maxW, maxH) {
+    if (canvas.width !== b.w) canvas.width = b.w;
+    if (canvas.height !== b.h) canvas.height = b.h;
+    var ctx = canvas.getContext("2d"), img = ctx.createImageData(b.w, b.h), d = img.data;
+    for (var i = 0; i < b.px.length; i++) {
+      var c = RGB[b.px[i]];
+      d[i * 4] = c[0]; d[i * 4 + 1] = c[1]; d[i * 4 + 2] = c[2]; d[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    var k = Math.max(1, Math.floor(Math.min(maxW / b.w, maxH / b.h)));
+    canvas.style.width = b.w * k + "px";
+    canvas.style.height = b.h * k + "px";
+    return k;
+  }
+
+  return { Buf: Buf, box: box, map: map, boxAt: boxAt, neckAt: neckAt, neck: neck, scale: scale, paint: paint, baseFret: baseFret, BOX_W: BOX_W, BOX_H: BOX_H, NECK_W: NECK_W, NECK_H: NECK_H };
+})();
+</script>
+<script data-src="src/guitar.js">
+/* 和弦大全 / Chords: a plucked guitar for strumming a voicing. The same Karplus-Strong string as the four-track's
+   guitar (runtime/studio-synth.js guitarFor): a short burst of soft noise fed round a delay line that loses a little
+   each pass, rendered once per note and kept. The app's own AudioContext, made on the first tap; PAD.music has three
+   tonal voices and a chord needs six. It does not follow the runtime's volume, so it stays quiet and has its own
+   switch (off, small, middle).
+   MIT License. Copyright (c) 2026 Haowei Wu. */
+var Guitar = (function () {
+  "use strict";
+  var ctx = null, master = null, cache = {}, playing = [], level = 2;
+  var LEVELS = [0, 0.3, 0.6];   /* six strings at 0.09 each stay under about 0.3 at the middle level */
+
+  function rng(seed) {
+    var x = seed >>> 0 || 1;
+    return function () { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) / 4294967296; };
+  }
+  function freq(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
+
+  function ensure() {
+    if (ctx) return ctx;
+    var AC = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
+    if (!AC) return null;
+    try { ctx = new AC(); } catch (e) { return null; }
+    master = ctx.createGain();
+    master.gain.value = LEVELS[level];
+    master.connect(ctx.destination);
+    return ctx;
+  }
+
+  /* one string's sound, 2.5 s, normalised; the delay line is a whole number of samples and the playback rate tunes it */
+  function bufferFor(midi) {
+    if (cache[midi]) return cache[midi];
+    var sr = ctx.sampleRate, f = freq(midi), N = Math.max(2, Math.floor(sr / f));
+    var len = Math.floor(sr * 2.5), out = new Float32Array(len), r = rng(0x7a3f19c5 ^ (midi * 2654435761));
+    var a = 1 - Math.exp(-2 * Math.PI * 3000 / sr), lp = 0, i;
+    for (i = 0; i < N && i < len; i++) {
+      var n = r() * 2 - 1;
+      lp += a * (n - lp);
+      out[i] = 0.7 * lp + 0.3 * n;
+    }
+    for (i = N; i < len; i++) out[i] = 0.996 * 0.5 * (out[i - N] + (i - N - 1 >= 0 ? out[i - N - 1] : 0));
+    var peak = 0;
+    for (i = 0; i < len; i++) peak = Math.max(peak, Math.abs(out[i]));
+    if (peak > 0) for (i = 0; i < len; i++) out[i] /= peak;
+    var buf = ctx.createBuffer(1, len, sr);
+    buf.getChannelData(0).set(out);
+    cache[midi] = { buf: buf, rate: (N + 0.5) * f / sr };
+    return cache[midi];
+  }
+
+  function hush(list) {
+    var t = ctx.currentTime;
+    list.forEach(function (p) {
+      try { p.g.gain.cancelScheduledValues(t); p.g.gain.setTargetAtTime(0, t, 0.02); p.src.stop(t + 0.1); } catch (e) {}
+    });
+  }
+  function stop() {
+    if (!ctx) return;
+    hush(playing);
+    playing = [];
+  }
+
+  /* notes: midi numbers, low string first; gap: seconds between strings (0.012 for a strum, 0.18 for an arpeggio).
+     ring: leave what is sounding alone (single tones tapped one after another ring together, so an interval is heard
+     both ways); at most 8 notes ring, the oldest go first */
+  function play(notes, gap, ring) {
+    if (!level || !notes.length || !ensure()) return false;
+    if (ctx.state === "suspended" && ctx.resume) ctx.resume();
+    if (!ring) stop();
+    else if (playing.length + notes.length > 8) hush(playing.splice(0, playing.length + notes.length - 8));
+    var t0 = ctx.currentTime + 0.02;
+    notes.forEach(function (m, k) {
+      var b = bufferFor(m), src = ctx.createBufferSource(), g = ctx.createGain();
+      src.buffer = b.buf;
+      src.playbackRate.value = b.rate;
+      g.gain.value = 0.09;
+      src.connect(g);
+      g.connect(master);
+      src.start(t0 + k * gap);
+      playing.push({ src: src, g: g });
+    });
+    return true;
+  }
+
+  function setLevel(n) {
+    level = Math.max(0, Math.min(2, n | 0));
+    if (master) master.gain.value = LEVELS[level];
+    if (!level) stop();
+  }
+  /* a hidden page goes quiet and lets the phone's audio go */
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", function () {
+    if (!ctx) return;
+    if (document.hidden) { stop(); if (ctx.suspend) ctx.suspend(); }
+  });
+
+  return { play: play, stop: stop, setLevel: setLevel, level: function () { return level; } };
+})();
+</script>
+<script data-src="src/progs.js">
+/* 和弦大全 / Chords: chord progressions (和弦连接). A hand-written table of common progressions, each in degrees of its key
+   with a short note on why it works; forChord() finds the ones a chord belongs to and spells them in that chord's key.
+   Every one of the 19 qualities appears in at least one progression (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
+   A progression is not anyone's property; the notes are our own words. Pachelbel's canon (1680s) is public domain.
+   MIT License. Copyright (c) 2026 Haowei Wu. */
+var Progs = (function () {
+  "use strict";
+  function mod12(n) { return ((n % 12) + 12) % 12; }
+
+  /* ch: [semitones from the key's tonic, quality id, bass in semitones from the tonic (slash chords only)];
+     rn: each chord's Roman numeral; key: "maj" or "min" (the tonic of a minor key is its i) */
+  var LIST = [
+    { id: "pop", key: "maj", zh: "流行四和弦", en: "Pop four",
+      ch: [[0, ""], [7, ""], [9, "m"], [5, ""]], rn: ["I", "V", "vi", "IV"],
+      why: {
+        zh: "四个都是大调自己的三和弦，相邻两个至少共用一个音，所以换得顺。V 不回 I 而去 vi，留个悬念；IV 再把耳朵推回 I，于是能一直循环。",
+        en: "All four are the key's own triads, and each pair shares at least one note, so the changes are smooth. V goes to vi instead of home, which keeps you waiting; IV then leads back to I, so it loops forever."
+      } },
+    { id: "sad", key: "maj", zh: "从 vi 开始的四和弦", en: "Pop four from vi",
+      ch: [[9, "m"], [5, ""], [0, ""], [7, ""]], rn: ["vi", "IV", "I", "V"],
+      why: {
+        zh: "和流行四和弦是同一组和弦，只是从小和弦 vi 开始。耳朵先把 vi 当成家，整段听着更伤感；V 最后又把它拉回 vi。",
+        en: "The same four chords as the pop four, started on the minor vi. The ear takes vi as home, so it sounds sadder, and V at the end pulls back to vi."
+      } },
+    { id: "fifties", key: "maj", zh: "五十年代进行", en: "Fifties progression",
+      ch: [[0, ""], [9, "m"], [5, ""], [7, ""]], rn: ["I", "vi", "IV", "V"],
+      why: {
+        zh: "I 和 vi 共用两个音，像同一个和弦换了颜色。IV、V 一级一级往上走，V 里的导音（大调第七级）离主音只差半音，所以又想回到 I 重新开始。",
+        en: "I and vi share two notes, like one chord changing colour. IV and V climb step by step, and V holds the leading tone, a half step below the tonic, so it wants to start again on I."
+      } },
+    { id: "three", key: "maj", zh: "三个主要和弦", en: "The three primary chords",
+      ch: [[0, ""], [5, ""], [7, ""], [0, ""]], rn: ["I", "IV", "V", "I"],
+      why: {
+        zh: "I、IV、V 三个和弦合起来正好是大调的七个音。V 带着导音，最想回家，所以 V 到 I 是最有力的结束（正格终止）。",
+        en: "Together I, IV and V hold all seven notes of the major scale. V carries the leading tone and wants home most, so V to I is the strongest ending (an authentic cadence)."
+      } },
+    { id: "plagal", key: "maj", zh: "变格终止", en: "Plagal cadence",
+      ch: [[0, ""], [5, ""], [0, ""]], rn: ["I", "IV", "I"],
+      why: {
+        zh: "IV 回 I 没有导音，两个和弦又共用主音，所以结束得比 V 到 I 柔和。教堂里唱的「阿门」就是这一下。",
+        en: "IV back to I has no leading tone, and the two chords share the tonic, so it ends more gently than V to I. It is the sung \"Amen\" at the end of a hymn."
+      } },
+    { id: "circle", key: "maj", zh: "五度圈", en: "Circle of fifths",
+      ch: [[0, ""], [5, ""], [11, "dim"], [4, "m"], [9, "m"], [2, "m"], [7, ""], [0, ""]],
+      rn: ["I", "IV", "vii°", "iii", "vi", "ii", "V", "I"],
+      why: {
+        zh: "根音每次往下五度（IV 到 vii° 那一步是减五度，好留在调里），走遍大调的七个和弦再回家。每一步都是最有力的根音进行，所以听着顺理成章。vii° 是减三和弦，因为大调里它的五音比纯五度少半音。",
+        en: "Each root falls a fifth (IV to vii° is a diminished fifth, to stay in the key), through all seven chords of the key and home. Every step is the strongest root move there is, so it sounds inevitable. vii° is diminished because, in the key, its fifth is a half step short."
+      } },
+    { id: "canon", key: "maj", zh: "卡农进行", en: "Canon progression",
+      ch: [[0, ""], [7, "", 11], [9, "m"], [4, "m", 7], [5, ""], [0, "", 4], [5, ""], [7, ""]],
+      rn: ["I", "V/7", "vi", "iii/5", "IV", "I/3", "IV", "V"],
+      why: {
+        zh: "低音从主音一级一级往下走（do、ti、la、sol、fa、mi），上面的和弦跟着换；斜线和弦就是为了把低音排成这一条线。这是帕赫贝尔《卡农》（17 世纪，公有领域）的骨架。",
+        en: "The bass walks down the scale from the tonic (do, ti, la, sol, fa, mi) while the chords change above it; the slash chords are there to keep that line. It is the frame of Pachelbel's Canon (17th century, public domain)."
+      } },
+    { id: "ii-V-I", key: "maj", zh: "二五一", en: "ii–V–I",
+      ch: [[2, "m7"], [7, "7"], [0, "maj7"]], rn: ["ii7", "V7", "Imaj7"],
+      why: {
+        zh: "根音每次往下五度。更妙的是三音和七音（引导音 guide tones）：ii7 的七音降半音成 V7 的三音，V7 的七音降半音成 Imaj7 的三音，另一个音不动。声部几乎不用走，所以爵士里到处都是。",
+        en: "Each root falls a fifth. Better still, the 3rds and 7ths (guide tones): the 7th of ii7 falls a half step to the 3rd of V7, the 7th of V7 falls a half step to the 3rd of Imaj7, and the other note stays. The voices barely move, which is why jazz is full of it."
+      } },
+    { id: "minor-ii-V-i", key: "min", zh: "小调二五一", en: "Minor ii–V–i",
+      ch: [[2, "m7b5"], [7, "7"], [0, "m"]], rn: ["iiø7", "V7", "i"],
+      why: {
+        zh: "小调里 ii 自然是半减七。V 借了和声小调升高的第七级，成了属七，带着导音，所以 V7 到 i 和大调一样有力，落下来却是小和弦。",
+        en: "In a minor key ii is naturally half-diminished. V borrows the raised 7th of the harmonic minor and becomes a dominant 7th with a leading tone, so V7 to i is as strong as in major but lands on a minor chord."
+      } },
+    { id: "minor-cadence", key: "min", zh: "小调终止", en: "Minor cadence",
+      ch: [[0, "m"], [5, "m"], [7, ""], [0, "m"]], rn: ["i", "iv", "V", "i"],
+      why: {
+        zh: "小调本来的 v 是小和弦，没有导音，回 i 的劲不够。把它换成大三和弦 V（借和声小调的升七级），才有半音往上落到主音的拉力。",
+        en: "The minor key's own v is a minor chord with no leading tone, so it pulls weakly. Making it major (borrowing the harmonic minor's raised 7th) gives the half step up into the tonic."
+      } },
+    { id: "andalusian", key: "min", zh: "安达卢西亚终止", en: "Andalusian cadence",
+      ch: [[0, "m"], [10, ""], [8, ""], [7, ""]], rn: ["i", "bVII", "bVI", "V"],
+      why: {
+        zh: "低音沿着小调音阶一级一级往下走（la、sol、fa、mi），最后停在大三和弦 V 上；V 的导音想回 i，所以能一圈一圈转下去。弗拉门戈常用。",
+        en: "The bass steps down the minor scale (la, sol, fa, mi) and stops on a major V, whose leading tone wants i again, so it can go round and round. Flamenco lives on it."
+      } },
+    { id: "minor-iv", key: "maj", zh: "借来的小四级", en: "Borrowed minor iv",
+      ch: [[0, ""], [5, ""], [5, "m"], [0, ""]], rn: ["I", "IV", "iv", "I"],
+      why: {
+        zh: "iv 是从同名小调借来的：IV 的三音降半音（C 调里 F 和弦的 A 变成 Ab），再往下半音落到 I 的五音（G）。就这一个半音下行，听着带点伤感。",
+        en: "iv is borrowed from the parallel minor: the 3rd of IV drops a half step (in C, the A of F becomes Ab), then falls another half step to the 5th of I (G). That one creeping line is the bittersweet sound."
+      } },
+    { id: "sus", key: "maj", zh: "挂留与解决", en: "Suspensions resolving",
+      ch: [[0, "sus2"], [0, "sus4"], [0, ""]], rn: ["Isus2", "Isus4", "I"],
+      why: {
+        zh: "挂留和弦没有三音，听不出大小，像悬在半空。挂二的二音、挂四的四音最后都落到三音上，和弦才「落地」。",
+        en: "A sus chord has no 3rd, so it is neither major nor minor and seems to hang. The 2 and the 4 both settle onto the 3rd, and only then does the chord land."
+      } },
+    { id: "dom-sus", key: "maj", zh: "属七挂四", en: "Dominant sus",
+      ch: [[7, "7sus4"], [7, "7"], [0, ""]], rn: ["V7sus4", "V7", "I"],
+      why: {
+        zh: "V7sus4 把导音换成了主音，属和弦的张力先压着；挂四落到三音（导音），张力出来，再解决到 I。等于解决了两次。",
+        en: "V7sus4 swaps the leading tone for the tonic, holding the dominant's tension back; the 4 falls to the 3rd (the leading tone), the tension arrives, and then it resolves to I. Two resolutions in a row."
+      } },
+    { id: "cliche", key: "maj", zh: "半音线（大调）", en: "Line cliché (major)",
+      ch: [[0, ""], [0, "aug"], [0, "6"], [0, "7"], [5, ""]], rn: ["I", "I+", "I6", "I7", "IV"],
+      why: {
+        zh: "根音不动，只有一个声部从五音半音往上爬（C 调里 G、G#、A、Bb），一条线把四个和弦串起来；最后 Bb 落到 IV 的三音 A。常用来做过门。",
+        en: "The root stays while one voice climbs from the 5th in half steps (in C: G, G#, A, Bb), threading four chords on one line; the Bb then falls to the A of IV. A favourite way into a new section."
+      } },
+    { id: "minor-cliche", key: "min", zh: "半音线（小调）", en: "Line cliché (minor)",
+      ch: [[0, "m"], [0, "mmaj7"], [0, "m7"], [0, "m6"]], rn: ["i", "i(maj7)", "i7", "i6"],
+      why: {
+        zh: "根音上面的那个声部半音往下走（A 小调里 A、G#、G、F#），和弦名字变了四次，其实只有一个音在动。小大七那一下最紧张，很像电影里的悬疑配乐。",
+        en: "The voice above the root slides down in half steps (in A minor: A, G#, G, F#): four chord names, one moving note. The minor-major 7th is the tense one, the sound of a film's suspense scene."
+      } },
+    { id: "dim-passing", key: "maj", zh: "减七经过", en: "Passing diminished",
+      ch: [[0, ""], [1, "dim7"], [2, "m"], [7, ""]], rn: ["I", "#I°7", "ii", "V"],
+      why: {
+        zh: "#I°7 夹在 I 和 ii 中间，低音半音往上走（C、C#、D）。减七和弦全是小三度叠起来的，哪个音都想往外走半音，正好推进 ii。",
+        en: "#I°7 sits between I and ii with the bass rising in half steps (C, C#, D). A diminished 7th is stacked minor thirds and every note wants to move a half step, which pushes straight into ii."
+      } },
+    { id: "blues", key: "maj", zh: "十二小节布鲁斯", en: "Twelve-bar blues",
+      ch: [[0, "7"], [5, "7"], [0, "7"], [7, "7"], [5, "7"], [0, "7"]], rn: ["I7", "IV7", "I7", "V7", "IV7", "I7"],
+      why: {
+        zh: "四小节 I7、两小节 IV7、两小节 I7，然后 V7、IV7、I7 各一或两小节。三个都是属七和弦，按规矩都该解决，布鲁斯偏不解决，这股一直绷着的劲就是它的味道。",
+        en: "Four bars of I7, two of IV7, two of I7, then V7, IV7 and I7 to finish. All three are dominant 7ths that by the rules should resolve, and the blues never lets them: that unrelieved pull is its flavour."
+      } },
+    { id: "power", key: "maj", zh: "强力和弦摇滚", en: "Power-chord rock",
+      ch: [[0, "5"], [10, "5"], [5, "5"]], rn: ["I5", "bVII5", "IV5"],
+      why: {
+        zh: "强力和弦只有根音和五音，没有三音，不分大小，所以可以随便借 bVII（混合利底亚 Mixolydian 的味道）。开了失真也不会糊，摇滚的标准配置。",
+        en: "A power chord is just root and 5th with no 3rd, neither major nor minor, so the bVII (a Mixolydian colour) slots right in. It stays clear under distortion, the rock standard."
+      } },
+    { id: "maj7-float", key: "maj", zh: "大七漂浮", en: "Floating major 7ths",
+      ch: [[0, "maj7"], [5, "maj7"]], rn: ["Imaj7", "IVmaj7"],
+      why: {
+        zh: "两个大七和弦来回，Cmaj7 和 Fmaj7 共用 C 和 E 两个音，换的时候几乎不动；大七度那点不协和让它一直有点飘，不想落地。",
+        en: "Two major 7ths back and forth: Cmaj7 and Fmaj7 share C and E, so little moves, and the slight rub of the major 7th keeps it floating instead of landing."
+      } },
+    { id: "add9-pop", key: "maj", zh: "加了颜色的流行四和弦", en: "Pop four with colour",
+      ch: [[0, "add9"], [7, ""], [9, "m7"], [5, "add9"]], rn: ["Iadd9", "V", "vi7", "IVadd9"],
+      why: {
+        zh: "就是流行四和弦，只在 I、IV 上加九音、vi 上加七音。这些音都在大调音阶里，加了不改和弦的作用，只让声音更亮、更开阔。",
+        en: "The pop four again with a 9th on I and IV and a 7th on vi. Those notes are all in the key, so they change no chord's job, only make the sound brighter and more open."
+      } },
+    { id: "funk9", key: "maj", zh: "九和弦律动", en: "Ninth-chord groove",
+      ch: [[0, "9"], [5, "9"]], rn: ["I9", "IV9"],
+      why: {
+        zh: "九和弦是属七再加九音，不急着解决，只想律动。I9 和 IV9 之间好几个音只移半音（C 调里 E 到 Eb、Bb 到 A），所以放克常常一整首就靠这两个。",
+        en: "A 9th chord is a dominant 7th plus the 9th: in no hurry to resolve, made to groove. Several notes move only a half step between I9 and IV9 (in C, E to Eb and Bb to A), so a funk tune can run on these two alone."
+      } },
+    { id: "minor9", key: "min", zh: "小九和弦", en: "Minor ninths",
+      ch: [[0, "m9"], [5, "m9"]], rn: ["im9", "ivm9"],
+      why: {
+        zh: "九音给小和弦加了一点亮色，听着柔。根音往上四度是最常见的进行之一，但两个都是小和弦，没有 V 到 I 那种结束感，适合一直反复，neo-soul 常用。",
+        en: "The 9th brightens a minor chord and softens it. Up a fourth is one of the commonest root moves, but with two minor chords there is no V-to-I sense of ending, so it can repeat for ever, as neo-soul does."
+      } }
+  ];
+
+  function bassOk(slot, c, strict) {
+    if (!strict) return true;
+    if (c.bass === null || c.bass === undefined) return slot[2] === undefined;
+    return slot[2] !== undefined && mod12(slot[2] - slot[0]) === mod12(c.bass - c.root);
+  }
+  /* the slot a chord takes in a progression: its tonic slot if it has one there, else the first that fits */
+  function find(p, c, strict) {
+    var first = -1;
+    for (var i = 0; i < p.ch.length; i++) {
+      if (p.ch[i][1] !== c.q || !bassOk(p.ch[i], c, strict)) continue;
+      if (p.ch[i][0] === 0) return i;
+      if (first < 0) first = i;
+    }
+    return first;
+  }
+
+  /* spelling in the key: the tonic's name from the usual key signature, then each chord's letter counted up the scale from
+     its Roman numeral (so #I°7 in G is G#°7, not Ab°7); the app's fixed names if that would need a double sharp or flat */
+  var LET = "CDEFGAB", NAT = [0, 2, 4, 5, 7, 9, 11];
+  var MAJ_KEY = ["C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+  var MIN_KEY = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "G#", "A", "Bb", "B"];
+  var DEG = ["I", "II", "III", "IV", "V", "VI", "VII"];
+  function stepOf(rn) { return DEG.indexOf(/^[b#]?(VII|VI|IV|V|III|II|I)/i.exec(rn)[1].toUpperCase()); }
+  function letter(tonic, step, pc) {
+    var L = (LET.indexOf(tonic.charAt(0)) + step) % 7, acc = mod12(pc - NAT[L]);
+    return acc === 0 ? LET.charAt(L) : acc === 1 ? LET.charAt(L) + "#" : acc === 11 ? LET.charAt(L) + "b" : null;
+  }
+  var ALT = { 1: ["C#", "Db"], 3: ["D#", "Eb"], 6: ["F#", "Gb"], 8: ["G#", "Ab"], 10: ["A#", "Bb"] };
+  function keyName(key, mode) { return (mode === "min" ? MIN_KEY : MAJ_KEY)[key]; }
+  /* the key's name: the usual one, unless the other spelling is the one that keeps the chord you looked up spelled as
+     you looked it up (Ebm as vi is in Gb major, not F#) */
+  function tonicFor(p, key, at, c) {
+    var usual = keyName(key, p.key), want = Chords.NAMES[c.root], step = stepOf(p.rn[at]);
+    if (letter(usual, step, c.root) === want || !ALT[key]) return usual;
+    var other = ALT[key][0] === usual ? ALT[key][1] : ALT[key][0];
+    return letter(other, step, c.root) === want ? other : usual;
+  }
+  function spell(p, tonic, i, c) {
+    var rn = p.rn[i];
+    var root = letter(tonic, stepOf(rn), c.root) || Chords.NAMES[c.root];
+    var out = root + Chords.name({ root: 0, q: c.q, bass: null }).slice(1);
+    if (c.bass !== null) {
+      var m = /\/(\d)$/.exec(rn);
+      out += "/" + ((m && letter(tonic, +m[1] - 1, c.bass)) || Chords.NAMES[c.bass]);
+    }
+    return out;
+  }
+
+  /* the progressions a chord appears in, each spelled in the key that puts the chord in its slot (find). A slash chord
+     takes slots with the same bass; failing that, any slot of its quality, listed after the exact ones. Then
+     progressions where the chord is the tonic come first, otherwise the table's order. */
+  function forChord(c) {
+    var out = [];
+    LIST.forEach(function (p, n) {
+      var at = find(p, c, true), exact = true;
+      if (at < 0 && c.bass !== null && c.bass !== undefined) { at = find(p, c, false); exact = false; }
+      if (at < 0) return;
+      var key = mod12(c.root - p.ch[at][0]);
+      var chords = p.ch.map(function (s) {
+        return { root: mod12(key + s[0]), q: s[1], bass: s[2] === undefined ? null : mod12(key + s[2]) };
+      });
+      var tonic = tonicFor(p, key, at, c);
+      out.push({
+        p: p, key: key, keyName: tonic, at: at, n: n, exact: exact, chords: chords,
+        names: chords.map(function (x, i) { return spell(p, tonic, i, x); })
+      });
+    });
+    out.sort(function (a, b) {
+      return (a.exact ? 0 : 1) - (b.exact ? 0 : 1) || (a.p.ch[a.at][0] === 0 ? 0 : 1) - (b.p.ch[b.at][0] === 0 ? 0 : 1) || a.n - b.n;
+    });
+    return out;
+  }
+  /* the voicing to play for a chord in a progression: among its 8 commonest, the one nearest the fret position the player
+     is at, so the hand stays in one place (the commonest wins a tie) */
+  function nearVoicing(list, pos) {
+    var best = null, d = 99;
+    list.slice(0, 8).forEach(function (v) { var e = Math.abs(v.pos - pos); if (e < d) { d = e; best = v; } });
+    return best;
+  }
+
+  return { LIST: LIST, forChord: forChord, nearVoicing: nearVoicing, keyName: keyName };
+})();
+</script>
+<script data-src="src/scales.js">
+/* 和弦大全 / Chords: the improv view's scales (即兴, version 1.4). Chord-scale theory: each chord quality has a few scales
+   (modes) a player can improvise over it with, the commonest first. Every note of the chosen scale, plus every chord tone,
+   is one of four kinds: the root, a chord tone (the safest to land on), a tension (colour you can hold) and an avoid note
+   (a half step over a chord tone where it clashes, or the 3 over a sus4: play it in passing, do not hold it). The kinds
+   are written by hand per
+   chord and scale, not derived from one rule, because the textbook exceptions (b9 over a dominant) matter.
+   With a key (the chord opened from a progression) the default is the first scale whose every note lies in that key or
+   in the chord, so Em7 in C major opens on Phrygian. Pure: no DOM, no PAD. MIT License. Copyright (c) 2026 Haowei Wu. */
+var Scales = (function () {
+  "use strict";
+  function mod12(n) { return ((n % 12) + 12) % 12; }
+
+  /* iv: semitones above the root; lab: how each is written when it is not one of the chord's own tones */
+  var S = {
+    ionian:     { zh: "Ionian（大调）", en: "Ionian (major)", iv: [0, 2, 4, 5, 7, 9, 11], lab: ["R", "9", "3", "11", "5", "13", "7"],
+      why: { zh: "大调本身，最稳的选择。", en: "The major scale itself, the safe choice." } },
+    lydian:     { zh: "Lydian", en: "Lydian", iv: [0, 2, 4, 6, 7, 9, 11], lab: ["R", "9", "3", "#11", "5", "13", "7"],
+      why: { zh: "大调把 11 升成 #11，听着更亮、更飘。", en: "Major with 11 raised to #11: brighter and floating." } },
+    mixolydian: { zh: "Mixolydian", en: "Mixolydian", iv: [0, 2, 4, 5, 7, 9, 10], lab: ["R", "9", "3", "11", "5", "13", "b7"],
+      why: { zh: "大调把 7 降成 b7，属七和弦自己的音阶。", en: "Major with a b7, the dominant chord's own scale." } },
+    lyddom:     { zh: "Lydian dominant", en: "Lydian dominant", iv: [0, 2, 4, 6, 7, 9, 10], lab: ["R", "9", "3", "#11", "5", "13", "b7"],
+      why: { zh: "Mixolydian 把 11 升成 #11，听着更开阔。", en: "Mixolydian with #11: a wider sound." } },
+    altered:    { zh: "Altered（变化音阶）", en: "Altered", iv: [0, 1, 3, 4, 6, 8, 10], lab: ["R", "b9", "#9", "3", "#11", "b13", "b7"],
+      why: { zh: "除了 R、3、b7，每个延伸音都变过。张力最大，适合马上要回主和弦的属七。", en: "Every tension altered. The tensest sound, for a 7 chord about to resolve." } },
+    hwdim:      { zh: "半全减音阶", en: "Half-whole diminished", iv: [0, 1, 3, 4, 6, 7, 9, 10], lab: ["R", "b9", "#9", "3", "#11", "5", "13", "b7"],
+      why: { zh: "半音、全音轮流，b9、#9、#11、13 都在，爵士里常用。", en: "Half step, whole step, repeat: b9, #9, #11 and 13 all at once." } },
+    mixob13:    { zh: "Mixolydian b13", en: "Mixolydian b13", iv: [0, 2, 4, 5, 7, 8, 10], lab: ["R", "9", "3", "11", "5", "b13", "b7"],
+      why: { zh: "Mixolydian 把 13 降成 b13，属七要去小和弦时常用。", en: "Mixolydian with b13, for a 7 chord heading to a minor chord." } },
+    phrygdom:   { zh: "Phrygian dominant", en: "Phrygian dominant", iv: [0, 1, 4, 5, 7, 8, 10], lab: ["R", "b9", "3", "11", "5", "b13", "b7"],
+      why: { zh: "和声小调从第五级开始，小调里 V7 的音阶，b9 和 b13 都往主和弦拉。", en: "Harmonic minor from its fifth: a minor key's V7. b9 and b13 pull home." } },
+    dorian:     { zh: "Dorian", en: "Dorian", iv: [0, 2, 3, 5, 7, 9, 10], lab: ["R", "9", "b3", "11", "5", "13", "b7"],
+      why: { zh: "小调里最亮的一种，13 让它没那么伤感。放克和爵士的小和弦多用它。", en: "The brightest minor: the 13 lifts it. Funk and jazz use it on minor chords." } },
+    aeolian:    { zh: "Aeolian（自然小调）", en: "Aeolian (natural minor)", iv: [0, 2, 3, 5, 7, 8, 10], lab: ["R", "9", "b3", "11", "5", "b13", "b7"],
+      why: { zh: "自然小调，比 Dorian 忧伤。", en: "Natural minor, sadder than Dorian." } },
+    phrygian:   { zh: "Phrygian", en: "Phrygian", iv: [0, 1, 3, 5, 7, 8, 10], lab: ["R", "b9", "b3", "11", "5", "b13", "b7"],
+      why: { zh: "b9 带一点西班牙味。", en: "The b9 gives it a Spanish colour." } },
+    locrian:    { zh: "Locrian", en: "Locrian", iv: [0, 1, 3, 5, 6, 8, 10], lab: ["R", "b9", "b3", "11", "b5", "b13", "b7"],
+      why: { zh: "半减七和弦自己的音阶。", en: "The half-diminished chord's own scale." } },
+    locrian2:   { zh: "Locrian #2", en: "Locrian #2", iv: [0, 2, 3, 5, 6, 8, 10], lab: ["R", "9", "b3", "11", "b5", "b13", "b7"],
+      why: { zh: "Locrian 把 b9 换成 9，更顺耳。", en: "Locrian with 9 instead of b9: smoother." } },
+    whdim:      { zh: "全半减音阶", en: "Whole-half diminished", iv: [0, 2, 3, 5, 6, 8, 9, 11], lab: ["R", "9", "b3", "11", "b5", "b13", "13", "7"],
+      why: { zh: "全音、半音轮流，减七和弦的音阶，每个延伸音都能用。", en: "Whole step, half step, repeat: the dim 7's scale, every tension works." } },
+    wholetone:  { zh: "全音音阶", en: "Whole tone", iv: [0, 2, 4, 6, 8, 10], lab: ["R", "9", "3", "#11", "#5", "b7"],
+      why: { zh: "六个音全隔全音，增三和弦的音阶，听着像在做梦。", en: "Six notes, all whole steps: the augmented chord's dreamy scale." } },
+    melmin:     { zh: "旋律小调", en: "Melodic minor", iv: [0, 2, 3, 5, 7, 9, 11], lab: ["R", "9", "b3", "11", "5", "13", "7"],
+      why: { zh: "小调配大七，小大七和弦自己的音阶。", en: "Minor with a major 7: the minor-major 7's own scale." } },
+    harmmin:    { zh: "和声小调", en: "Harmonic minor", iv: [0, 2, 3, 5, 7, 8, 11], lab: ["R", "9", "b3", "11", "5", "b13", "7"],
+      why: { zh: "b13 到 7 隔了一个半全音，有中东味。", en: "The wide gap from b13 to 7 sounds Middle Eastern." } },
+    majpent:    { zh: "大调五声", en: "Major pentatonic", iv: [0, 2, 4, 7, 9], lab: ["R", "9", "3", "5", "13"],
+      why: { zh: "大调去掉 4 和 7，五个音都不撞，最不容易弹错。", en: "Major without 4 and 7: nothing clashes, the hardest to get wrong." } },
+    minpent:    { zh: "小调五声", en: "Minor pentatonic", iv: [0, 3, 5, 7, 10], lab: ["R", "b3", "11", "5", "b7"],
+      why: { zh: "五个音都不撞，摇滚和布鲁斯的即兴多从这里开始。", en: "Five notes, nothing clashes. Rock and blues solos start here." } },
+    blues:      { zh: "布鲁斯音阶", en: "Blues scale", iv: [0, 3, 5, 6, 7, 10], lab: ["R", "b3", "11", "b5", "5", "b7"],
+      why: { zh: "小调五声加 b5 蓝调音。在属七上 b3 磨着 3，就是布鲁斯味。", en: "Minor pentatonic plus the blue b5. Over a 7 chord, b3 rubbing on 3 is the blues." } }
+  };
+
+  /* per quality: [scale, avoid notes in semitones above the root], the commonest first (docs/design/chord-book.md 14) */
+  var FOR = {
+    "":    [["ionian", [5]], ["lydian"], ["majpent"], ["mixolydian", [5]]],
+    "m":   [["aeolian", [8]], ["dorian"], ["phrygian", [1, 8]], ["minpent"]],
+    "dim": [["locrian", [1]], ["whdim"]],
+    "aug": [["wholetone"]],
+    "5":   [["minpent"], ["blues"], ["majpent"]],
+    "7":   [["mixolydian", [5]], ["blues"], ["lyddom"], ["altered"], ["hwdim"], ["mixob13", [5]], ["phrygdom", [5]]],
+    "maj7": [["ionian", [5]], ["lydian"], ["majpent"]],
+    "m7":  [["dorian"], ["aeolian", [8]], ["phrygian", [1, 8]], ["minpent"], ["blues"]],
+    "m7b5": [["locrian", [1]], ["locrian2"]],
+    "dim7": [["whdim"]],
+    "mmaj7": [["melmin"], ["harmmin", [8]]],
+    "sus2": [["majpent"], ["mixolydian"], ["ionian"]],
+    "sus4": [["mixolydian", [4]], ["ionian", [4]], ["minpent"]],
+    "7sus4": [["mixolydian", [4]], ["dorian"], ["minpent"]],
+    "add9": [["ionian", [5]], ["lydian"], ["majpent"]],
+    "6":   [["ionian", [5]], ["lydian"], ["majpent"]],
+    "m6":  [["dorian"], ["melmin"]],
+    "9":   [["mixolydian", [5]], ["lyddom"], ["mixob13", [5]]],
+    "m9":  [["dorian"], ["aeolian", [8]], ["minpent"]]
+  };
+  var MAJOR = [0, 2, 4, 5, 7, 9, 11], MINOR = [0, 2, 3, 5, 7, 8, 10];
+
+  /* one option: the scale's notes and the chord's tones together, low to high, each {iv, pc, lab, kind} with kind
+     "r" root, "c" chord tone, "t" tension, "a" avoid. A chord tone keeps the chord's own name (the 6 of a 6 chord). */
+  function option(c, pair) {
+    var Q = Chords.qual(c.q), sc = S[pair[0]], avoid = pair[1] || [], by = {};
+    sc.iv.forEach(function (v, i) {
+      by[v] = { iv: v, lab: sc.lab[i], kind: v === 0 ? "r" : avoid.indexOf(v) >= 0 ? "a" : "t" };
+    });
+    Q.iv.forEach(function (v, i) {
+      by[v] = { iv: v, lab: Q.lab[i], kind: v === 0 ? "r" : "c" };
+    });
+    var notes = Object.keys(by).map(Number).sort(function (a, b) { return a - b; }).map(function (v) {
+      var n = by[v];
+      n.pc = mod12(c.root + v);
+      return n;
+    });
+    /* the avoid notes said in words after the scale's own line: which chord tone each sits a half step over, or for a
+       sus4 that the 3 would undo the suspension */
+    var zh = [], en = [];
+    notes.forEach(function (n) {
+      if (n.kind !== "a") return;
+      var under = null;
+      Q.iv.forEach(function (v, i) { if (mod12(n.iv - v) === 1) under = Q.lab[i]; });
+      if (under) { zh.push(n.lab + " 比 " + under + " 高半音"); en.push(n.lab + " is a half step over " + under); }
+      else { zh.push(n.lab + " 会把挂留解决掉"); en.push(n.lab + " would undo the sus"); }
+    });
+    var why = { zh: sc.why.zh + (zh.length ? zh.join("，") + "，经过就好，别停在上面。" : ""),
+      en: sc.why.en + (en.length ? " " + en.join(", ") + ": pass through, don't hold it." : "") };
+    return { id: pair[0], zh: sc.zh, en: sc.en, why: why, notes: notes };
+  }
+  /* a chord's scales {list, def, inKey}: def is the one to show first. With ctx {key: tonic pc, minor} it is the first
+     seven-note scale whose notes all lie in the key's scale or the chord (inKey true); otherwise, or when none does, 0. */
+  function forChord(c, ctx) {
+    var pairs = FOR[Chords.qual(c.q).id] || FOR[""], list = pairs.map(function (p) { return option(c, p); }), def = 0, inKey = false;
+    if (ctx) {
+      var ok = {};
+      (ctx.minor ? MINOR : MAJOR).forEach(function (v) { ok[mod12(ctx.key + v)] = true; });
+      Chords.tones(c).forEach(function (x) { ok[x.pc] = true; });
+      for (var i = 0; i < list.length; i++) {
+        var sc = S[list[i].id];
+        if (sc.iv.length !== 7) continue;
+        if (sc.iv.every(function (v) { return ok[mod12(c.root + v)]; })) { def = i; inKey = true; break; }
+      }
+    }
+    return { list: list, def: def, inKey: inKey };
+  }
+
+  return { S: S, FOR: FOR, forChord: forChord };
+})();
+</script>
+<script data-src="src/app.js">
+/* 和弦大全 / Chords: the screens. The main screen shows one chord's voicings one at a time (box or neck); the picker
+   chooses a root, a quality and a bass; the finder names the chord your fingers make. docs/design/chord-book.md 3-8.
+   MIT License. Copyright (c) 2026 Haowei Wu. */
+(function () {
+  "use strict";
+  var EN = PAD.lang === "en";
+  var T = EN ? {
+    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
+    open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
+    search: "C#m7b5, D/F#, Bbmaj7", unknown: "Unknown chord", root: "Root", bass: "Bass", none: "none", recent: "Recent",
+    byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
+    listen: "Play", noChord: "Not a common chord", also: "also ", posLabel: "fret {n}",
+    bassLab: "bass", held: "hold for arpeggio", order: "Shape order", orders: ["Common first", "By fret"],
+    progs: "Progs", progTitle: "Progressions with {c}", keyMaj: "{k} major", keyMin: "{k} minor", play: "Play", stopIt: "Stop",
+    role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
+    legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k}. "
+  } : {
+    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
+    open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
+    search: "C#m7b5、D/F#、Bbmaj7", unknown: "认不出这个和弦", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
+    byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
+    listen: "听", noChord: "不是常见和弦", also: "也读作 ", posLabel: "{n} 品起",
+    bassLab: "低音", held: "长按是分解", order: "按法顺序", orders: ["常用在前", "按把位"],
+    progs: "连接", progTitle: "{c} 的和弦连接", keyMaj: "{k} 大调", keyMin: "{k} 小调", play: "听", stopIt: "停",
+    role: "{c} 在这里是 {rn}", spelled: "{c} 在这个调里写作 {s}，是 {rn}", loose: "按不带低音的 {c} 算，是 {rn}",
+    legend: "■ 根音 ● 和弦音 ○ 延伸音 × 避免音", inKey: "按 {k}选的。"
+  };
+  function t(k, vars) { var s = T[k]; if (vars) for (var v in vars) s = s.replace("{" + v + "}", vars[v]); return s; }
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+  function sfx(n) { try { PAD.sfx(n); } catch (e) {} }
+
+  /* ---------------- state and save (section 5) ---------------- */
+  var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
+  var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
+  var saveTimer = 0, VIEWS = ["box", "neck", "map", "scale"];
+  function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
+  function adopt(s) {
+    if (!s || s.v !== 1 || !s.cur) return;
+    var c = s.cur;
+    if (typeof c.root === "number" && c.root >= 0 && c.root < 12 && Chords.qual(c.q) &&
+      (c.bass === null || (typeof c.bass === "number" && c.bass >= 0 && c.bass < 12)))
+      set.cur = { root: c.root, q: c.q, bass: c.bass === c.root ? null : c.bass, i: Math.max(0, c.i | 0) };
+    if (s.sort === "pos" || s.sort === "common") set.sort = s.sort;
+    if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
+    if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
+    if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
+    if (Array.isArray(s.recent)) set.recent = s.recent.filter(function (n) { return typeof n === "string" && Chords.parse(n); }).slice(0, 8);
+  }
+  function chord() { return { root: set.cur.root, q: set.cur.q, bass: set.cur.bass }; }
+  function list() {
+    var all = Chords.voicings(chord());
+    all = set.sort === "pos" ? Chords.byPosition(all) : all;
+    if (temp && temp.name === Chords.name(chord())) all = [temp.v].concat(all);
+    return all;
+  }
+  function remember() {
+    var n = Chords.name(chord());
+    set.recent = [n].concat(set.recent.filter(function (r) { return r !== n; })).slice(0, 8);
+  }
+  function go(c, i) {
+    if (Chords.name(c) !== Chords.name(chord())) temp = null;
+    set.cur = { root: c.root, q: c.q, bass: c.bass === undefined ? null : c.bass, i: i || 0 };
+    remember(); store(); show();
+  }
+
+  /* ---------------- the improv view's scale (version 1.4) ---------------- */
+  /* the scale shown for the chord in view: back to the chord's default whenever the chord changes (owner, 1.4.0), and
+     picked by the key when the chord was opened from a progression (ctx: {key, minor, name}) */
+  var md = { name: "", i: 0, ctx: null, sc: null };
+  function modes() {
+    var n = Chords.name(chord());
+    if (md.name !== n) md = { name: n, i: -1, ctx: null, sc: null };
+    if (!md.sc) md.sc = Scales.forChord(chord(), md.ctx);
+    if (md.i < 0) md.i = md.sc.def;
+    return md;
+  }
+  function stepMode(d) {
+    var m = modes(), n = m.sc.list.length;
+    if (n < 2) { sfx("err"); return false; }
+    m.i = (m.i + d + n) % n;
+    sfx("move"); show();
+    return true;
+  }
+
+  /* ---------------- the main screen ---------------- */
+  var cv = $("pic"), wrap = $("pwrap");
+  function current() {
+    var l = list();
+    if (set.cur.i >= l.length) set.cur.i = l.length - 1;
+    if (set.cur.i < 0) set.cur.i = 0;
+    return { list: l, v: l[set.cur.i] };
+  }
+  function show() {
+    var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
+    $("cname").textContent = Chords.name(c);
+    $("qname").textContent = EN ? Q.en : Q.zh;
+    $("view").textContent = t(set.view === "map" ? "degrees" : set.view === "scale" ? "improv" : set.view);
+    if (set.view === "scale") { showScale(); paint(); return; }
+    /* one row only: a long line (frets past 9 in brackets) takes a smaller font, and if even that is too wide it drops the
+       fret position, which the picture shows anyway; a second row would shrink the picture */
+    $("line").classList.remove("deg");
+    var line = $("line"), head = v ? Chords.fretText(v.frets) + " · " + t("of", { i: set.cur.i + 1, n: cur.list.length }) : "";
+    line.classList.remove("tight");
+    line.textContent = v ? head + " · " + (v.pos === 0 ? t("open") : t("fret", { n: v.pos })) : "";
+    if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
+    if (line.scrollWidth > line.clientWidth) line.textContent = head;
+    /* one cell per string, low E first, so what the hand plays can be read off: the note and its degree in the chord */
+    var row = $("tones");
+    row.innerHTML = "";
+    (v ? Chords.strings(v.frets, c) : []).forEach(function (x) {
+      if (!x) { row.appendChild(el("span", "tone mute", "x")); return; }
+      var cell = el("button", "tone");
+      cell.appendChild(el("b", "", Chords.NAMES[x.pc]));
+      cell.appendChild(el("span", "", x.lab === "/" ? t("bassLab") : x.lab));
+      cell.addEventListener("click", function () { playString(x); });
+      row.appendChild(cell);
+    });
+    paint();
+  }
+  /* the improv view's words: the scale and how far through the list, its notes by kind, why it works and the legend */
+  function showScale() {
+    var m = modes(), o = m.sc.list[m.i], c = chord(), line = $("line"), row = $("tones");
+    $("qname").textContent = Chords.NAMES[c.root] + " " + (EN ? o.en : o.zh) + (m.sc.list.length > 1 ? " · " + t("of", { i: m.i + 1, n: m.sc.list.length }) : "");
+    line.classList.remove("tight");
+    line.classList.add("deg");
+    line.innerHTML = "";
+    o.notes.forEach(function (n, i) {
+      if (i) line.appendChild(document.createTextNode(" "));
+      line.appendChild(el(n.kind === "a" ? "s" : n.kind === "t" ? "span" : "b", "", n.lab));
+    });
+    if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
+    row.innerHTML = "";
+    var why = el("div", "why2");
+    why.appendChild(el("p", "", (m.sc.inKey && m.i === m.sc.def ? t("inKey", { k: m.ctx.label }) : "") + (EN ? o.why.en : o.why.zh)));
+    why.appendChild(el("p", "legend", t("legend")));
+    row.appendChild(why);
+  }
+  function paint() {
+    var cur = current(), c = chord();
+    if (!cur.v) return;
+    var w = wrap.clientWidth, h = wrap.clientHeight;
+    var b = set.view === "scale" ? Draw.scale(modes().sc.list[md.i].notes) : set.view === "map" ? Draw.map(cur.v, c) :
+      set.view === "neck" ? Draw.neck(cur.v, Chords.tones(c), c.root) : Draw.box(cur.v, c.root);
+    Draw.paint(cv, b, Math.max(1, w), Math.max(1, h));
+    prevBuf = lastBuf; lastBuf = b;
+  }
+  /* the swipe's animation (1.4.0): the picture that was there slides out the way the finger went and the new one slides
+     in behind it, in whole css pixels so every pixel stays one of the four tones. The new picture is already painted, so
+     the words and a tap see the new voicing at once. A ghost canvas carries the old picture (put with putImageData,
+     never drawImage, sdk/UI.md). No animation when the system asks for reduced motion. */
+  var lastBuf = null, prevBuf = null, ghost = null, anim = 0;
+  function slide(d) {
+    cancelAnimationFrame(anim);
+    if (ghost) { ghost.remove(); ghost = null; }
+    cv.style.transform = "";
+    var W = wrap.clientWidth;
+    if (!prevBuf || !W || (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches)) return;
+    ghost = el("canvas", "ghost");
+    Draw.paint(ghost, prevBuf, Math.max(1, wrap.clientWidth), Math.max(1, wrap.clientHeight));
+    ghost.style.left = cv.offsetLeft + "px"; ghost.style.top = cv.offsetTop + "px";
+    ghost.style.imageRendering = "pixelated";
+    wrap.appendChild(ghost);
+    var t0 = 0, dir = d > 0 ? -1 : 1, dur = 180;
+    function frame(now) {
+      if (!t0) t0 = now;
+      var p = Math.min(1, (now - t0) / dur), e = 1 - (1 - p) * (1 - p);
+      ghost.style.transform = "translateX(" + Math.round(dir * e * W) + "px)";
+      cv.style.transform = "translateX(" + Math.round(-dir * (1 - e) * W) + "px)";
+      if (p < 1) anim = requestAnimationFrame(frame);
+      else { ghost.remove(); ghost = null; cv.style.transform = ""; }
+    }
+    cv.style.transform = "translateX(" + Math.round(-dir * W) + "px)";
+    anim = requestAnimationFrame(frame);
+  }
+  /* left and right: the next voicing, or in the improv view the next scale; the picture slides the way the finger went */
+  function step(d) {
+    if (set.view === "scale") { if (stepMode(d)) slide(d); return; }
+    var n = list().length;
+    if (!n) return;
+    set.cur.i = (set.cur.i + d + n) % n;
+    sfx("move"); store(); show(); slide(d);
+  }
+  function stepQual(d) {
+    var qi = Chords.QUALS.indexOf(Chords.qual(set.cur.q)), n = Chords.QUALS.length;
+    go({ root: set.cur.root, q: Chords.QUALS[(qi + d + n) % n].id, bass: set.cur.bass }, 0);
+    sfx("tick");
+  }
+  function notesOf(v) { return Chords.midiOf(v.frets); }
+  /* one string on its own, at the pitch it sounds in this voicing; strings tapped one after another ring together (at
+     most 8), so the intervals between them can be heard as melody and as harmony */
+  function playString(x) {
+    if (!Guitar.play([x.midi], 0, true) && Guitar.level()) sfx("tap");
+  }
+  function strum(arp) {
+    var v = current().v;
+    if (!v) return;
+    if (!Guitar.play(notesOf(v), arp ? 0.18 : 0.012) && Guitar.level()) sfx("tap");
+  }
+
+  /* the diagram: in every view a tap plays the one note under the finger (string and fret, played or not), ringing with
+     what was strummed, so a note can be found and heard against the chord; a swipe changes the voicing. Strumming is the
+     扫弦 button's job, and the view is the header button's (owner, 1.3.0). */
+  function tapPicture(e) {
+    var v = current().v, r = cv.getBoundingClientRect();
+    if (!v || !r.width) return;
+    var bx = (e.clientX - r.left) * cv.width / r.width, by = (e.clientY - r.top) * cv.height / r.height;
+    var hit = set.view === "neck" || set.view === "scale" ? Draw.neckAt(bx, by) : Draw.boxAt(v, bx, by);
+    if (hit && !Guitar.play([Chords.OPEN[hit.s] + hit.f], 0, true) && Guitar.level()) sfx("tap");
+  }
+  (function () {
+    var x0 = null, y0 = 0;
+    wrap.addEventListener("pointerdown", function (e) { x0 = e.clientX; y0 = e.clientY; });
+    wrap.addEventListener("pointercancel", function () { x0 = null; });
+    wrap.addEventListener("pointerup", function (e) {
+      if (x0 === null) return;
+      var dx = e.clientX - x0, dy = e.clientY - y0;
+      x0 = null;
+      if (Math.abs(dx) > 36 && Math.abs(dx) > Math.abs(dy)) step(dx < 0 ? 1 : -1);
+      else if (Math.abs(dx) < 12 && Math.abs(dy) < 12) tapPicture(e);
+    });
+  })();
+  /* the strum button: a short press strums, a long one (decided on release, where the phone lets sound start) arpeggiates */
+  (function () {
+    var b = $("strum"), down = 0, timer = 0;
+    b.addEventListener("pointerdown", function () {
+      down = Date.now();
+      timer = setTimeout(function () { b.textContent = t("arp"); }, 400);
+    });
+    function end(play) {
+      clearTimeout(timer);
+      if (!down) return;
+      var long = Date.now() - down >= 400;
+      down = 0;
+      b.textContent = t("strum");
+      if (play) strum(long);
+    }
+    b.addEventListener("pointerup", function () { end(true); });
+    b.addEventListener("pointercancel", function () { end(false); });
+    b.addEventListener("pointerleave", function () { end(false); });
+    b.addEventListener("click", function (e) { if (e.detail === 0) strum(false); });
+  })();
+  $("prev").addEventListener("click", function () { step(-1); });
+  $("next").addEventListener("click", function () { step(1); });
+  function setSort(to) {
+    var v = current().v;
+    set.sort = to;
+    /* stay on the same voicing in the new order */
+    var l = list(), id = v ? v.frets.join(",") : "";
+    set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
+    sfx("tick"); store(); show();
+  }
+  /* the header's view button cycles the four pictures: box, neck, degree map, improv */
+  function nextView() { set.view = VIEWS[(VIEWS.indexOf(set.view) + 1) % VIEWS.length]; sfx("tick"); store(); show(); }
+  $("view").addEventListener("click", nextView);
+  $("cname").parentNode.addEventListener("click", function () { openPicker(); });
+
+  /* ---------------- the picker (section 3.3) ---------------- */
+  var pick = null;   /* {root, q, bass} while the picker is open */
+  var picker = $("picker");
+  function openPicker() {
+    pick = chord();
+    picker.classList.add("open");
+    $("q").value = "";
+    $("msg").textContent = "";
+    buildPicker();
+    $("pmain").scrollTop = 0;
+    sfx("tap");
+  }
+  function closePicker() { picker.classList.remove("open"); pick = null; show(); }
+  function choice(label, on, fn, cls) {
+    var b = el("button", (cls || "") + (on ? " sel" : ""), label);
+    b.addEventListener("click", fn);
+    return b;
+  }
+  function buildPicker() {
+    $("ptitle").textContent = Chords.name(pick);
+    var roots = $("roots"); roots.innerHTML = "";
+    Chords.NAMES.forEach(function (n, pc) {
+      roots.appendChild(choice(n, pick.root === pc, function () { pick.root = pc; if (pick.bass === pc) pick.bass = null; sfx("tick"); buildPicker(); }));
+    });
+    var quals = $("quals"); quals.innerHTML = "";
+    Chords.GROUPS.forEach(function (g, gi) {
+      quals.appendChild(el("h3", "", EN ? g.en : g.zh));
+      var grid = el("div", "grid3");
+      Chords.QUALS.forEach(function (Q) {
+        if (Q.group !== gi) return;
+        var b = choice("", pick.q === Q.id, function () { pick.q = Q.id; sfx("tick"); buildPicker(); }, "qual");
+        b.appendChild(el("b", "", Q.id || "maj"));
+        b.appendChild(el("span", "", EN ? Q.en : Q.zh));
+        grid.appendChild(b);
+      });
+      quals.appendChild(grid);
+    });
+    var bass = $("basses"); bass.innerHTML = "";
+    bass.appendChild(choice(t("none"), pick.bass === null, function () { pick.bass = null; sfx("tick"); buildPicker(); }));
+    Chords.NAMES.forEach(function (n, pc) {
+      if (pc === pick.root) return;
+      bass.appendChild(choice(n, pick.bass === pc, function () { pick.bass = pc; sfx("tick"); buildPicker(); }));
+    });
+    var rec = $("recent"); rec.innerHTML = "";
+    set.recent.forEach(function (n) {
+      rec.appendChild(choice(n, false, function () { var c = Chords.parse(n); if (!c) return; sfx("ok"); go(c, 0); closePicker(); }));
+    });
+    $("recentH").style.display = set.recent.length ? "" : "none";
+    var ord = $("sorts"); ord.innerHTML = "";
+    ["common", "pos"].forEach(function (id, i) {
+      ord.appendChild(choice(T.orders[i], set.sort === id, function () { if (set.sort !== id) setSort(id); else sfx("tick"); buildPicker(); }));
+    });
+    var vol = $("vol"); vol.innerHTML = "";
+    T.vol.forEach(function (label, i) {
+      vol.appendChild(choice(label, set.vol === i, function () {
+        set.vol = i; Guitar.setLevel(i); store(); buildPicker();
+        if (i) Guitar.play([52, 59, 64], 0.012); else sfx("tick");
+      }));
+    });
+  }
+  function applyPick() { sfx("ok"); go(pick, 0); closePicker(); }
+  function search() {
+    var c = Chords.parse($("q").value);
+    if (!c) { $("msg").textContent = t("unknown"); sfx("err"); return; }
+    $("q").blur();
+    pick = c; applyPick();
+  }
+  $("pback").addEventListener("click", function () { sfx("tap"); closePicker(); });
+  $("pok").addEventListener("click", applyPick);
+  $("qgo").addEventListener("click", search);
+  $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(); } });
+  $("tofind").addEventListener("click", function () { picker.classList.remove("open"); pick = null; openFinder(); });
+
+  /* ---------------- the progressions (和弦连接, version 1.2) ---------------- */
+  var progs = $("progs"), gl = null, gfocus = 0, gkeyed = false, seq = { timer: 0, card: -1, i: -1 };
+  function openProgs() {
+    var c = chord();
+    gl = Progs.forChord(c);
+    gfocus = 0; gkeyed = false;
+    $("gtitle").textContent = t("progTitle", { c: Chords.name(c) });
+    buildProgs();
+    progs.classList.add("open");
+    $("glist").scrollTop = 0;
+    sfx("tap");
+  }
+  function closeProgs() { stopSeq(); progs.classList.remove("open"); gl = null; show(); }
+  /* the voicing each chord of a progression is played with: the one in view for the chord you came from, the nearest
+     common one to its fret position for the others, so the hand would stay in one place */
+  function voicingFor(r, i) {
+    var v = current().v;
+    if (i === r.at && r.exact && v) return v;
+    return Progs.nearVoicing(Chords.voicings(r.chords[i]), v ? v.pos : 0);
+  }
+  function buildProgs() {
+    var box = $("glist"); box.innerHTML = "";
+    gl.forEach(function (r, n) {
+      var p = r.p, card = el("div", "card" + (gkeyed && n === gfocus ? " focus" : ""));
+      var head = el("div", "ghead");
+      head.appendChild(el("b", "", EN ? p.en : p.zh));
+      head.appendChild(el("span", "", t(p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName })));
+      card.appendChild(head);
+      card.appendChild(el("div", "grn", p.rn.join(" - ")));
+      var chips = el("div", "chips grid4");
+      r.chords.forEach(function (x, i) {
+        var b = choice(r.names[i], seq.card === n && seq.i === i, function () { jumpTo(r, i); });
+        if (i === r.at) b.className += " me";
+        chips.appendChild(b);
+      });
+      card.appendChild(chips);
+      var row = el("div", "grow"), here = Chords.name(chord()), rn = p.rn[r.at];
+      row.appendChild(el("div", "grole", !r.exact ? t("loose", { c: Chords.name({ root: chord().root, q: chord().q, bass: null }), rn: rn }) :
+        r.names[r.at] !== here ? t("spelled", { c: here, s: r.names[r.at], rn: rn }) : t("role", { c: here, rn: rn })));
+      row.appendChild(choice(seq.card === n ? t("stopIt") : t("play"), false, function () { playProg(n); }, "gplay"));
+      card.appendChild(row);
+      card.appendChild(el("p", "why", EN ? p.why.en : p.why.zh));
+      box.appendChild(card);
+    });
+  }
+  function stopSeq() { clearTimeout(seq.timer); seq = { timer: 0, card: -1, i: -1 }; }
+  /* one strum per chord, a second apart; the chord sounding is filled. A second tap on Play stops it. */
+  function playProg(n) {
+    var again = seq.card === n;
+    stopSeq(); Guitar.stop();
+    if (again) { buildProgs(); return; }
+    var r = gl[n];
+    /* the switch at Off means silence, not an error (1.4.1) */
+    if (!Guitar.level()) return;
+    function at(i) {
+      if (!gl || document.hidden) { stopSeq(); return; }
+      if (i >= r.chords.length) { stopSeq(); buildProgs(); return; }
+      seq.card = n; seq.i = i;
+      var v = voicingFor(r, i);
+      if (v) Guitar.play(Chords.midiOf(v.frets), 0.012);
+      buildProgs();
+      seq.timer = setTimeout(function () { at(i + 1); }, 1000);
+    }
+    at(0);
+  }
+  /* a chord in a progression opens it on the main screen, on the voicing it was played with */
+  function jumpTo(r, i) {
+    var v = voicingFor(r, i), c = r.chords[i];
+    stopSeq();
+    progs.classList.remove("open"); gl = null;
+    go(c, 0);
+    md = { name: Chords.name(c), i: -1, ctx: { key: r.key, minor: r.p.key === "min", label: t(r.p.key === "min" ? "keyMin" : "keyMaj", { k: r.keyName }) }, sc: null };
+    var l = list(), id = v ? v.frets.join(",") : "";
+    set.cur.i = Math.max(0, l.map(function (x) { return x.frets.join(","); }).indexOf(id));
+    sfx("ok"); store(); show();
+  }
+  function focusProg(d) {
+    if (!gl || !gl.length) return;
+    if (gkeyed) gfocus = (gfocus + d + gl.length) % gl.length;
+    gkeyed = true;
+    sfx("tick"); buildProgs();
+    var card = $("glist").children[gfocus];
+    if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
+  }
+  $("prog").addEventListener("click", openProgs);
+  $("gback").addEventListener("click", function () { sfx("tap"); closeProgs(); });
+  document.addEventListener("visibilitychange", function () { if (document.hidden) stopSeq(); });
+
+  /* ---------------- the finder (section 3.4) ---------------- */
+  var fs = null;     /* {frets, base} */
+  var finder = $("finder");
+  function openFinder() {
+    var v = current().v, frets = v ? v.frets.slice() : [-1, 3, 2, 0, 1, 0];
+    fs = { frets: frets, base: Math.min(12, Draw.baseFret(frets)) };
+    finder.classList.add("open");
+    buildFinder();
+    sfx("tap");
+  }
+  function closeFinder() { finder.classList.remove("open"); fs = null; show(); }
+  function buildFinder() {
+    var xo = $("xo"); xo.innerHTML = "";
+    fs.frets.forEach(function (f, s) {
+      /* a fretted string has no x or o: the grid below says which fret it holds (1.4.1). Tapping cycles x -> o -> x,
+         and a fretted string goes to x (the grid puts a fret back on a string). */
+      var b = choice(f < 0 ? "x" : f === 0 ? "o" : "·", f <= 0, function () {
+        fs.frets[s] = fs.frets[s] < 0 ? 0 : -1; sfx("tick"); buildFinder();
+      }, "xo");
+      xo.appendChild(b);
+    });
+    $("fpos").textContent = t("posLabel", { n: fs.base });
+    var grid = $("frets"); grid.innerHTML = "";
+    for (var r = 0; r < 5; r++) for (var s = 0; s < 6; s++) (function (s, f) {
+      var b = choice(String(f), fs.frets[s] === f, function () {
+        fs.frets[s] = fs.frets[s] === f ? 0 : f; sfx("tick"); buildFinder();
+      }, "cell");
+      grid.appendChild(b);
+    })(s, fs.base + r);
+    var ids = Chords.identify(fs.frets), out = $("fname"), alt = $("falt");
+    if (ids.length) {
+      out.textContent = Chords.name(ids[0]);
+      alt.textContent = ids.length > 1 ? t("also") + ids.slice(1).map(Chords.name).join(", ") : "";
+    } else {
+      out.textContent = t("noChord");
+      var seen = {}, names = [];
+      Chords.midiOf(fs.frets).forEach(function (m) { var n = Chords.NAMES[m % 12]; if (!seen[n]) { seen[n] = 1; names.push(n); } });
+      alt.textContent = names.join(" ");
+    }
+    $("fsee").disabled = !ids.length;
+  }
+  /* Moving the position moves the shape (1.4.1): the frets on screen and the shape move together, so no note can hide
+     outside the five frets and still sound. Open and muted strings stay as they are. A move that would take a fretted
+     note below fret 1 or past MAX_FRET, or the position past 12, is refused. */
+  function moveBase(d) {
+    var b = fs.base + d, next = fs.frets.slice(), i;
+    if (b < 1 || b > 12) { sfx("err"); return; }
+    for (i = 0; i < 6; i++) if (fs.frets[i] > 0) {
+      next[i] = fs.frets[i] + d;
+      if (next[i] < 1 || next[i] > Chords.MAX_FRET) { sfx("err"); return; }
+    }
+    fs.frets = next;
+    fs.base = b;
+    sfx("tick"); buildFinder();
+  }
+  function seeFound() {
+    var ids = Chords.identify(fs.frets);
+    if (!ids.length) { sfx("err"); return; }
+    var c = { root: ids[0].root, q: ids[0].q, bass: ids[0].bass }, frets = fs.frets.slice();
+    var l = Chords.voicings(c);
+    l = set.sort === "pos" ? Chords.byPosition(l) : l;
+    var i = l.map(function (v) { return v.frets.join(","); }).indexOf(frets.join(","));
+    temp = null;
+    if (i < 0) {
+      var fingers = Chords.assignFingers(frets);
+      temp = { name: Chords.name(c), v: { frets: frets, fingers: fingers, tier: 0, rank: 0,
+        pos: Chords.position(frets), barre: Chords.barreFromFingers(frets, fingers) } };
+      i = 0;
+    }
+    sfx("ok");
+    finder.classList.remove("open"); fs = null;
+    set.cur = { root: c.root, q: c.q, bass: c.bass, i: i };
+    remember(); store(); show();
+  }
+  $("fback").addEventListener("click", function () { sfx("tap"); closeFinder(); });
+  $("fdown").addEventListener("click", function () { moveBase(-1); });
+  $("fup").addEventListener("click", function () { moveBase(1); });
+  $("fplay").addEventListener("click", function () {
+    var n = Chords.midiOf(fs.frets);
+    if (!n.length) { if (Guitar.level()) sfx("err"); return; }
+    if (!Guitar.play(n, 0.012) && Guitar.level()) sfx("err");
+  });
+  $("fsee").addEventListener("click", seeFound);
+
+  /* ---------------- keys (section 7) ---------------- */
+  PAD.on("press", function (k) {
+    if (gl) {
+      if (k === "b") { sfx("tap"); closeProgs(); }
+      else if (k === "up" || k === "left") focusProg(-1);
+      else if (k === "down" || k === "right") focusProg(1);
+      else if (k === "a") playProg(gfocus);
+      return;
+    }
+    if (fs) {
+      if (k === "b") { sfx("tap"); closeFinder(); }
+      else if (k === "a" || k === "start") seeFound();
+      else if (k === "left") moveBase(-1);
+      else if (k === "right") moveBase(1);
+      return;
+    }
+    if (pick) {
+      if (document.activeElement === $("q")) return;
+      if (k === "b") { sfx("tap"); closePicker(); }
+      else if (k === "a" || k === "start") applyPick();
+      else if (k === "left" || k === "right") { pick.root = (pick.root + (k === "left" ? 11 : 1)) % 12; if (pick.bass === pick.root) pick.bass = null; sfx("tick"); buildPicker(); }
+      else if (k === "up" || k === "down") {
+        var n = Chords.QUALS.length, qi = Chords.QUALS.indexOf(Chords.qual(pick.q));
+        pick.q = Chords.QUALS[(qi + (k === "up" ? n - 1 : 1)) % n].id; sfx("tick"); buildPicker();
+      }
+      return;
+    }
+    if (k === "left") step(-1);
+    else if (k === "right") step(1);
+    else if (k === "up") stepQual(-1);
+    else if (k === "down") stepQual(1);
+    else if (k === "a") strum(false);
+    else if (k === "start") openPicker();
+    else if (k === "select") nextView();
+  });
+
+  var resizeTimer = 0;
+  window.addEventListener("resize", function () { clearTimeout(resizeTimer); resizeTimer = setTimeout(paint, 60); });
+
+  /* fixed words */
+  $("prev").textContent = t("prev"); $("next").textContent = t("next"); $("strum").textContent = t("strum");
+  $("strum").title = t("held");
+  $("pback").textContent = t("back"); $("pok").textContent = t("ok"); $("qgo").textContent = t("find");
+  $("q").placeholder = t("search"); $("rootH").textContent = t("root"); $("bassH").textContent = t("bass");
+  $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
+  $("sortH").textContent = t("order");
+  $("prog").textContent = t("progs"); $("gback").textContent = t("back");
+  $("fback").textContent = t("back");
+  $("fplay").textContent = t("listen"); $("fsee").textContent = t("see");
+  document.documentElement.lang = EN ? "en" : "zh";
+
+  function begin(s) {
+    adopt(s);
+    Guitar.setLevel(set.vol);
+    show();
+    /* the first paint can come before the layout settles */
+    requestAnimationFrame(paint);
+  }
+  PAD.load("set").then(begin, function () { begin(null); });
+})();
+</script>
+</body>
+</html>
