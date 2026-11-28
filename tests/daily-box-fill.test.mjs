@@ -61,6 +61,70 @@ function pad() {
 }
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r)); };
 
+function localKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function padWith(initial) {
+  const data = JSON.parse(JSON.stringify(initial || {}));
+  return {
+    lang: "zh", on() {}, off() {}, isDown() { return false; }, sfx() {},
+    save() { return Promise.resolve(); },
+    load(key) { return Promise.resolve(key in data ? JSON.parse(JSON.stringify(data[key])) : null); },
+    remove() {}, setSchema() {}
+  };
+}
+
+function run(app, frames) { for (let i = 0; i < frames; i++) app.frame(); }
+
+/* A pointer event at a canvas pixel of a fill stage: the app's own toScreen turns it into a world
+   pixel (or clamps it to the near edge when it is in a band). */
+function pointerAt(app, type, x, y) {
+  const st = app.ctx.get("game").stage;
+  app.pointer(type, x, y, 160, 144, st);
+}
+
+function tapBand(app, where) {
+  const st = app.ctx.get("game").stage;
+  const x = Math.floor(st.w / 2);
+  const y = where === "top" ? Math.max(1, Math.floor(st.y / 2))
+    : st.y + H + Math.max(1, Math.floor((st.h - st.y - H) / 2));
+  pointerAt(app, "pointerdown", x, y);
+  app.frame();
+  pointerAt(app, "pointerup", x, y);
+  run(app, 2);
+}
+
+function dragFromBand(app) {
+  const st = app.ctx.get("game").stage;
+  const x = Math.floor(st.w / 2), y = Math.max(1, Math.floor(st.y / 2));
+  pointerAt(app, "pointerdown", x, y);
+  app.frame();
+  pointerAt(app, "pointermove", x + 40, st.y + 72);   /* the finger comes down into the board */
+  app.frame();
+  pointerAt(app, "pointerup", x + 40, st.y + 72);
+  run(app, 2);
+}
+
+const BAND_SIZES = [[346, 518], [386, 738]];
+const CORRIDOR = [
+  "##########",
+  "@        .",
+  "#        #",
+  "#    $   #",
+  "#        #",
+  "#        #",
+  "#        #",
+  "##########",
+];
+
+async function bootBand(sw, sh, pad) {
+  const app = boot(APP, { pad: pad || padWith(), seed: 3, stage: { w: sw, h: sh } });
+  await settle();
+  run(app, 4);
+  return app;
+}
+
 test("daily-box app: is on 1.2.0 and asks lo-game for a fill screen", () => {
   assert.equal(readJSON("registry/apps/daily-box/manifest.json").version, "1.2.0");
   const src = readFileSync(join(ROOT, "registry/apps/daily-box/src/game.js"), "utf8");
@@ -80,5 +144,81 @@ test("daily-box app: the fitted stage covers all five phone sizes", async () => 
     assert.ok(st.w * st.k >= sw - 1e-9 && st.h * st.k >= sh - 1e-9, `${sw}x${sh}: paper at an edge`);
     /* the canvas' own pixels are the world plus the bands: the world's hit tests never move */
     assert.equal(app.ctx.get("BOX").state().ui, "title");
+  }
+});
+
+test("daily-box fill: a drag beginning in a band never moves the postman", async () => {
+  for (const [sw, sh] of BAND_SIZES) {
+    const app = await bootBand(sw, sh);
+    const BOX = app.ctx.get("BOX");
+    BOX.load(CORRIDOR);
+    run(app, 2);
+    const before = BOX.state();
+    assert.equal(before.ui, "play");
+
+    dragFromBand(app);
+    run(app, 4);
+
+    const after = BOX.state();
+    assert.equal(after.player, before.player, `${sw}x${sh}: the postman moved from a band drag`);
+    assert.equal(after.moves, before.moves, `${sw}x${sh}: a band drag counted a move`);
+    assert.equal(after.pushes, before.pushes, `${sw}x${sh}: a band drag pushed a crate`);
+  }
+});
+
+test("daily-box fill: a band tap never shifts the calendar month", async () => {
+  for (const [sw, sh] of BAND_SIZES) {
+    const app = await bootBand(sw, sh);
+    const BOX = app.ctx.get("BOX");
+    BOX.openCalendar("2026-11-15");
+    run(app, 3);
+    const before = BOX.calendar();
+    assert.equal(before.ui, "calendar");
+    assert.equal(before.month, 10, `${sw}x${sh}: the test month is not November 2026`);
+
+    const st = app.ctx.get("game").stage;
+    const y = Math.max(1, Math.floor(st.y / 2));
+    pointerAt(app, "pointerdown", 10, y);   /* over the left month arrow once clamped to row 0 */
+    app.frame();
+    pointerAt(app, "pointerup", 10, y);
+    run(app, 3);
+
+    const after = BOX.calendar();
+    assert.equal(after.ui, "calendar", `${sw}x${sh}: a band tap left the calendar`);
+    assert.equal(after.year, before.year, `${sw}x${sh}: a band tap shifted the year`);
+    assert.equal(after.month, before.month, `${sw}x${sh}: a band tap shifted the month`);
+  }
+});
+
+test("daily-box fill: a band tap never dismisses the result card", async () => {
+  const today = localKey(new Date());
+  const box = { v: 1, days: { [today]: { pushes: 1, moves: 1, ms: 1, peeked: false } } };
+  for (const [sw, sh] of BAND_SIZES) {
+    const app = await bootBand(sw, sh, padWith({ box }));
+    const BOX = app.ctx.get("BOX");
+    assert.equal(BOX.openDay(today), true);
+    run(app, 3);
+    assert.equal(BOX.state().ui, "card", `${sw}x${sh}: the result card did not open`);
+
+    tapBand(app, "top");
+
+    assert.equal(BOX.state().ui, "card", `${sw}x${sh}: a band tap dismissed the result card`);
+  }
+});
+
+test("daily-box fill: a world tap still works on the same stage", async () => {
+  for (const [sw, sh] of BAND_SIZES) {
+    const app = await bootBand(sw, sh);
+    const BOX = app.ctx.get("BOX");
+    BOX.load(CORRIDOR);
+    run(app, 2);
+    const before = BOX.state();
+    const st = app.ctx.get("game").stage;
+    pointerAt(app, "pointerdown", 80, st.y + 70);   /* the board, not the wall */
+    app.frame();
+    pointerAt(app, "pointerup", 120, st.y + 70);
+    run(app, 4);
+    const after = BOX.state();
+    assert.equal(after.moves, before.moves + 1, `${sw}x${sh}: a world swipe did not move`);
   }
 });

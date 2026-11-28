@@ -54,10 +54,14 @@ export function boot(file, opt = {}) {
   const names = Object.keys(g);
   const run = new Function(...names, body + "\n;return { get: function (name) { return eval(name); } };");
   const ctx = run(...names.map((n) => g[n]));
-  /* pointer(type, x, y, w, h): a "pointerdown" / "pointerup" at screen pixel x, y of a w x h game screen
-     (the fake canvas is 160 x 144 css px, so the point is scaled to it) */
-  const pointer = (type, x, y, w = 160, h = 144) => {
-    const e = { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
+  /* pointer(type, x, y, w, h, view): a "pointerdown" / "pointerup" at screen pixel x, y of a w x h game screen
+     (the fake canvas is 160 x 144 css px, so the point is scaled to it). `view` ({k}) is a fill stage's
+     CSS pixels per canvas pixel: x, y are then canvas pixels, so the app's real fit-and-offset mapping
+     is what turns them into world pixels. */
+  const pointer = (type, x, y, w = 160, h = 144, view = null) => {
+    const e = view
+      ? { pointerId: 1, clientX: (x + 0.5) * (view.k || 1), clientY: (y + 0.5) * (view.k || 1), preventDefault() {} }
+      : { pointerId: 1, clientX: (x + 0.5) * 160 / w, clientY: (y + 0.5) * 144 / h, preventDefault() {} };
     (elListeners[type] || []).forEach((f) => f(e));
   };
   /* pointerRaw(type, clientX, clientY): at page CSS pixels (the fake rect starts at 0, 0), for fill apps whose

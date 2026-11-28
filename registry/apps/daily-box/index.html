@@ -2458,12 +2458,13 @@ var touchStart = null, touchLast = null, touchCancelled = false, touchIgnored = 
   function point(e) {
     var r = canvas.getBoundingClientRect();
     /* With the fill layout the canvas is bigger than the world: divide by the canvas pixel size,
-       then subtract the world's offset. A tap on a band lands on the world's near edge, as
-       game.pointer does. */
+       then subtract the world's offset. Outside the world a gesture is not ours: null, so a drag
+       that begins in a band never becomes a swipe. */
     var st = game.stage, k = st.k || 1;
-    var x = Math.floor((e.clientX - r.left) / k - st.x);
-    var y = Math.floor((e.clientY - r.top) / k - st.y);
-    return { x: Math.max(0, Math.min(159, x)), y: Math.max(0, Math.min(143, y)) };
+    var fx = (e.clientX - r.left) / k - st.x;
+    var fy = (e.clientY - r.top) / k - st.y;
+    if (fx < 0 || fy < 0 || fx >= 160 || fy >= 144) return null;
+    return { x: Math.floor(fx), y: Math.floor(fy) };
   }
   canvas.addEventListener("pointerdown", function (e) {
     if (!primary(e)) {
@@ -2766,7 +2767,14 @@ function anyInput() {
   for (var i = 0; i < ALL_BUTTONS.length; i++) {
     if (game.pressed(ALL_BUTTONS[i])) return true;
   }
-  return game.pointer.pressed;
+  return tapInWorld();
+}
+
+/* A tap in the scenery is not an input: lo-game clamps the pointer to the world's near edge, so
+   without this a tap on the wall calendar or the floor would move, flip a month or dismiss a card. */
+function tapInWorld() {
+  var p = game.pointer, st = game.stage;
+  return p.pressed && p.stageX >= st.x && p.stageX < st.x + 160 && p.stageY >= st.y && p.stageY < st.y + 144;
 }
 
 /* Midnight while the app is open: the next play input, or coming back from HOME, starts the new
@@ -3281,7 +3289,7 @@ function updateMenu() {
   }
   var pick = -1;
   if (game.pressed("a") || game.pressed("start")) pick = menuSel;
-  else if (game.pointer.pressed) pick = menuHit();
+  else if (tapInWorld()) pick = menuHit();
   if (pick >= 0) chooseMenu(pick);
   else if (game.pressed("b")) {
     ui = menuBack;
@@ -3291,7 +3299,7 @@ function updateMenu() {
 
 function updateConfirm() {
   if (game.pressed("a")) doRestart();
-  else if (game.pointer.pressed && confirmAHit(game.pointer.x, game.pointer.y)) doRestart();
+  else if (tapInWorld() && confirmAHit(game.pointer.x, game.pointer.y)) doRestart();
   else if (game.pressed("b")) {
     ui = confirmBack;
     game.sfx("miss");
@@ -3299,7 +3307,7 @@ function updateConfirm() {
 }
 
 function updateHelp() {
-  if (game.pressed("a") || game.pressed("b") || game.pointer.pressed) {
+  if (game.pressed("a") || game.pressed("b") || tapInWorld()) {
     if (!seenHelp) {
       seenHelp = true;
       game.save("box-help", 1);
@@ -3310,9 +3318,9 @@ function updateHelp() {
 }
 
 function updateCard() {
-  if (game.pressed("a") || (game.pointer.pressed && game.pointer.x < 80)) {
+  if (game.pressed("a") || (tapInWorld() && game.pointer.x < 80)) {
     openCalendar(dayK, "card");
-  } else if (game.pressed("b") || game.pressed("start") || game.pointer.pressed) {
+  } else if (game.pressed("b") || game.pressed("start") || tapInWorld()) {
     clearInput();
     ui = "play";             /* 再看看: back to the finished board */
     game.sfx("tap");
@@ -3349,7 +3357,7 @@ function updateTitle() {
   if (game.repeat("left", 0.32, 0.09) || game.repeat("right", 0.32, 0.09) ||
       game.repeat("up", 0.32, 0.09) || game.repeat("down", 0.32, 0.09)) { titleSel = (titleSel + 1) % 2; game.sfx("move"); }
   if (game.pressed("a") || game.pressed("start")) chooseTitle(titleSel);
-  else if (game.pointer.pressed) {
+  else if (tapInWorld()) {
     var hit = titleHit(game.pointer.x, game.pointer.y);
     if (hit >= 0) { titleSel = hit; chooseTitle(hit); }
   }
@@ -3392,7 +3400,7 @@ function updateCalendar() {
     game.sfx("miss");
     return;
   }
-  if (game.pointer.pressed) {
+  if (tapInWorld()) {
     var arrow = calArrowAt(game.pointer.x, game.pointer.y);
     if (arrow) {
       if (calShiftMonth(arrow)) game.sfx("move"); else game.sfx("miss");
@@ -3429,7 +3437,7 @@ function gestureDirection(start, last, cancelled) {
 function pointerSwipe(now) {
   var p = game.pointer;
   if (p.pressed) {
-    if (touchIgnored) {
+    if (touchIgnored || !tapInWorld()) {
       swipe = null;
       return;
     }
@@ -3631,6 +3639,24 @@ function drawBandWall(s, top, calm) {
   for (var y = 8; y < top; y += 11) s.dither(0, y, s.width, 1, s.DARK, 1);
   for (var x = 14; x < s.width; x += 43) s.rect(x, 0, 1, top, s.DARK);
   if (top > 5) s.rect(0, top - 1, s.width, 1, s.DARK);
+  /* a tall title band needs one thing to look at above the picture */
+  if (ui === "title" && top >= 70) drawBandLamp(s, top, Math.floor(s.width * 0.22));
+}
+
+/* A hanging work lamp: the title picture's warehouse has one over the crates, so the ceiling above it
+   gets one too, with a faint cone on the wall. */
+function drawBandLamp(s, top, x) {
+  var y = Math.max(24, Math.floor(top * 0.55)), i, half;
+  for (i = 0; i < y - 7; i += 3) s.pixel(x, i, s.DARK);
+  for (i = 0; i < 6; i++) {
+    half = 2 + Math.floor(i * 1.4);
+    s.rect(x - half, y - 6 + i, half * 2 + 1, 1, i < 2 ? s.DARK : s.MID);
+  }
+  s.rect(x - 1, y, 3, 2, s.PAPER);
+  for (var gy = y + 3; gy < top - 1; gy++) {
+    var spread = Math.min(20, 3 + Math.floor((gy - y) / 2));
+    s.dither(x - spread, gy, spread * 2, 1, s.MID, 1);
+  }
 }
 
 /* The extra columns of a stage that is too short for the world's width: the room carries on. */
