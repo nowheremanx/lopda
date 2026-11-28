@@ -63,3 +63,65 @@ for (const lang of ["zh", "en"]) {
     await p.close();
   });
 }
+
+/* A return to the title from pause replaces the canvas. mountTitle() must destroy the menu it replaces: lo-title
+   0.1.1's destroy() removes its window resize listener, its pointer listeners, its pending frame and its full-screen
+   buffers. The spy wraps LoTitle.mount before the app's own script assigns LoTitle, so it sees each menu and its
+   destroy() calls; a leaked menu would leave mounts ahead of destroys (and its buffers alive until a resize). */
+test("lao-zhang: returning to the title destroys the previous menu", { skip, timeout: 90000 }, async () => {
+  const p = await browser.newPage({ viewport: { width: 900, height: 1000 } });
+  await p.addInitScript(() => {
+    let lib = null;
+    window.__lt = { mounts: 0, destroys: 0 };
+    Object.defineProperty(window, "LoTitle", {
+      configurable: true,
+      get() { return lib; },
+      set(v) {
+        if (lib) return;                     /* the first assignment is the bundled library */
+        lib = v;
+        const mount = v.mount;
+        v.mount = function (canvas, opts) {
+          const menu = mount.call(this, canvas, opts);
+          window.__lt.mounts++;
+          const destroy = menu.destroy;
+          menu.destroy = function () {
+            if (menu.__live) { menu.__live = false; window.__lt.destroys++; }
+            return destroy.call(this);
+          };
+          menu.__live = true;
+          return menu;
+        };
+      }
+    });
+  });
+  await p.goto(`${base}/sdk/dev.html?app=registry/apps/lao-zhang&lang=zh`);
+  await p.addStyleTag({ content: ".screen{width:331px!important;height:359px!important;border:0!important}" });
+  await p.waitForTimeout(1200);
+  const f = p.frames().find((x) => x !== p.mainFrame());
+  await f.waitForSelector("#tt", { timeout: 15000 });
+  const stats = () => f.evaluate(() => ({
+    mounts: window.__lt.mounts, destroys: window.__lt.destroys,
+    canvases: document.querySelectorAll("canvas.lotitle").length
+  }));
+  /* the boot mounts the title before the saves are read, then again when they arrive: the first menu is destroyed */
+  const first = await stats();
+  assert.equal(first.canvases, 1, "one title canvas at boot");
+  assert.equal(first.mounts - first.destroys, 1, "the title that is up is the only live menu: " + JSON.stringify(first));
+  for (let i = 0; i < 3; i++) {
+    await p.keyboard.press("x");                       /* 新游戏 / 继续: into the level tip */
+    await p.waitForTimeout(400);
+    await p.keyboard.press("Enter");                   /* START pauses, also from the tip */
+    await p.waitForTimeout(300);
+    await p.keyboard.press("ArrowDown");               /* 返回标题 / title */
+    await p.waitForTimeout(200);
+    await p.keyboard.press("x");
+    await f.waitForSelector("#tt", { timeout: 10000 });
+    await p.waitForTimeout(300);
+    const now = await stats();
+    assert.equal(now.canvases, 1, `return ${i + 1}: one title canvas, got ${now.canvases}`);
+    assert.equal(now.mounts, first.mounts + i + 1, `return ${i + 1}: the title was mounted again`);
+    assert.equal(now.destroys, first.destroys + i + 1, `return ${i + 1}: the menu it replaced was destroyed`);
+    assert.equal(now.mounts - now.destroys, 1, `return ${i + 1}: exactly one live menu, old ones destroyed`);
+  }
+  await p.close();
+});

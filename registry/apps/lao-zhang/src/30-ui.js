@@ -256,7 +256,12 @@ GM.ui = (function () {
 
   /* The title screen: the picture, the name painted over its sky and the menu, all drawn by sdk/lo-title.js */
   var titleMenu = null, titleArt = null;
+  /* lo-title's default is 6 LCD pixels a font pixel; the owner asked for one step smaller on a phone (PR #517) */
+  var TITLE_MAX_SCALE = 5;
   function mountTitle() {
+    /* coming back from pause or the end screen replaces the canvas, so the old menu's resize listener and its
+       full-screen buffers must go with it (lo-title 0.1.1's destroy) */
+    if (titleMenu) { titleMenu.destroy(); titleMenu = null; }
     var c = $("tt");
     if (!c || typeof LoTitle === "undefined") return;
     if (!titleArt) titleArt = { w: GM.titleArt.W, h: GM.titleArt.H, px: GM.titleArt.draw(LANG, true) };
@@ -265,6 +270,10 @@ GM.ui = (function () {
     /* the name on the sky left of the winch; the fog may cover the picture from the claw on the nugget down */
     spec.title = { text: name.text, sub: name.sub, x: 17, y: 6, w: 86 };
     spec.calm = 141;
+    /* one step under lo-title's own cap: at 6 the chosen word on a phone ran almost the whole screen wide and read
+       too large (owner, PR #517); 5 keeps it the one big thing without crowding the name and the bar. The shorter
+       menu makes menuStart() drop the fog top and the neighbour words a few pixels lower; the bar stays put. */
+    spec.maxScale = TITLE_MAX_SCALE;
     spec.onMove = function (i) { state.menuCursor = i + titleOffset(); sfx("move"); };
     spec.onPick = function (i) { state.menuCursor = i + titleOffset(); chooseMenu(); };
     titleMenu = LoTitle.mount(c, spec);
