@@ -23,12 +23,13 @@ var ROW_ICONS={
   saves:["............","..00000000..","..0......0..","..0.0..0.0..","..0......0..","..0.0000.0..","..0......0..","..0......0..","..00000000..","...0....0...","..00000000..","............"],
   key:["............","..000.......",".0...0......",".0...0......","..000.......","....0000000.",".........0..",".........0..",".........00.","............","............","............"],
   sounds:["............","....0000....","...0....0...","...0....0...","..0......0..","..0......0..","..0......0..",".0........0.",".0........0.","000000000000","....0000....",".....00....."],
+  pad:["............","............","..00000000..",".0........0.","0..0.....0.0","0.000...0.00","0..0..0...00","0.......0..0",".0........0.","..00....00..","............","............"],
   share:["............","........000.","........000.",".......0....","......0.....",".000.0......",".0000.......",".000.0......","......0.....",".......0....","........000.","........000."],
   about:["....0000....","..00....00..",".0...00...0.",".0...00...0.","0..........0","0...000....0","0....00....0","0....00....0",".0...00...0.",".0..0000..0.","..00....00..","....0000...."]
 };
 function drawRowIcons(){
   [["set-vol-ico","volume"],["set-ui-ico","sounds"],["set-lang-ico","language"],["set-sys-ico","system"],["set-sense-ico","permissions"],
-   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-saves-ico","saves"],["set-key-ico","key"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
+   ["set-ai-ico","ai"],["set-backup-ico","backup"],["set-saves-ico","saves"],["set-key-ico","key"],["set-pad-ico","pad"],["set-share-ico","share"],["set-about-ico","about"]].forEach(function(p){
     var host=$(p[0]), rows=ROW_ICONS[p[1]];
     if(host && rows){ host.textContent=""; host.appendChild(LP.iconCanvas(rows)); }
   });
@@ -1111,6 +1112,8 @@ $("set-backup-open").onclick=function(){ sfx("tap"); show("set-backup"); };
 $("set-backup-back").onclick=function(){ sfx("tap"); openSettings(); };
 $("set-saves-open").onclick=function(){ sfx("tap"); show("set-saves"); };
 $("set-saves-back").onclick=function(){ sfx("tap"); openSettings(); };
+$("set-pad-open").onclick=function(){ sfx("tap"); show("set-pad"); };   /* gamepad.js fills the page */
+$("set-pad-back").onclick=function(){ sfx("tap"); openSettings(); };
 $("set-share-open").onclick=function(){ sfx("tap"); show("set-share"); };
 $("set-share-back").onclick=function(){ sfx("tap"); openSettings(); };
 $("set-about-open").onclick=function(){ sfx("tap"); show("set-about"); };
