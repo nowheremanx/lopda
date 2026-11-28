@@ -810,17 +810,23 @@ document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
 
 /* sdk/LO-GAME.md 2.1: with fill on, a tap in the bands around the world is clamped onto the world's
    nearest edge (pointer.x/y stay inside it), so every direct read of game.pointer asks whether the
-   press landed in the world first. A band tap must not start a game, pick a level or dismiss a card. */
-function worldPoint() {
-  var p = game.pointer, st = game.stage;
-  return p.stageX >= st.x && p.stageX < st.x + game.width &&
-    p.stageY >= st.y && p.stageY < st.y + game.height;
-}
-function worldTap() { return game.pointer.pressed && worldPoint(); }
+   press landed in the world. The answer is taken from the pointerdown itself: lo-game keeps only the
+   latest point, and a finger that moves before the next frame has already left where it went down. */
+var downInWorld = false, touchInWorld = false;
+(function () {
+  var cvs = typeof document !== "undefined" && document.querySelector ? document.querySelector("canvas") : null;
+  if (!cvs || !cvs.addEventListener) return;
+  cvs.addEventListener("pointerdown", function (e) {
+    if (e.isPrimary === false) return;
+    var r = cvs.getBoundingClientRect(), sg = game.stage, k = sg.k || 1;
+    var sx = (e.clientX - r.left) / k, sy = (e.clientY - r.top) / k;
+    downInWorld = sx >= sg.x && sx < sg.x + game.width && sy >= sg.y && sy < sg.y + game.height;
+  });
+})();
+function worldTap() { return game.pointer.pressed && downInWorld; }
 /* the ball follows a finger held on the world; one that went down in a band never grabs it, and one
    that went down on the world keeps pulling even if it slides off (a real finger does) */
-var touchInWorld = false;
-function noteTouch() { if (game.pointer.pressed) touchInWorld = worldPoint(); }
+function noteTouch() { if (game.pointer.pressed) touchInWorld = downInWorld; }
 
 /* ---- the stone around the tray (sdk/UI.md 13, sdk/LO-GAME.md 2.1) ----
    The world keeps its 160 x 176 size, its levels and every hit test; lo-game's fill canvas grows the wall
@@ -829,6 +835,7 @@ function noteTouch() { if (game.pointer.pressed) touchInWorld = worldPoint(); }
    The still screens (title, the level list, an area's card, a pause and its menu, the tally) paint the
    same stone flat and empty, so their bands never look like the maze is being played. */
 var COURSE = 9;                          /* canvas rows in one course of the wall */
+var SLAB = 13;                           /* and in one flagstone: wider, so the ledge is not more wall */
 
 function bandsCalm() {
   var top = game.top ? game.top() : null;
@@ -848,17 +855,17 @@ function bandWall(s, w, top) {
   }
 }
 
-/* the floor the tray rests on: a shadow under its near edge, one lit row, flagstones to the canvas edge */
+/* the floor the tray rests on: a shadow under its near edge, one lit row, wide flagstones to the canvas edge */
 function bandFloor(s, w, h, by) {
   var bh = h - by;
   s.rect(0, by, w, bh, s.DARK);
   s.rect(0, by, w, Math.min(2, bh), s.INK);
   if (bh >= 4) s.rect(0, by + 2, w, 1, s.MID);
-  for (var y = by + 3, r = 0; y < h; y += 9, r++) {
-    var hh = Math.min(9, h - y), off = (r & 1) ? 13 : 0, x;
+  for (var y = by + 3, r = 0; y < h; y += SLAB, r++) {
+    var hh = Math.min(SLAB, h - y), off = (r & 1) ? 15 : 0, x;
     if (y + hh < h) s.rect(0, y + hh, w, 1, s.INK);
-    for (x = -off; x < w; x += 26) if (x >= 0) s.rect(x, y, 1, hh, s.INK);
-    if (hh >= 3 && r % 2 === 0) s.rect(Math.max(0, 6 + (r % 3) * 31), y + 1, 5, 1, s.MID);
+    for (x = -off; x < w; x += 30) if (x >= 0) s.rect(x, y, 1, hh, s.INK);
+    if (hh >= 4 && r % 2 === 0) s.rect(Math.max(0, 8 + (r % 3) * 34), y + 2, 6, 1, s.MID);
   }
   if (bh >= 12) s.rect(0, h - 2, w, 2, s.INK);
 }
@@ -884,6 +891,11 @@ function bandMarble(s, x, y) {
   s.pixel(x - 1, y - 5, s.PAPER);
 }
 
+/* a still screen keeps the stone flat, but not empty: one row of lit joints ties a tall band to the wall */
+function bandCalmJoint(s, w, y) {
+  for (var x = 4; x < w; x += 22) s.rect(x, y, 6, 1, s.MID);
+}
+
 function paintBands(s, st) {
   var w = st.w, h = st.h, x0 = st.x, y0 = st.y, ww = st.worldW, wh = st.worldH;
   var bot = h - (y0 + wh), left = x0, right = w - (x0 + ww), calm = bandsCalm();
@@ -891,6 +903,9 @@ function paintBands(s, st) {
   if (!calm) {
     if (y0 > 0) bandWall(s, w, y0);
     if (bot > 0) bandFloor(s, w, h, y0 + wh);
+  } else {
+    if (y0 >= 48) bandCalmJoint(s, w, y0 - 10);
+    if (bot >= 48) bandCalmJoint(s, w, y0 + wh + 10);
   }
   /* the tray's rim: a lit bevel on the far side, a shadow on the near side (light from the top left) */
   if (y0 >= 1) s.rect(x0, y0 - 1, ww, 1, s.MID);

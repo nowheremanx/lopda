@@ -588,8 +588,8 @@
         "motion"
       ],
       "path": "apps/tilt-maze/index.html",
-      "sha256": "ab77d85b225ce980e925d185027dec46b95802d570e21d6ab75ba3fa0d638cc1",
-      "bytes": 108521
+      "sha256": "a8218786b61aaac3374664aab37e9aa8d5a8c61d2a219c2db377430bbd7f7892",
+      "bytes": 109410
     },
     {
       "spec": "lopda/1",

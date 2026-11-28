@@ -247,6 +247,44 @@ test("tilt-maze app: a band tap or drag never starts the ball, nor skips the are
   assert.equal(a.ctx.get("paused"), false, "B resumes");
 });
 
+test("tilt-maze app: a press is judged where it went down, not where the finger slid by the next frame", async () => {
+  /* 346 x 518: the title, a band down two rows under the tray that slides two rows up before the tick */
+  let a = await bootAt(346, 518);
+  let game = a.game, st = game.stage;
+  const title = game.top();
+  stageDown(a, st.x + 120, st.y + H + 2);          /* on the flagstones, under the title */
+  stageMove(a, st.x + 120, st.y + H - 2);          /* up into the world's dark band, no frame between */
+  await a.run(4);
+  stageUp(a, st.x + 120, st.y + H - 2);
+  await a.run(40);
+  assert.equal(game.top(), title, "a band down that slid into the world started the game");
+
+  /* 348 x 323: the jamb on a short stage, a down two columns out that slides five columns in */
+  a = await bootAt(348, 323);
+  game = a.game; st = game.stage;
+  await press(a, "a");                             /* the title starts level 1 from the key */
+  await a.run(80);
+  if (a.ctx.get("state") === "intro") { await press(a, "a"); await a.run(4); }
+  assert.equal(a.ctx.get("state"), "roll");
+  const ballNow = () => a.ctx.get("ball");
+  const reset = async () => { a.ctx.get("placeBall")(); await a.run(2); };
+  await reset();
+  const x0 = ballNow().x, y0 = ballNow().y;
+  stageDown(a, st.x - 2, st.y + 40);               /* in the left jamb */
+  stageMove(a, st.x + 5, st.y + 40);               /* into the maze, no frame between */
+  await a.run(30);
+  stageUp(a, st.x + 5, st.y + 40);
+  assert.equal(ballNow().x, x0); assert.equal(ballNow().y, y0, "a jamb down that slid into the maze pulled the ball");
+
+  /* and the other way: a down on the world keeps pulling after the finger leaves it */
+  await reset();
+  stageDown(a, st.x + 80, st.y + 40);              /* on the maze */
+  stageMove(a, st.x + W + 6, st.y + 40);           /* out into the right jamb, no frame between */
+  await a.run(30);
+  stageUp(a, st.x + W + 6, st.y + 40);
+  assert.ok(ballNow().x > x0 + 1, "a drag that went down on the world stopped pulling when it left it");
+});
+
 test("tilt-maze app: pause, the area's card and the tally keep the bands flat and still", async () => {
   const a = await bootAt(386, 738);
   const game = a.game, st = game.stage;
