@@ -14,7 +14,7 @@ var Chords = (function () {
   var PICK_NAMES = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
   var LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
 
-  /* The 25 qualities, in the order the picker lists them (section 2.1). iv: semitones above the root; lab: how each
+  /* The 28 qualities, in the order the picker lists them (section 2.1). iv: semitones above the root; lab: how each
      interval is written; opt: intervals a voicing may leave out (the fifth). group: the picker's heading; common: how
      readily identify() picks it when two names fit the same notes. A 9, 11 or 13 is stored as its mod-12 interval
      (2, 5, 9); tones() stacks it an octave up. */
@@ -43,7 +43,10 @@ var Chords = (function () {
     { id: "7#9",   zh: "属七升九", en: "7 sharp 9", iv: [0, 3, 4, 7, 10],  lab: ["R", "#9", "3", "5", "b7"],     opt: [7], group: 5, common: 0.3 },
     { id: "6/9",   zh: "六九",   en: "six-nine",    iv: [0, 2, 4, 7, 9],   lab: ["R", "9", "3", "5", "6"],       opt: [7], group: 3, common: 0.35 },
     { id: "m11",   zh: "小十一", en: "minor 11",    iv: [0, 2, 3, 5, 7, 10], lab: ["R", "9", "b3", "11", "5", "b7"], opt: [7, 2], group: 4, common: 0.3 },
-    { id: "add11", zh: "加十一", en: "add11",       iv: [0, 4, 5, 7],     lab: ["R", "3", "11", "5"],          opt: [7], group: 3, common: 0.3 }
+    { id: "add11", zh: "加十一", en: "add11",       iv: [0, 4, 5, 7],     lab: ["R", "3", "11", "5"],          opt: [7], group: 3, common: 0.3 },
+    { id: "7b9",   zh: "属七降九", en: "7 flat 9",   iv: [0, 1, 4, 7, 10], lab: ["R", "b9", "3", "5", "b7"],    opt: [7], group: 5, common: 0.3 },
+    { id: "7b5",   zh: "属七降五", en: "7 flat 5",   iv: [0, 4, 6, 10],    lab: ["R", "3", "b5", "b7"],         opt: [],  group: 5, common: 0.3 },
+    { id: "7#5",   zh: "属七升五", en: "7 sharp 5",  iv: [0, 4, 8, 10],    lab: ["R", "3", "#5", "b7"],         opt: [],  group: 5, common: 0.3 }
   ];
   var GROUPS = [{ zh: "三和弦", en: "Triads" }, { zh: "七和弦", en: "Sevenths" }, { zh: "挂留", en: "Suspended" },
     { zh: "加音、六", en: "Added, sixths" }, { zh: "九、十一、十三", en: "Ninths, elevenths, thirteenths" },
@@ -75,6 +78,10 @@ var Chords = (function () {
     "6/9": "6/9", "69": "6/9", "6add9": "6/9", "M6/9": "6/9",
     "m11": "m11", "min11": "m11", "-11": "m11",
     "add11": "add11", "add4": "add11", "(add11)": "add11",
+    "7b9": "7b9", "7(b9)": "7b9", "7-9": "7b9",
+    "7b5": "7b5", "7(b5)": "7b5", "7-5": "7b5",
+    /* aug7 and 7#5 are the same chord (owner, 1.4.8): one quality, several names */
+    "7#5": "7#5", "7(#5)": "7#5", "7+5": "7#5", "7+": "7#5", "aug7": "7#5", "+7": "7#5",
     /* not qualities of this book: a major 11 and a minor 6/9 must not fall through the lowercase aliases to
        m11 and 6/9 (M/m stay apart, as the comment above says) */
     "M11": null, "m6/9": null
@@ -176,6 +183,8 @@ var Chords = (function () {
     /* the colours of 1.4.7: their first shapes under Common, each naming itself first in the finder */
     ["Cmaj9", "x3243x", "021430"], ["C13", "x30355", "010234"], ["E7#9", "076780", "021340"],
     ["C6/9", "x32233", "021134"], ["Cm11", "x31311", "021311"], ["Cadd11", "x32011", "032011"],
+    /* 1.4.8's three altered dominants: E7b9 bars D-G-B at 6 with the ring finger on G 7; C7b5 sits at 3-4, C7#5 at 3-6 */
+    ["E7b9", "07676x", "021310"], ["C7b5", "x34310", "024310"], ["C7#5", "x36350", "013120"],
     /* slash chords */
     ["D/F#", "2x0232", "T00132"], ["G/B", "x20003", "010003"], ["C/G", "332010", "432010"], ["C/E", "032010", "032010"],
     ["Am/G", "3x2210", "402310"], ["F/C", "x33211", "034211"], ["D/A", "x00232", "000132"], ["Am/E", "002210", "002310"]
@@ -314,36 +323,58 @@ var Chords = (function () {
      strings only at the low side plus one in the middle, at most 4 fingers. */
   function generate(c) {
     var Q = qual(c.q), bass = c.bass === null || c.bass === undefined ? c.root : c.bass;
-    var allowed = [], need = [], i;
+    var allowed = [], needMask = 0, i;
     for (i = 0; i < 12; i++) allowed.push(false);
-    Q.iv.forEach(function (v) { allowed[mod12(c.root + v)] = true; if (Q.opt.indexOf(v) < 0) need.push(mod12(c.root + v)); });
+    Q.iv.forEach(function (v) {
+      var pc = mod12(c.root + v);
+      allowed[pc] = true;
+      if (Q.opt.indexOf(v) < 0) needMask |= 1 << pc;
+    });
     allowed[bass] = true;
-    if (need.indexOf(bass) < 0) need.push(bass);
+    needMask |= 1 << bass;
     var minStrings = Q.id === "5" ? 2 : Math.min(4, Q.iv.length + 1);
-    var seen = {}, out = [], frets = [0, 0, 0, 0, 0, 0];
-    function finish() {
-      var notes = midiOf(frets);
-      if (notes.length < minStrings) return;
-      var lowest = Math.min.apply(null, notes);
+    var seen = {}, out = [], frets = [0, 0, 0, 0, 0, 0], reach = [0, 0, 0, 0, 0, 0, 0];
+    /* a pitch-class bitmask and the running low note keep the hot path free of arrays and objects; reach[s] is every
+       pitch class still playable on strings s..5 at this hand position, so a branch that can no longer supply a
+       required tone is cut before it descends */
+    function setReach(lo, hi) {
+      reach[6] = 0;
+      for (var s = 5; s >= 0; s--) {
+        var m = allowed[mod12(OPEN[s])] ? 1 << mod12(OPEN[s]) : 0;
+        for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) m |= 1 << mod12(OPEN[s] + f);
+        reach[s] = m | reach[s + 1];
+      }
+    }
+    function finish(mask, sounding, lowest) {
+      if (sounding < minStrings) return;
       if (mod12(lowest) !== bass) return;
-      var have = {};
-      notes.forEach(function (n) { have[mod12(n)] = true; });
-      for (var k = 0; k < need.length; k++) if (!have[need[k]]) return;
+      if ((mask & needMask) !== needMask) return;
       if (fingerCount(frets).n > 4) return;
       var id = frets.join(",");
       if (seen[id]) return;
       seen[id] = true;
       out.push(frets.slice());
     }
-    function walk(s, lo, hi, started, gaps) {
-      if (s === 6) { finish(); return; }
+    function walk(s, lo, hi, started, gaps, mask, sounding, lowest) {
+      if (sounding + (6 - s) < minStrings) return;
+      if (((mask | reach[s]) & needMask) !== needMask) return;
+      if (s === 6) { finish(mask, sounding, lowest); return; }
       /* muted */
-      if (!started || gaps === 0) { frets[s] = -1; walk(s + 1, lo, hi, started, started ? gaps + 1 : 0); }
+      if (!started || gaps === 0) { frets[s] = -1; walk(s + 1, lo, hi, started, started ? gaps + 1 : 0, mask, sounding, lowest); }
       /* open */
-      if (allowed[mod12(OPEN[s])]) { frets[s] = 0; walk(s + 1, lo, hi, true, gaps); }
-      for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) { frets[s] = f; walk(s + 1, lo, hi, true, gaps); }
+      if (allowed[mod12(OPEN[s])]) {
+        frets[s] = 0;
+        walk(s + 1, lo, hi, true, gaps, mask | (1 << mod12(OPEN[s])), sounding + 1, Math.min(lowest, OPEN[s]));
+      }
+      for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) {
+        frets[s] = f;
+        walk(s + 1, lo, hi, true, gaps, mask | (1 << mod12(OPEN[s] + f)), sounding + 1, Math.min(lowest, OPEN[s] + f));
+      }
     }
-    for (var start = 1; start + SPAN <= MAX_FRET; start++) walk(0, start, start + SPAN, false, 0);
+    for (var start = 1; start + SPAN <= MAX_FRET; start++) {
+      setReach(start, start + SPAN);
+      walk(0, start, start + SPAN, false, 0, 0, 0, Infinity);
+    }
     return out;
   }
 
@@ -366,11 +397,12 @@ var Chords = (function () {
       var id = f.join(",");
       if (seen[id]) return;
       seen[id] = true;
-      list.push({ frets: f, fingers: assignFingers(f), tier: 0, rank: score(f) });
+      list.push({ frets: f, fingers: null, tier: 0, rank: score(f) });
     });
     list.sort(function (a, b) { return b.rank - a.rank; });
     list = list.slice(0, LIMIT);
     list.forEach(function (v) {
+      if (!v.fingers) v.fingers = assignFingers(v.frets);   /* only the 24 shown, not every candidate */
       v.pos = position(v.frets);
       v.barre = v.tier > 0 ? barreFromFingers(v.frets, v.fingers) : fingerCount(v.frets).barre;
     });
@@ -386,7 +418,7 @@ var Chords = (function () {
   }
 
   /* ---------------- naming a voicing (section 3.4) ---------------- */
-  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 25.
+  /* frets -> up to three names, best first: [{root, q, bass, score}], or [] when the notes are no chord of the 28.
      The notes' pitch classes must hold every required tone of the quality and nothing outside it but the bass. */
   function identify(frets) {
     var notes = midiOf(frets);

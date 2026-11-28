@@ -1,6 +1,6 @@
 /* 和弦大全 / Chords: chord progressions (和弦连接). A hand-written table of common progressions, each in degrees of its key
    with a short note on why it works; forChord() finds the ones a chord belongs to and spells them in that chord's key.
-   Every one of the 25 qualities appears in at least one of the 26 progressions (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
+   Every one of the 28 qualities appears in at least one of the 28 progressions (tests/chord-book.test.mjs). Pure: no DOM, no PAD.
    A progression is not anyone's property; the notes are our own words. Pachelbel's canon (1680s) is public domain.
    MIT License. Copyright (c) 2026 Haowei Wu. */
 var Progs = (function () {
@@ -171,6 +171,18 @@ var Progs = (function () {
       why: {
         zh: "升九音其实就是小三音，和大三音一起响：同一个和弦里同时有大三度和小三度，磨得很厉害。它仍然是个属七和弦，解决到主和弦时那股拉力还在；停在 I 或 IV 上不解决，就成了一大块悬着的颜色。",
         en: "The sharp 9 is really a minor 3rd sounding at the same time as the major 3rd: one chord holding both, a hard rub. It is still a dominant 7th, so the pull is there when it resolves; left unresolved on I or IV it becomes a large suspended colour."
+      } },
+    { id: "altered-b9", key: "maj", zh: "变化属七（降九）", en: "Altered dominant (flat 9)",
+      ch: [[0, "7b9"], [5, "7b9"]], rn: ["I7b9", "IV7b9"],
+      why: {
+        zh: "降九音就在根音上方半音，耳朵一直听它想往下落到根音上。放在 I 或 IV 上，这个小二度的摩擦只是颜色，不是真要解决，所以两个和弦可以来回挂着。",
+        en: "The flat 9 sits a half step above the root and leans down onto it. On I or IV that rub is colour rather than a cadence, so the two chords can hang there without settling."
+      } },
+    { id: "altered-fifth", key: "maj", zh: "变化属七（降五、升五）", en: "Altered dominant (flat/sharp 5)",
+      ch: [[0, "7b5"], [5, "7#5"]], rn: ["I7b5", "IV7#5"],
+      why: {
+        zh: "降五和升五只是把五音换掉，三音和降七音不动，属七的骨架还在。五音降或升半音，和弦一会儿像减三和弦、一会儿像增三和弦，颜色变了，拉力没变。",
+        en: "The flat and sharp 5 change only the fifth while the 3rd and flat 7th stay, so the dominant frame is intact. Lowered or raised by a half step, the fifth turns the chord diminished or augmented in colour; the pull stays."
       } }
   ];
 
