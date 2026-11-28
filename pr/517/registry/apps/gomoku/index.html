@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>五子棋</title>
+<!-- Lo-PDA example app (lopda/1): touch only, sounds through PAD.sfx, zh/en text through PAD.lang. MIT License. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#a3ad7e;font-family:monospace;color:#1f2a14;touch-action:none;user-select:none;-webkit-user-select:none}
+/* one canvas over the whole stage: board, status bar and button bar are painted into it (UI.md section 13) */
+#stage{position:fixed;inset:0;overflow:hidden;background:#7d8a58}
+#c{display:block;position:absolute;left:0;top:0;touch-action:none}
+button{font-family:monospace;font-size:15px;font-weight:bold;min-height:44px;color:#a3ad7e;background:#1f2a14;border:2px solid #1f2a14;padding:8px 14px;cursor:pointer;touch-action:manipulation;box-shadow:3px 3px 0 #4a5a32}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #4a5a32}
+/* the title screen covers the stage: picture, one line, full-width rows (44 px) */
+#ov{position:fixed;inset:0;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#a3ad7e;overflow:hidden;padding:8px;box-sizing:border-box}
+#panel{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;min-height:0}
+#art{display:block}
+#ot{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);margin:0}
+#op{margin:0;font-size:14px;line-height:1.5;text-align:center;box-sizing:border-box;padding:0 6px}
+#btns{display:flex;flex-direction:column;gap:6px;width:100%;box-sizing:border-box}
+#btns button{width:100%;min-height:44px;padding:8px 6px}
+/* the radio match is the second choice: an outline, never the solid primary button */
+#panel #lk{background:#a3ad7e;color:#1f2a14;border:2px solid #1f2a14;box-shadow:none}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="ov"><div id="panel"><canvas id="art" aria-hidden="true"></canvas><h1 id="ot">五子棋</h1><p id="op">你执黑先手，横竖斜连成五子即胜。</p><div id="btns"><button id="st">开始</button><button id="lk" class="hide">对战（电波）</button></div></div></div>
+<script>
+/* the title picture: a 156 x 156 buffer of tone indices (0 paper, 1 mid, 2 dark, 3 ink), drawn once per language.
+   A hand sets a black stone on the board in the traditional grip; the name is written on the dark wall above the
+   board. The picture is stored packed, 2 bits a pixel; the letters are lopix12 glyphs (sdk/fonts, OFL) at 2x. */
+var ART = (function () {
+  var W = 156, H = 156;
+  var PIC = "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/pVVVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqUAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/gAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/RAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqquqAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9AAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/QAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/VAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqv8AAAAAAAAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/lUAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqQAAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr/9AAAAAAAAAAAAAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq/9VUAAAAAAAAAAAAAABqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAAAAAAAAAAAAAAAAGqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr9AAAAAAAAAAAAAAAAAAWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqr4AAAAAAAAAAAAAAAAAABWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq+UAAAAAAAAAAAAAAAAAAFWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq5AAAAAAAAAAAAAAAAAAAVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrgAAAAAAAAAAAAAAAAAABVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrgAAAAAAAAAAAAAAAAAAFVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqquAAAAAAAAAAAAAAAAAAAVVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpAAAAAAAAAAAAAAAAAABVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAAAAAAAAAAAAAFVVVqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAAAAAAAAAAAAAFVVpqqqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAAAAAGVVVUAAAAAAAFVV5qqqqqqqqqqqqqqqqqqqqqqqqqqqqr0AAABVVWlVVUAAAAAAAVVW5qqqqqqqqqqqqqqqqqqqqqqqqqqqqrAAAAFVVWlVVUAAAAAAAVVXmqqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAABVVVWlVWQAAAAAABVVXmqqqqqqqqqqqqqqqqqqqqqqqqqqqq4AAAFVVVW5VaQAAAAAAFVVuVqqqqqqqqqqqqqqqqqqqqqqqqqqqrkAAAFaVVV5VuAAAAAAAFVVtqqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAAFammppVtAAAAAAAFVVu/qqqqqqqqqqqqqqqqqqqqqqqqqqqtAAAAVX////lsAAAAAABVVW/6qqqqqqqqqqqqqqqqqqqqqqqqqqq4AAABVX6qqr5sAAAAAAFVVb6qqqqqqqqqqqqqqqqqqqqqqqqqqqrkAAAFVb6qqq+oAAAAABVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqvQAAAFWvqqqqvwAAAAABVVW+qqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAAAVW+qqqqrgAAAAAFVVW6qqqqqqqqqqqqqqqqqqqqqqqqqqqq0AAABVW6qqqqvgAAAAFVVVbqqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAAFVuqqqqq9AAAAAVVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqvAAAAVa+qqqqr4AAAAEVVVW+qqqqqqqqqqqqqqqqqqqqqqqqqqqq9AAABVb6qqqqvQAAAAVVVVb6qqqqqqqqqqqqqqqqqqqqqqqqqqqq4AAAFVbqqqqquAAAABVVVVbqqqqqqqqqqqqqqqqqqqqqqqqqqqqrkAABVX/qqqqq4AAAAVVVVV+qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAABVrv6qqqrgAAABVVVVa6qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAVVvb6qqqvQAAAFVVVav6qqqqqqqqqqqqqqqqqqqqqqqqqqqqrQAAZW9W6qqq9AAAAVVVVv+qqqqqqqq//////////////////////QAAa/1W////0AAABVVVv///////qqr6qqqqqqqqqqqqqqqqqqqqrQAAW+lW1VVXgAAAFVVW/qqqqqqqqq+hVUBVVAFUAAVBBVUVVVQVHQAAV5VWpVVbAAAAVVVrpEVVQBVRqr5VVVVVVVVVVVVVVVVVVVVVbQAAV5VVeVVuAAABVVr/VVVVVVVWquVWqqqqqqqqqqqqqqqqqqqqrQAAV5VVala4AAABVa+qqqqqqqqqq9VpVVVlVVVZVVVWVVVVZVVVXQAAV5VVW1XgAAAFVb9VVVZVVVVlr1VlVVWVVVVlVVVVVVVVlVVVXQABV5VVW1eAAAAVV+VVVVVVVVVV/VVVVVZVVVVlVVVYVVVVlVVVHQACW5VVW69AAABVrqRVVVWVVVVG9VaVVVpVVVWlVVVZVVVVpVVVbQABb6VVWv0AAAVV/mlVVVaVVVVa1VqqqqmqqqqaqqqmqqqqqqqqrQABbvlVVuQAABVX5pqqqqqqqqqqVWVVVVlVVVZVVVVlVVVSVVVVbAABbblVVsAAAFVXlVlVVVVlVVVVVZVVVWVVVVlVVVVlVVVWVVVVbAAFbW5VWgAAAVVuVVlVVVVZVVVVVlVVVZVVVVlVVVWVVVVZVVVVuAAVuVuVbgAABVW9VVZVVVVZVVVVVVVVVlVVVWVVVVWVVVVZVVVUoABVtVbmuAAAVVblVVZVVVVWVVVVqVVVWlVVVWVVVVaVVVVaVVVV4ABa9Vb65AAAVVvlVVaVVVVWVVVWqqqqqqqqqqqqqqqqqqqqqqqp4ABa+qq+wAABVW6qqqqqqqqqqqqqlVVVVVVVVZVVVVVVVVUVVVVVtAAVtVVfQAAVVb1VVVVVVVVVlVVVVVVVZVVVVlVVVVlVVVVVVVVVtAAVtVVcAAAVVvlVVVVlVVVVlVVVVVVVVVVVVlVVVVVVVVVlVVVVdAAVtFW8AKpVW5lVVVVZVVVVaVVVVVVWVVVVWVVVVWRVVVVVVVVVdAAVuaS0AZqVb1lVVVUaVVVVWVVVlVVaVVVVaVVVVrlVVVWlVVVVdAAa//3gBkGlvVlVVVVvlVVVaVVVqqqqqqqqqqqqq/6qqqqqqqqqtAAv///gKQBp+qqqqqqv6qqqqqqqVVVlVVVVlVVVVflVVVWVVVVVdAD////gJABr1VZVVVVXlVVVVlVVVVWVVVVWVVVVVZVVVVVVVVVWdAL////hgAFvVVZVVVVVVVVVVZVVVVZVVVVWVVVVVlVVVVaVVVVWdAv5f//hgBV9VVWVVVVVlVVVVZVVVVVVVVVVVVVVVlVVVVZVVVVVdA+Qv//hgBWkVVWVVVVVlVVVVWValVlVVVVaVVVVVlVVVVpVVVVWtB+S///hgBblVVWVVVVVlVVVVWmqqqqqqqqqqqqqqqqqqqqqqqqqqH/b///kUWuqqqqqqqqqqqqqqqqqVWVVVVVlVVVVWVVVVVVVVVVWXn/////4KX9VVVVlVVVVVVVVWqqqVZVVVVWVVVVVZVVVVVpVVVVZV///////lblVVVVlVVVVZVVqqqqqVlVVVVWVVVVVZVVVVVlVVVVZVa/////+/+lVVVVVVVVVWqqqqqqqWVVVVVWVVVVVZVVVVWlVVVVZVV/////9q5VVVVVZVVaqqqqqqqqqWFVVVVZVVVVVlVVVVVVVVVVZVVf////5VBlVVVVZVaqqqqqqqqqqqqqqqpqqqqqqqqqqqqqqqqqqaqr////pqmqqqqaqqqqqqqqqqqqqlVVVVVlVVVVWVVVVVWVVVVVZVVV///+VVVpVVVqqqqqqqqqqqqqqlVVVVVVVVVVWVVVVVWVVVVVZVVVb+/lVVVUVVqqqqqqqqqqqqqqqVVVVVaVVVVVWVVVVVVVVVVVZVVVVVlVVVVZqqqqqqqqqqqqqqqqqVVVVVZVVVVVWVVVVVVVVVVVZVVVVVlVVWqqqqqqqqqqqqqqqqqqqVVVVVZVVVVVZVVVVVb//RVVZVVVVVlVVqqqqqqqqqqqqqqqqqqqqRVVVVVVVVVVZVVVVW4VVuVVUVVVVVlVqqqqqqqqqqqqqqqqqqqlVlVaqWmaqpVZplqlVeUAAWlZqmpVaur6qqqqqqqqqqqqqqq6qqqVWlVVVaVVVVVWlVVVV5AAAB5VZVVarqqqqqqqqqqqqqqqqpVpVVVVVRVVVVVVVVVVRVVVV0AAABoVZVVaqqqqqqqqqqqqqqqpVVVZVVVVVVVVVlVVVVVaVVVVV0AAAFpVVVVqqqqqqqqqqqqqqmVVVVVWVVVVVVVVVVVVVVX/+VVVV9QAFW9VlVVqqqqqqqqqqqqqVWVVVVVWVVVVVVVVWVVVVX4VR9VVVv9VZ/5VlVVaqqqqqqVWlVVVVWVVVVVVlVVVVVVVWVVVVpUAAWlVVb////pVlVVVqqqqqVVVlVVVVVVVVVVVlVVVVVVVVVVVVoAAAC1VVWr//qVVlVVVVVpVVVVWlVVVVVlVVVVVZVVVVlVVpVVVXgAAAAtVVWqqqpVVlVVVVVVVVVVW5VVVVVlVVVVVZVVVVqqqqqqqrgAAABuqqqqqqqqqqqqqqqqqqqqq/qqqqqqqqqqqqqqqqVVWlVVVXwAAAG9VVVVqlVVVlVVVVVZVVVVVpVVVVVZVVVVVWVVVVVVWVVVVW8EBVr5VVpVVVVVVlVVVVVZVVVVVZVVVVVZVVVVVWVVVVVVVVVVVV+lVW/pVVv/5VVVVlVVVVVZVVVVVZVVVVVZVVVVVWVVVVVVlVVVVVr///+lVv///0VVWVVVVVVZVVVVVlVVVVVWVVVVVVlVVVVVlVVVVVav//qlX////+VVWVVVVVVZVVVVVZVVVVVWVVVVVVlVVVVWVVVVVVarqupVb6b///VVWVVVVVVZVVVVVZVVVVVVlVVVVVZVVVVVVVVVVVVmqpVVv0b///1VWVVVVVVZVVVVVZVVVVVVlVVVVVKVVVlZVVVVVVpVVVVV/6////1VWVVVVVVpVVVVVZVVVVVVlVVVVVaVVVqqqqqqqqqqqqqq//////6qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqVVVVVVVWVVVVVVv/////1VWf/5VVVZVVVVVaVVVVVVZVVVVVVlVVVlVVVVVWVVVVVVv/////lVL0AH9VVZVVVVVWVVVVVVZVVVVVVlVVWVVVVVVZVVVVVVv////+lV1QABXRVZVVVVVWVVVVVVWVVVVVVZVVWVVVVVVZVVVVVVb////6lWgAAAClVZVVVVVWVVVVVVWVVVVVVZVVlVVVVVVVVVVVVVWv//+qVaAAAAAtVZVVVVVVVVVVVVWlVVVVVZVVlVVVVVVlVVVVVVVq//6pVaAAAABtVZVVVVVVlVVVVV//0VVVVWVVlVVVVVVlVVVVVVVWqqpVVaAAAAFtVZVVVVVVlVVVUfVVb0VVVWVVVVVVVVWVVVVVVVWlVVVVVbQAAFW9VZVVVVVVlVVVWqAAGmVVVWlVlVVVVVWVVVVVX//9VVVVVbwAAVn5VpVVVVVVlVVVXgAAALlVVVlVqqqqqqqqqqqq////qqqqqr+VVVvqqqqqqqqqqqqqsAAAAB+qqqqqlVVVVVZVVVVf////5VVVVWv6qr+pVZVVVVVVZVVVsAAAAB5VVVZVVVVVVVZVVVVvqv//+FVVVWu///6lVZVVVVVVZVVVsAAAAF5VVVZVVVVVVVpVVVW/Qv//+VVVVVqv/+qVVZVVVVVVZVVVsAAAAV9VVVVVVVVVS//RVVX/q////lVVVVaqqqlVVZVVVVVVVVVVuAAAVX5VVVWVVVVRr//6VVb//////lVVVVZaqpVVVZVVVVVVWVVVbqABW/pVVVWVVVVb////lVb//////1VVVVZVVVVVVZVVVVVVVVVVb/qqr+pVVVVVVVVf7///5Vb//////lVVVVZVVVVVVZVVVVVVaVVVWv///+lVVVVlVVR/Rv///VW/////+pVVVVlVVVVVVZVVVVVVZVVVWq//+qVVVVVlVVW+m////VVv////+lVVVVlVVVVVVaVVVVVVZVVVVaqqqpVVVVVWlVb//////lWr////qlVVVVlVVVVVVvlVVVVValVVVVqqqVVVVVVaqqv//////6qqv//+qqqqqqqqqqqqr/+qqqqqqqqqqqqqqqqqqqqrVVb//////lVWqqqqlVVVVVlVVVVVW/lVVVVVWVVVVVVVpVVVVVVWVVb/////+lWr/qqpVVVVVVlVVVVVVaVVVVVVWVVVVVVVZVVVVVVVVVW/////+lqqqulVVVVVVVlVVVVVVZVVVVVVWVVVVVVVVVVVVVVVVVWv////6mtAAelVVVVVVVlVVVVVVZVVVVVVWVVVVVVVZVVVVVVVVVVr////qeAAAAuVVVVVVWVVVVVVVZVVVVVVVlVVVVVVVVVVVVVVVVVav//6lwAAAALVVVVVVWVVVVVVVZVVVVVVVlVVVVVVVlVVVVVVVVVWqqqqaQAAAAG1VVVVVWVVVVVVVZVVVVVVVlVVVVVVWVVVVVVVVVVVmqqlbAAAAAG1VVVVVWVVVVVVVZVVVVVVVlVVVVVVVlVVVVVVVVVVlVVVbAAAAAW1VVVVVWVVVVVVVZVVVVVVVlVVVVVVVpVVVVVVVVVVlVVVbQAAABW5VVVVVWVVVVVVVZVVVVVVVpVVVVVVVZVVVVVVlVVWVVVVb0AABVb5VVVVVWVVVVVVVZVVVVVVVpVVVVVVVZVVVVVVqqqqqqqqr5VVVVvqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqlVVWVVVVW/1VVv/pVVVVVpVVVVVVVaVVVVVVVaVVVVVVVWVVVVVVVVVZVVVVWv6qqv6lVVVVVZVVVVVVVZVVVVVVVZVVVVVVVWVVVVVVVVVZVVVVWr////qlVVVVVZVVVVVVVZVVVVVVVaVVVVVVVWVVVVVVVVVVVVVVVav//6qVVVVVVZVVVVVVVZVVVVVVVaVVVVVVVVlVVVVVVVVVVVVVVWqqqqlVVVVVVZVVVVVVVZVVVVVVVVVVVVVVVVlVVVVVVVWlVVVVVVaqqlVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVpVVVVVVVVVVVVVVVWqqVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVZVVVVVVVVWVVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVVVVVVVVVVZVVVVVVVVVZVVVVVVVZVVVVVVVVlVVVVVVVZVVVVVVVZVVVVVVVVZVVVVVVVVVlVVVVVVVZVVVVVVVVlVVVVVVVWVVVVVRVpVVVVVVVVZVVVVVVVVSRVVVVVVVZVVVVVVVVpVVVVVVVWVVVVRlVpVVVVVVVVpVVVVVVVVWlVVVVVVVaVVVVVVVVpVVVVVVVaVVVVWqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqRWVVVVVVVVVlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVlVVVVVWVVVVVVVVVlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVlVVVVVZVVVVVVVVWlVVVVVVVVWVVVVVVVVZVVVVVVVVZVVVVVVVVVVVVVVZVVVVVVVVVVVVVVVVVVVVVVVVVVVZVVVVVVVVVVVVVVVVVZVVVVlZVVVVVVVVaVVVVVVVVVZVVVVVVVVaVVVVVVVVWVVVVVVVVZVVVV";
+  var GLYPH = {"5":"6:AA+ggg8CCicAAA==","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","G":"7:AADiKBAgRoSI8AAA","O":"8:AAA4RIKCgoKCRDgAAA==","M":"8:AACCgsbGqqqSkpIAAA==","K":"7:AAIUSRQwUJESEAAA","U":"7:AAIUKFChQoUJ4AAA","F":"7:AAP0CBA+QIECAAAA","I":"4:AORERETgAA==","V":"8:AACCgkRERCgoEBAAAA==","E":"7:AAP0CBA+QIED8AAA"," ":"6:AAAAAAAAAAAAAA==","N":"7:AAIWKlSlSo0aEAAA","A":"8:AAAQECgoRHxEgoIAAA==","R":"7:AAPkKFC+SIkSEAAA","W":"10:AAAIiiKIlUVRVCIIgiAAAAA="};
+  function glyph(ch) {
+    var s = GLYPH[ch], w = +s.split(":")[0], b = atob(s.split(":")[1]), rows = [];
+    for (var y = 0; y < 14; y++) { var r = []; for (var x = 0; x < w; x++) { var i = y * w + x; r.push((b.charCodeAt(i >> 3) >> (7 - (i & 7))) & 1); } rows.push(r); }
+    /* drop the empty columns on both sides: the title is set tight */
+    var l = 0, rr = w - 1, col = function (x) { for (var y = 0; y < 14; y++) if (rows[y][x]) return true; return false; };
+    while (l < rr && !col(l)) l++; while (rr > l && !col(rr)) rr--;
+    return { w: rr - l + 1, rows: rows.map(function (r) { return r.slice(l, rr + 1); }) };
+  }
+  /* a line of glyphs at scale s, tone t, with a shadow of tone sh one pixel down and right */
+  function text(px, str, x, y, s, gap, t, sh) {
+    var gs = str.split("").map(function (ch) { return ch === " " ? { w: 3, rows: [] } : glyph(ch); });
+    [[1, sh], [0, t]].forEach(function (pass) {
+      var cx = x + pass[0];
+      gs.forEach(function (g) {
+        for (var j = 0; j < g.rows.length; j++) for (var i = 0; i < g.w; i++) if (g.rows[j][i])
+          for (var a = 0; a < s; a++) for (var b = 0; b < s; b++) {
+            var X = cx + i * s + a, Y = y + pass[0] + j * s + b;
+            if (X >= 0 && Y >= 0 && X < W && Y < H) px[Y * W + X] = pass[1];
+          }
+        cx += g.w * s + gap;
+      });
+    });
+  }
+  function draw(lang) {
+    var px = new Uint8Array(W * H), b = atob(PIC);
+    for (var i = 0; i < W * H; i++) px[i] = (b.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3;
+    /* the name on the dark wall, paper with an ink shadow; the line under it smaller */
+    var en = lang === "en";
+    text(px, en ? "GOMOKU" : "五子棋", en ? 3 : 4, en ? 1 : 4, 2, en ? 1 : 4, 0, 3);
+    text(px, en ? "5 IN A ROW" : "黑白连珠", en ? 4 : 5, en ? 29 : 33, 1, en ? 1 : 3, 0, 3);
+    return px;
+  }
+  return { W: W, H: H, draw: draw };
+})();
+</script>
+<script>
+(function(){
+var N=15,cv=document.getElementById('c'),ctx=cv.getContext('2d'),stage=document.getElementById('stage');
+var ov=document.getElementById('ov'),ot=document.getElementById('ot'),op=document.getElementById('op');
+/* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
+var LANG=(typeof PAD!=='undefined'&&PAD.lang==='en')?'en':'zh';
+var TXT={
+  zh:{title:'五子棋',intro:'你执黑先手，横竖斜连成五子即胜。',start:'开始',again:'再来一局',undo:'悔棋',restart:'重新开始',match:'对战（电波）',menu:'回到菜单',
+    yours:'黑棋落子',thinking:'白棋思考中',tip:'点交叉点落子',tipsure:'点别处可换位置',tipover:'点重新开始再来一局',wins:'胜 ',
+    win:'你赢了',lose:'你输了',draw:'平局',winnote:'五子连珠，漂亮。',losenote:'电脑连成五子。',drawnote:'棋盘已满。',
+    myTurn:'你的回合',peerTurn:'对方的回合',waiting:'等对方…',sending:'发送中…',linked:'已连线',linking:'连接中…',offline:'断线了',notYet:'没连上',
+    reconnect:'重新连接',leave:'离开',menuTip:'点回到菜单',
+    linkWin:'你赢了',linkLose:'对方赢了',linkWinnote:'五子连珠，漂亮。',linkLosenote:'对方连成五子。',linkDrawnote:'棋盘已满。',
+    linkTip:'点交叉点落子',offlineTip:'点重新连接',
+    why:{bye:'对方离开了',lost:'信号断了','other-app':'对方换了别的程序',timeout:'没找到对方',home:'这边离开了',cancelled:'连线取消了',denied:'没有允许连线',none:'这台掌机不能连线',busy:'已经有别的连线',big:'消息太长',other:'连线出了错'}},
+  en:{title:'GOMOKU',intro:'You play black and go first. Five in a row wins.',start:'START',again:'AGAIN',undo:'Undo',restart:'Restart',match:'Match (radio)',menu:'Menu',
+    yours:'Your move',thinking:'White thinking',tip:'Tap a point',tipsure:'Tap elsewhere to move',tipover:'Restart for another',wins:'Wins ',
+    win:'You win',lose:'You lose',draw:'Draw',winnote:'Five in a row. Nice.',losenote:'The computer made five.',drawnote:'The board is full.',
+    myTurn:'Your turn',peerTurn:'Their turn',waiting:'Waiting…',sending:'Sending…',linked:'Linked',linking:'Connecting…',offline:'Disconnected',notYet:'No link',
+    reconnect:'Reconnect',leave:'Leave',menuTip:'Tap Menu',
+    linkWin:'You win',linkLose:'They win',linkWinnote:'Five in a row. Nice.',linkLosenote:'The other side made five.',linkDrawnote:'The board is full.',
+    linkTip:'Tap a point',offlineTip:'Tap Reconnect',
+    why:{bye:'the other side left',lost:'the signal went',"other-app":'the other side switched apps',timeout:'nobody was found',home:'this side left',cancelled:'pairing was cancelled',denied:'the link was not allowed',none:'this handheld cannot link',busy:'another link is busy',big:'the message was too long',other:'the link failed'}}
+}[LANG];
+document.documentElement.lang=LANG==='zh'?'zh-CN':'en';document.title=TXT.title;
+ot.textContent=TXT.title;op.textContent=TXT.intro;document.getElementById('st').textContent=TXT.start;
+document.getElementById('lk').textContent=TXT.match;
+var C0='#a3ad7e',C1='#7d8a58',C2='#4a5a32',C3='#1f2a14';
+/* the canvas font: lopix12 glyphs for every string this app paints (sdk/fonts/lopix12.json, OFL).
+   The subset is generated from this file's own text; __gomoku.missingGlyphs() names any that are left out. */
+var UIFONT = /*FONT-START*/{"name":"lopix12","cell":13,"line":14,"glyphs":{"0":"6:AAciimqyiicAAA==","1":"6:AAIYIIIIIIcAAA==","2":"6:AAciCCEIQg+AAA==","3":"6:AAciCCMCCicAAA==","4":"6:AAEMMUUk+EEAAA==","5":"6:AA+ggg8CCicAAA==","6":"6:AAcigg8iiicAAA==","7":"6:AA+CCEEIIIIAAA==","8":"6:AAciiiciiicAAA==","9":"6:AAciiieCCicAAA=="," ":"6:AAAAAAAAAAAAAA==","!":"4:AEREREBAAA==","\"":"6:AAUUUAAAAAAAAA==","#":"7:AAEiT8kSJPyRIAAA","$":"6:AIcqoocKKqcIAA==","%":"8:AABEpEgIECAkSkQAAA==","&":"7:AADCRIYZSokR0AAA","'":"4:AERAAAAAAA==","(":"6:AEIIQQQQQIIEAA==",")":"6:AQIIEEEEEIIQAA==","*":"6:AAAAAIqcqIAAAA==","+":"6:AAAAAII+IIAAAA==",",":"4:AAAAAABEgA==","-":"6:AAAAAAA+AAAAAA==",".":"4:AAAAAABAAA==","/":"6:ACCEEIIIQQggAA==",":":"4:AAAEAABAAA==",";":"4:AAAEAABEgA==","<":"5:AAABERBBBAAA","=":"6:AAAAAA+A+AAAAA==",">":"5:AAAIIIIiIAAA","?":"6:AAciCCEIIAIAAA==","@":"8:AAA4RJqqqqqqtkA8AA==","A":"8:AAAQECgoRHxEgoIAAA==","B":"7:AAPkKFC+QoUL4AAA","C":"7:AADiKBAgQICI4AAA","D":"7:AAPESFChQoUTwAAA","E":"7:AAP0CBA+QIED8AAA","F":"7:AAP0CBA+QIECAAAA","G":"7:AADiKBAgRoSI8AAA","H":"7:AAIUKFC/QoUKEAAA","I":"4:AORERETgAA==","J":"6:AACCCCCCiicAAA==","K":"7:AAIUSRQwUJESEAAA","L":"6:AAgggggggg+AAA==","M":"8:AACCgsbGqqqSkpIAAA==","N":"7:AAIWKlSlSo0aEAAA","O":"8:AAA4RIKCgoKCRDgAAA==","P":"7:AAPkKFC+QIECAAAA","Q":"8:AAA4RIKCgoKKRDoAAA==","R":"7:AAPkKFC+SIkSEAAA","S":"7:AAHkKAgMBAUJ4AAA","T":"8:AAD+EBAQEBAQEBAAAA==","U":"7:AAIUKFChQoUJ4AAA","V":"8:AACCgkRERCgoEBAAAA==","W":"10:AAAIiiKIlUVRVCIIgiAAAAA=","X":"8:AACCREQoEChERIIAAA==","Y":"8:AACCREQoKBAQEBAAAA==","Z":"7:AAPwIIIIEEED8AAA","[":"6:AcQQQQQQQQQcAA==","\\":"6:AggQQIIIEECCAA==","]":"6:AcEEEEEEEEEcAA==","^":"6:AAIUiAAAAAAAAA==","_":"6:AAAAAAAAAAAA+A==","`":"5:ABBAAAAAAAAA","a":"6:AAAAAcCeiieAAA==","b":"6:AAggg8iiii8AAA==","c":"6:AAAAAciggicAAA==","d":"6:AACCCeiiiieAAA==","e":"6:AAAAAci+gicAAA==","f":"5:AAyEeQhCEAAA","g":"6:AAAAAeiiiieCcA==","h":"6:AAgggsyiiiiAAA==","i":"4:AEAMRETgAA==","j":"4:ACAOIiIiwA==","k":"6:AAgggiswokiAAA==","l":"4:AMRERERgAA==","m":"8:AAAAAADskpKSkpIAAA==","n":"6:AAAAAsyiiiiAAA==","o":"6:AAAAAciiiicAAA==","p":"6:AAAAA8iiii8ggA==","q":"6:AAAAAeiiiieCCA==","r":"5:AAAAWxCEIAAA","s":"6:AAAAAciYEicAAA==","t":"5:ABCEeQhCDAAA","u":"6:AAAAAiiiimaAAA==","v":"6:AAAAAiiUUIIAAA==","w":"8:AAAAAACSkqqqREQAAA==","x":"6:AAAAAiUIIUiAAA==","y":"6:AAAAAiiiUUIIwA==","z":"6:AAAAA+EIQg+AAA==","{":"7:ADCBAgQQECBAgMAA","|":"4:BEREREREAA==","}":"7:AMBAgQICCBAgQwAA","~":"6:AAAAAQqEAAAAAA==","…":"12:AAAAAAAAAAAAZmZmAAAAAAAAAAA=","。":"12:AAAAAAAAAAAAAAAAMASASAMAAAA=","一":"12:AAAAAAAAAAAA/+AAAAAAAAAAAAA=","上":"12:AABABABABAB8BABABABABA/+AAA=","不":"12:AA/+AgBADAFQJIxEBCBABABAAAA=","中":"12:AABABA/+hChChC/+BABABABAAAA=","了":"12:AAf8AEAIAQAgAgAgAgAgAgDgAAA=","五":"12:AAf8CACACAf4EIEIEIIIII/+AAA=","交":"12:AABA/+AAEQII0WCgBACgMYwGAAA=","亮":"12:AABA/+IIP4AA/+gCHwEQISweAAA=","价":"12:AAIQIoREWCxERERERERERESEAAA=","估":"12:AAIQIQX+QQwQQQT8SESESET8AAA=","位":"12:AAIgIQX+QAyESERERIRIQQX+AAA=","你":"12:AAKAL+SCUSwQRURUSSUSQQQwAAA=","保":"12:AAL8KESET8wQQQX+Q4RUWSQQAAA=","信":"12:AAIgIQX+QAz8QAT8QAT8SET8AAA=","值":"12:AAIQL+QQT8yET8SET8SESEX+AAA=","允":"12:AABACAEQIIf8EUEQEQESISweAAA=","先":"12:AAJAJAP8RABA/+EQEQESISweAAA=","再":"12:AA/+BAf8REf8RERE/+QEQEQcAAA=","出":"12:AABAREREREf8BABAhChChC/+AAA=","别":"12:AA/ChShS/SIS/SJSJSRCRCmOAAA=","到":"12:AA/iEKIKRK+qEKEK/qECHi4OAAA=","动":"12:AAAQeQB+AS+SISQSSSmi6iBMAAA=","单":"12:AAIIEQf8REf8REf8BA/+BABAAAA=","即":"12:AA++iiii+iiiii+ikikiquygAAA=","叉":"12:AAf8QESEJIIIEQCgBACgMYwGAAA=","发":"12:AASQSIiA/+EAH4KIJQQgTYsGAAA=","取":"12:AA/AS+eiSiSieiSUSUXI6UCiAAA=","可":"12:AA/+AEAEPkIkIkIkPkAEAEAcAAA=","台":"12:AACAEAIIQE/6ACf8QEQEQEf8AAA=","号":"12:AAP4IIIIP4AA/+EAH4AIAIBwAAA=","合":"12:AABACgMYwGP4AAf8QEQEQEf8AAA=","回":"12:AA/+gCgCnykSkSkSnygCgC/+AAA=","处":"12:AAIIIIPIRIRMpKKIKIEILAw+AAA=","多":"12:AABAD4cICQBoGe4iHCAkAYPgAAA=","大":"12:AABABABA/+BACgCgEQEQIIwGAAA=","太":"12:AABABABA/+BACgCgEQEQKIxGAAA=","始":"12:AAIQIQ8kVEX6UAl+VCJCVCh+AAA=","子":"12:AAf4AIAQAgBA/+BABABABAHAAAA=","对":"12:AAAE8EF+kEUEVEIkIkUEUEgcAAA=","局":"12:AAf8QEf8QAf+QCXyUSUSXygMAAA=","已":"12:AAf8AEAEQEQEf8QAQAQCQCP+AAA=","平":"12:AAf8BAREJIBA/+BABABABABAAAA=","序":"12:AAAgf+QAX8QIRQf+QiQkQgjgAAA=","度":"12:AAAgf+SIf+SIT4QAX8SIRwuOAAA=","开":"12:AA/+IIIIIIII/+IIIIQIQIgIAAA=","强":"12:AA58JEJ84Qj+iS6SL+IQIUz6AAA=","思":"12:AAf8REf8REREf8AAVEUikKD4AAA=","息":"12:AACAP4IIP4IIP4IIP4VEUqj6AAA=","悔":"12:AAJAJ+qAt8pUpML+JUJMJ+IEAAA=","成":"12:AAAoAkf+QgekSkSoSQWSQqjGAAA=","战":"12:AAIUISOQIeJwIS+UiIiKiW+iAAA=","手":"12:AAA8fABABAf8BABA/+BABAHAAAA=","执":"12:AAIgIg98IkIkJkM04kJEJCaCAAA=","扰":"12:AAQoQk4gX+QgZQxQRQSSSS0eAAA=","找":"12:AAQoQk4gQ+XgYkwoQQQSRq2GAAA=","持":"12:AAQQR84QQQT+YEz+REQkQEwcAAA=","换":"12:AAQgQ45IT8SUaUyUX+QoRE2CAAA=","掌":"12:AAJI/+gCP4IIf8BAf8BA/+BAAAA=","接":"12:AAQQT+5EQoT+YQz+QkRIQ4zGAAA=","斜":"12:AAMESkgU8EJEIk8GIcrkoEIEAAA=","断":"12:AAkG14ugkg/+kkuk1kkkgk/EAAA=","新":"12:AAEG/YRQKQ/eEU/UEUVUkkMkAAA=","方":"12:AACABA/+CACAD8CEEEEEIEwYAAA=","有":"12:AACA/+EAIAP8YEv8IEP8IEIcAAA=","机":"12:AAJ4JI9IJIJIZIdIpIJKJKKOAAA=","来":"12:AABAf8BAJIFQ/+DgFQJIxGBAAAA=","某":"12:AAII/+IIP4IIP4BA/+FQJIxGAAA=","棋":"12:AAJEL+9EJ8JEZ8dEr+IAJEKCAAA=","横":"12:AAIoJ88oL+IQZ8dUp8JUJ8LGAAA=","没":"12:AAR4JIBIhIWOAAD8SERIgwnOAAA=","波":"12:AAQQL+CSiQT+DCCiSUSIiUliAAA=","消":"12:AASSJUAQj+SCD+CCT+SCiCiGAAA=","满":"12:AAhIX+BIn+RIH+FKVKW2kCkGAAA=","漂":"12:AAT+IoD+iqT+AAB8QAT+hUiyAAA=","点":"12:AABAB+BABAf8QEQEf8AAUkiSAAA=","珠":"12:AACQ6QT8UQQQ7+QQQ4ZU2SAQAAA=","电":"12:AACA/4iIiI/4iIiI/4CCCCB+AAA=","白":"12:AABACAf8QEQEQEf8QEQEQEf8AAA=","的":"12:AAIgQg++jCiCiS+KiKiCiC+MAAA=","盘":"12:AABAP8JEIk/+JEQsAAf8Sk/+AAA=","离":"12:AABA/+EQTkUUf8BA/+kSvqgGAAA=","程":"12:AAF85EJEJ88AL+YQd8oQIQL+AAA=","竖":"12:AAF+lCkkkYlmEABAf8IIEQ/+AAA=","等":"12:AAQge+lIf8BA/+AI/+EICIA4AAA=","线":"12:AAIUISQelw4QIeRw8SAMMazmAAA=","经":"12:AAT8QEgIoQxoWGh84QAQIQz+AAA=","置":"12:AA/+kS/+BA/+BAP4IIP4II/+AAA=","考":"12:AACEfoCQ/+BAH8MA38AEAEA4AAA=","胜":"12:AA6QqQr86QsQoQ78oQoQoQr+AAA=","能":"12:AAQmk46gAi+eiA+mi4+giimeAAA=","脑":"12:AA4Qr+oA6CrGqq6SqqrGqCr+AAA=","菜":"12:AAEQ/+EQAcfgSEJI/+FQJIxGAAA=","落":"12:AAEQ/+EQQgJ8jEQ4DGJ8REh8AAA=","许":"12:AAiAT8EQAQwQX+QQQQQQYQQQAAA=","评":"12:AAj+QQCSBUwQT+QQQQUQYQQQAAA=","赢":"12:AABA/+QAf8II/+qq6qqu5KqqAAA=","输":"12:AAIQ8oREq6oA/qKqPq6qLiKmAAA=","边":"12:AAggQgD+AiwiQiRCRCSMoAn+AAA=","这":"12:AAggQQH+AExEQoQQQoTGoAn+AAA=","连":"12:AAggX+BACQyQT+QQX+QQoQn+AAA=","送":"12:AAhEQoD+AQwQT+QQQoTGoAn+AAA=","重":"12:AAf8BA/+REf8REf8BAf8BA/+AAA=","错":"12:AARIb8hI5IX+QA78SET8aET8AAA=","长":"12:AAIIIQIgLAIA/+JAIgIQKIMGAAA=","随":"12:AA4Qt+qQo8xku8qkq86klAk+AAA=","黑":"12:AAf8REVUREf8BAf8BA/+UkiSAAA=","（":"12:AAAEAIAIAQAQAQAQAQAIAIAEAAA=","）":"12:AAQAIAIAEAEAEAEAEAIAIAQAAAA=","，":"12:AAAAAAAAAAAAAAAAMAMAEAIAAAA="}}/*FONT-END*/;
+var GLYPHS={};
+function glyphOf(ch){
+  var g=GLYPHS[ch];if(g)return g;
+  var src=UIFONT.glyphs[ch]||UIFONT.glyphs['?']||'6:AAAAAAAAAAAAAA==';
+  var cut=src.indexOf(':'),w=+src.slice(0,cut),raw=atob(src.slice(cut+1)),m=new Uint8Array(14*w),i;
+  for(i=0;i<m.length;i++)m[i]=(raw.charCodeAt(i>>3)>>(7-(i&7)))&1;
+  return (GLYPHS[ch]={w:w,m:m});
+}
+function textWidth(s,scale){
+  var a=Array.from(String(s)),w=0,i;
+  for(i=0;i<a.length;i++)w+=glyphOf(a[i]).w*scale;
+  return w;
+}
+/* text at (x, y), y its top; one fillRect a font pixel, so every pixel stays one of the four tones */
+function textAt(s,x,y,scale,c){
+  ctx.fillStyle=c;
+  var a=Array.from(String(s)),cx=x,xx,yy,gl,i;
+  for(i=0;i<a.length;i++){
+    gl=glyphOf(a[i]);
+    for(yy=0;yy<14;yy++)for(xx=0;xx<gl.w;xx++)if(gl.m[yy*gl.w+xx])
+      ctx.fillRect(cx+xx*scale,y+yy*scale,scale,scale);
+    cx+=gl.w*scale;
+  }
+}
+function fitEllipsis(s,maxW,scale){
+  if(textWidth(s,scale)<=maxW)return s;
+  var a=Array.from(String(s)),ell='…';
+  while(a.length&&textWidth(a.join('')+ell,scale)>maxW)a.pop();
+  return a.join('')+ell;
+}
+/* a tip that is too long wraps; the last line it is allowed gets an ellipsis instead of running on */
+function wrapText(s,maxW,scale,maxLines){
+  if(!s)return [''];
+  var chars=Array.from(String(s)),lines=[],line='',i,ch;
+  for(i=0;i<chars.length;i++){
+    ch=chars[i];
+    if(line&&textWidth(line+ch,scale)>maxW){
+      if(lines.length>=maxLines-1)return lines.concat([fitEllipsis(line+chars.slice(i).join(''),maxW,scale)]);
+      lines.push(line);line=ch;
+    }else line+=ch;
+  }
+  if(line||!lines.length)lines.push(line);
+  return lines.slice(0,maxLines);
+}
+var b,over,busy,last,winLine,hover,pick,pickT,pickAt,WAIT=1000,wins=0,hist=[];
+var resultT;                             // the 0.9 s wait before the result appears, so a restart can cancel it
+var aiT;                                 // the computer's 0.45 s think, so a restart can cancel it too
+/* the link match: see the long comment over the link functions below */
+var LINK=(typeof PAD!=='undefined'&&PAD.link)?PAD.link:null;
+var mode='solo',panelMode='menu';        // mode: 'solo' | 'link'; panelMode: what the start overlay says
+var linkColour=0;                        // 1 black, 2 white; set once, at the match's first open
+var peerColour=0;                        // the peer's colour as its "c,<colour>" says, read again on every open
+var moves=[];                            // a match's moves in order, [x,y] (the board can be rebuilt from it)
+var linkOpen=false,openingLink=false,sendingMove=false,linkWhy='',syncs=0;
+var sendQ=[],sendBusy=false,syncAsked=false,allBuf=[];
+/* the painted screen's state: what the status bar, the tip and the result bar say */
+var turnTxt=TXT.yours,tipTxt=TXT.tip,recTxt=TXT.wins+'0';
+var resultOn=false,resultTitle='',resultNote='',resultLabel='';
+var L=null,BTNS={},btnDown=null;          // the layout, the painted buttons' boxes, the button held down
+var lastDpr=0;                            // so a move between displays (same stage, other dpr) refits too
+function clamp(v,a,b){return v<a?a:v>b?b:v;}
+/* One canvas over the stage (UI.md 13): the board is the largest whole-cell square that fits the width,
+   the status bar and the button bar take the height above and below it, and on a short stage the columns
+   beside the board carry the same table. W/H are the stage's own CSS pixels; no paper is left anywhere. */
+function layoutFor(w,h){
+  if(!(w>0))w=331;
+  if(!(h>0))h=359;
+  var top=clamp(Math.round(h*0.11),38,64),bot=clamp(Math.round(h*0.18),76,124);
+  var zone=h-top-bot;
+  if(zone<160){top=Math.min(top,36);bot=Math.min(bot,72);zone=h-top-bot;}
+  var minPad=6,wcell=Math.floor((w-16)/14),hcell=Math.floor((zone-2*minPad)/14);
+  var cell=Math.min(wcell,hcell);if(cell<4)cell=4;
+  var pad,S;
+  if(cell===wcell){
+    pad=Math.max(6,Math.floor((w-14*cell)/2));S=14*cell+2*pad;
+    if(S>zone){pad=Math.max(4,pad-Math.ceil((S-zone)/2));S=14*cell+2*pad;}
+  }else{
+    pad=Math.min(Math.max(5,Math.round(cell*0.55)),Math.max(4,Math.floor((zone-14*cell)/2)));
+    S=14*cell+2*pad;
+  }
+  var bx=Math.max(0,Math.round((w-S)/2));
+  var by=top+Math.max(0,Math.floor((zone-S)/2));
+  if(by+S>h-bot)by=Math.max(top,h-bot-S);
+  return {W:w,H:h,topH:top,botH:bot,botY:h-bot,zone:zone,bx:bx,by:by,S:S,cell:cell,pad:pad};
+}
+/* fit the canvas to the stage's exact CSS box, rows rounded up, as many device pixels as the screen has */
+function fit(){
+  var r=stage.getBoundingClientRect(),w=r.width,h=r.height;
+  if(!(w>0&&h>0))return false;
+  var d=window.devicePixelRatio||1;
+  /* a move between displays changes the dpr without changing the stage: the backing store must follow */
+  if(L&&Math.abs(L.W-w)<0.01&&Math.abs(L.H-h)<0.01&&d===lastDpr)return false;
+  L=layoutFor(w,h);lastDpr=d;
+  cv.style.width=w+'px';cv.style.height=h+'px';
+  cv.width=Math.max(1,Math.ceil(w*d));cv.height=Math.max(1,Math.ceil(h*d));
+  ctx.setTransform(d,0,0,d,0,0);ctx.imageSmoothingEnabled=false;
+  return true;
+}
+function emptyBoard(){var nb=[];for(var i=0;i<N;i++)nb.push(new Array(N).fill(0));return nb;}
+function reset(){
+  b=emptyBoard();
+  unpick();clearTimeout(aiT);over=false;busy=false;last=null;winLine=null;hover=null;hist=[];
+  hideResult();
+  turnTxt=TXT.yours;tipTxt=TXT.tip;draw();
+}
+function drawTable(){
+  ctx.fillStyle=C1;ctx.fillRect(0,L.topH,L.W,L.botY-L.topH);
+  ctx.fillStyle=C2;
+  for(var y=L.topH+3;y<L.botY;y+=8){
+    var off=(Math.floor((y-L.topH)/8)%2)?4:0;
+    for(var x=off;x<L.W;x+=16){
+      if(x>L.bx-4&&x<L.bx+L.S+4&&y>L.by-4&&y<L.by+L.S+4)continue;
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+}
+function drawTop(){
+  var W=L.W,h=L.topH;
+  ctx.fillStyle=C0;ctx.fillRect(0,0,W,h);
+  ctx.fillStyle=C3;ctx.fillRect(0,h-2,W,2);
+  /* the stone whose turn it is, so the bar says the same thing twice: in colour and in words */
+  var ir=Math.max(6,Math.min(10,Math.round(h*0.2))),ix=10+ir,iy=Math.round(h/2);
+  var v;
+  if(over)v=(last&&b[last[1]][last[0]])||1;            // the stone that decided it: black for a win, white for a loss
+  else if(mode==='link')v=linkOpen?colourToMove():1;
+  else v=busy?2:1;
+  ctx.beginPath();ctx.arc(ix,iy,ir,0,7);
+  ctx.fillStyle=v===1?C3:C0;ctx.fill();
+  ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
+  /* the wins (or the link's own state) sit in an ink box on the right */
+  var rs=2,rw=textWidth(recTxt,rs),boxW=rw+16,boxH=14*rs+8,boxX=W-8-boxW,boxY=Math.round((h-boxH)/2);
+  if(recTxt){
+    ctx.fillStyle=C3;ctx.fillRect(boxX,boxY,boxW,boxH);
+    textAt(recTxt,boxX+8,boxY+4,rs,C0);
+  }
+  var tx=ix+ir+8,ty=Math.round((h-28)/2),tw=Math.max(0,boxX-8-tx),sc=2;
+  if(textWidth(turnTxt,sc)>tw){
+    sc=1;ty=Math.round((h-14)/2);
+  }
+  ctx.save();ctx.beginPath();ctx.rect(tx,0,tw,h);ctx.clip();
+  textAt(turnTxt,tx,ty,sc,C3);
+  ctx.restore();
+}
+function barButtons(){
+  if(resultOn)return [{id:'again',label:resultLabel}];
+  if(mode==='link'){
+    var a=[];
+    if(!linkOpen&&!openingLink&&!over)a.push({id:'rc',label:TXT.reconnect});
+    a.push({id:'ln',label:TXT.leave});
+    return a;
+  }
+  return [{id:'ud',label:TXT.undo},{id:'rs',label:TXT.restart}];
+}
+function drawBottom(){
+  var W=L.W,y=L.botY,h=L.botH;
+  ctx.fillStyle=C0;ctx.fillRect(0,y,W,h);
+  ctx.fillStyle=C3;ctx.fillRect(0,y,W,2);
+  var list=barButtons(),n=list.length,padX=10,gap=8;
+  var btnH=Math.min(56,Math.max(44,h-32)),btnY=y+h-6-btnH;
+  var tipY=y+6,tipH=Math.max(14,btnY-4-tipY);
+  var lines=wrapText(tipTxt,W-2*padX,1,Math.max(1,Math.floor(tipH/15)));
+  for(var i=0;i<lines.length;i++)textAt(lines[i],padX,tipY+i*15,1,C2);
+  var bw=Math.floor((W-2*padX-gap*(n-1))/n);
+  BTNS={};
+  for(i=0;i<n;i++){
+    var x=padX+i*(bw+gap),down=btnDown===list[i].id,off=down?1:3;
+    ctx.fillStyle=C2;ctx.fillRect(x+off,btnY+off,bw,btnH);
+    ctx.fillStyle=down?C2:C3;ctx.fillRect(x,btnY,bw,btnH);
+    var sc=2,label=list[i].label;
+    if(textWidth(label,sc)>bw-10)sc=1;
+    var lw=textWidth(label,sc);
+    textAt(label,Math.round(x+(bw-lw)/2),Math.round(btnY+(btnH-14*sc)/2),sc,C0);
+    BTNS[list[i].id]={x:x,y:btnY,w:bw,h:btnH};
+  }
+}
+function drawBoard(){
+  var S=L.S,pad=L.pad,cell=L.cell,gx=L.bx+pad,gy=L.by+pad,gx1=gx+(N-1)*cell,gy1=gy+(N-1)*cell;
+  ctx.fillStyle=C2;ctx.fillRect(L.bx+4,L.by+4,S,S);
+  ctx.fillStyle=C0;ctx.fillRect(L.bx,L.by,S,S);
+  ctx.strokeStyle=C3;ctx.lineWidth=2;ctx.strokeRect(L.bx+1,L.by+1,S-2,S-2);
+  ctx.strokeStyle=C2;ctx.lineWidth=1;
+  ctx.beginPath();
+  for(var i=0;i<N;i++){
+    var p=Math.round(gy+i*cell)+.5;
+    ctx.moveTo(gx,p);ctx.lineTo(gx1,p);
+    var q=Math.round(gx+i*cell)+.5;
+    ctx.moveTo(q,gy);ctx.lineTo(q,gy1);
+  }
+  ctx.stroke();
+  ctx.fillStyle=C3;
+  [3,7,11].forEach(function(a){[3,7,11].forEach(function(c){
+    if((a==7&&c!=7)||(c==7&&a!=7))return;
+    ctx.beginPath();ctx.arc(gx+a*cell,gy+c*cell,2.5,0,7);ctx.fill();
+  });});
+  var r=cell*0.43;
+  for(var y=0;y<N;y++)for(var x=0;x<N;x++){
+    var v=b[y][x];if(!v)continue;
+    var cx=gx+x*cell,cy=gy+y*cell;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,7);
+    ctx.fillStyle=v==1?C3:C0;ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
+    if(v==2){ctx.beginPath();ctx.arc(cx,cy,r*0.6,0,7);ctx.lineWidth=1;ctx.strokeStyle=C1;ctx.stroke();}
+  }
+  if(last){
+    var lx=gx+last[0]*cell,ly=gy+last[1]*cell,m=b[last[1]][last[0]];
+    ctx.fillStyle=m==1?C0:C3;
+    ctx.fillRect(lx-3,ly-3,6,6);
+  }
+  if(hover&&canMoveNow()&&b[hover[1]][hover[0]]==0){
+    var hx=gx+hover[0]*cell,hy=gy+hover[1]*cell;
+    ctx.strokeStyle=C3;ctx.lineWidth=2;
+    var q2=cell*0.5;
+    ctx.beginPath();
+    ctx.moveTo(hx-q2,hy-q2+5);ctx.lineTo(hx-q2,hy-q2);ctx.lineTo(hx-q2+5,hy-q2);
+    ctx.moveTo(hx+q2,hy-q2+5);ctx.lineTo(hx+q2,hy-q2);ctx.lineTo(hx+q2-5,hy-q2);
+    ctx.moveTo(hx-q2,hy+q2-5);ctx.lineTo(hx-q2,hy+q2);ctx.lineTo(hx-q2+5,hy+q2);
+    ctx.moveTo(hx+q2,hy+q2-5);ctx.lineTo(hx+q2,hy+q2);ctx.lineTo(hx+q2-5,hy+q2);
+    ctx.stroke();
+  }
+  // the picked point: a dark stone, and a ring around it that closes when the stone goes down
+  if(pick&&canMoveNow()&&b[pick[1]][pick[0]]==0){
+    var kx=gx+pick[0]*cell,ky=gy+pick[1]*cell,f=Math.min(1,(Date.now()-pickAt)/WAIT);
+    ctx.beginPath();ctx.arc(kx,ky,r,0,7);ctx.fillStyle=C2;ctx.fill();
+    ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
+    ctx.beginPath();ctx.arc(kx,ky,r*0.45,0,7);ctx.fillStyle=C1;ctx.fill();
+    ctx.beginPath();ctx.arc(kx,ky,r+4,-Math.PI/2,-Math.PI/2+f*Math.PI*2);ctx.lineWidth=2;ctx.strokeStyle=C3;ctx.stroke();
+  }
+  if(winLine){
+    var wl=winLine,dx=wl[2]===wl[0]?0:(wl[2]>wl[0]?1:-1),dy=wl[3]===wl[1]?0:(wl[3]>wl[1]?1:-1);
+    var n=Math.max(Math.abs(wl[2]-wl[0]),Math.abs(wl[3]-wl[1]))+1,from=0;
+    /* a run longer than five still marks the five that include the stone just placed */
+    if(n>5&&last){
+      var li=dx?(last[0]-wl[0])*dx:(last[1]-wl[1])*dy;
+      from=Math.max(0,Math.min(li-2,n-5));
+    }
+    ctx.strokeStyle=C3;ctx.lineWidth=Math.max(5,cell*0.3);ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.moveTo(gx+wl[0]*cell,gy+wl[1]*cell);
+    ctx.lineTo(gx+wl[2]*cell,gy+wl[3]*cell);ctx.stroke();ctx.lineCap='butt';
+    /* a ring inside each of the five marks it against the thick line: paper on a black stone, ink on a white one */
+    for(var wi=from;wi<from+Math.min(n,5);wi++){
+      var wx=gx+(wl[0]+dx*wi)*cell,wy=gy+(wl[1]+dy*wi)*cell;
+      ctx.beginPath();ctx.arc(wx,wy,r*0.58,0,7);
+      ctx.lineWidth=2;ctx.strokeStyle=b[wl[1]+dy*wi][wl[0]+dx*wi]==1?C0:C3;ctx.stroke();
+    }
+  }
+}
+function draw(){
+  if(!L){fit();if(!L)return;}
+  if(!b)return;
+  ctx.fillStyle=C1;ctx.fillRect(0,0,L.W,L.H);
+  drawTable();drawBoard();drawTop();drawBottom();
+}
+var D=[[1,0],[0,1],[1,1],[1,-1]];
+function checkWin(x,y,v){
+  for(var d=0;d<4;d++){
+    var dx=D[d][0],dy=D[d][1],n=1,x1=x,y1=y,x2=x,y2=y;
+    while(inb(x1-dx,y1-dy)&&b[y1-dy][x1-dx]==v){x1-=dx;y1-=dy;n++;}
+    while(inb(x2+dx,y2+dy)&&b[y2+dy][x2+dx]==v){x2+=dx;y2+=dy;n++;}
+    if(n>=5){winLine=[x1,y1,x2,y2];return true;}
+  }
+  return false;
+}
+function inb(x,y){return x>=0&&y>=0&&x<N&&y<N;}
+function full(){for(var y=0;y<N;y++)for(var x=0;x<N;x++)if(!b[y][x])return false;return true;}
+// 评估某点对某方有多大价值
+function score(x,y,v){
+  var t=0;
+  for(var d=0;d<4;d++){
+    var dx=D[d][0],dy=D[d][1],n=1,open=0;
+    var i=1;while(inb(x+dx*i,y+dy*i)&&b[y+dy*i][x+dx*i]==v){n++;i++;}
+    if(inb(x+dx*i,y+dy*i)&&b[y+dy*i][x+dx*i]==0)open++;
+    i=1;while(inb(x-dx*i,y-dy*i)&&b[y-dy*i][x-dx*i]==v){n++;i++;}
+    if(inb(x-dx*i,y-dy*i)&&b[y-dy*i][x-dx*i]==0)open++;
+    if(n>=5)t+=100000;
+    else if(n==4)t+=open==2?10000:(open==1?1000:0);
+    else if(n==3)t+=open==2?1000:(open==1?100:0);
+    else if(n==2)t+=open==2?100:(open==1?10:0);
+    else t+=open;
+  }
+  return t;
+}
+function aiMove(){
+  var best=-1,list=[],cx=(N-1)/2;
+  var any=false;
+  for(var y=0;y<N;y++)for(var x=0;x<N;x++)if(b[y][x])any=true;
+  if(!any){return [7,7];}
+  for(var y=0;y<N;y++)for(var x=0;x<N;x++){
+    if(b[y][x])continue;
+    var near=false;
+    for(var j=-2;j<=2&&!near;j++)for(var i=-2;i<=2;i++){
+      if(inb(x+i,y+j)&&b[y+j][x+i]){near=true;break;}
+    }
+    if(!near)continue;
+    var s=score(x,y,2)*1.0+score(x,y,1)*0.85;
+    s-=(Math.abs(x-cx)+Math.abs(y-cx))*0.5;
+    s+=Math.random()*60; // 随机扰动，保持中等强度
+    if(s>best+0.0001){best=s;list=[[x,y]];}
+  }
+  return list[0]||[7,7];
+}
+// the result: the board stays uncovered, the bar says what happened and offers the next game
+function hideResult(){
+  clearTimeout(resultT);
+  resultOn=false;resultTitle='';resultNote='';resultLabel='';
+}
+function showResult(title,note,label,panel){
+  panelMode=panel;
+  resultOn=true;resultTitle=title;resultNote=note;resultLabel=label;
+  turnTxt=title;tipTxt=note;
+  draw();
+}
+// result: 'win', 'lose' or 'draw'
+function endGame(result){
+  over=true;busy=false;
+  turnTxt=TXT[result];tipTxt=TXT.tipover;
+  recTxt=TXT.wins+wins;draw();
+  PAD.sfx(result=='win'?'win':(result=='draw'?'ok':'lose'));
+  clearTimeout(resultT);
+  resultT=setTimeout(function(){
+    showResult(TXT[result],TXT[result+'note'],TXT.again,'solo');
+  },900);
+}
+function place(x,y){
+  if(over||busy||!inb(x,y)||b[y][x])return;
+  unpick();b[y][x]=1;last=[x,y];hist.push([x,y]);PAD.sfx('tap');
+  if(checkWin(x,y,1)){wins++;PAD.save('gomoku_wins',wins);endGame('win');return;}
+  if(full()){endGame('draw');return;}
+  busy=true;turnTxt=TXT.thinking;draw();
+  aiT=setTimeout(function(){
+    var m=aiMove();
+    b[m[1]][m[0]]=2;last=[m[0],m[1]];hist.push([m[0],m[1]]);PAD.sfx('tick');
+    if(checkWin(m[0],m[1],2)){endGame('lose');return;}
+    if(full()){endGame('draw');return;}
+    busy=false;turnTxt=TXT.yours;tipTxt=TXT.tip;draw();
+  },450);
+}
+/* the canvas point in the layout's own CSS pixels */
+function canvasPoint(e){
+  var r=cv.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*(L.W/r.width),y:(e.clientY-r.top)*(L.H/r.height)};
+}
+function hitButton(p){
+  for(var id in BTNS){var q=BTNS[id];if(p.x>=q.x&&p.x<q.x+q.w&&p.y>=q.y&&p.y<q.y+q.h)return id;}
+  return null;
+}
+function boardPos(e){
+  var p=canvasPoint(e);
+  if(p.x<L.bx||p.x>L.bx+L.S||p.y<L.by||p.y>L.by+L.S)return null;   // a tap in a bar never places a stone
+  var x=Math.round((p.x-L.bx-L.pad)/L.cell),y=Math.round((p.y-L.by-L.pad)/L.cell);
+  return inb(x,y)?[x,y]:null;
+}
+cv.addEventListener('pointermove',function(e){if(e.pointerType!=='mouse')return;hover=boardPos(e);draw();});
+/* A fingertip covers the point it taps, so on touch a tap only picks a point: the stone goes down a second
+   later, or at once on a second tap there, and a tap elsewhere in that second moves it. A mouse shows the
+   hover cursor before the click, so one click places. */
+function unpick(){pick=null;clearTimeout(pickT);}
+function ring(){if(!pick)return;draw();requestAnimationFrame(ring);}
+function runButton(id){
+  if(id==='ud')undo();
+  else if(id==='rs'){if(mode!=='link')reset();}
+  else if(id==='rc')openLink();
+  else if(id==='ln')leaveMatch();
+  else if(id==='again'){if(panelMode==='link')leaveMatch();else{mode='solo';reset();}}
+  if(btnDown===id){btnDown=null;draw();}
+}
+cv.addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  var id=hitButton(canvasPoint(e));
+  if(id){btnDown=id;draw();runButton(id);return;}
+  var p=boardPos(e);hover=e.pointerType==='mouse'?p:null;
+  if(!p||!canMoveNow()||b[p[1]][p[0]]){draw();return;}
+  if(e.pointerType==='mouse'||(pick&&pick[0]==p[0]&&pick[1]==p[1])){tap(p[0],p[1]);return;}
+  unpick();pick=p;pickAt=Date.now();pickT=setTimeout(function(){if(pick)tap(pick[0],pick[1]);},WAIT);
+  tipTxt=TXT.tipsure;PAD.sfx('move');ring();
+});
+cv.addEventListener('pointerup',function(){if(btnDown){btnDown=null;draw();}});
+cv.addEventListener('pointercancel',function(){if(btnDown){btnDown=null;draw();}});
+cv.addEventListener('pointerleave',function(){hover=null;if(btnDown)btnDown=null;draw();});
+document.getElementById('lk').addEventListener('pointerdown',function(e){e.preventDefault();startLinkGame();});
+document.getElementById('st').addEventListener('pointerdown',function(e){
+  e.preventDefault();
+  if(panelMode==='link'){leaveMatch();return;}  // a finished match goes back to the menu, not a solo game
+  mode='solo';updateButtons();ov.classList.add('hide');reset();resize();
+});
+window.addEventListener('resize',resize);
+function undo(){
+  if(mode==='link')return;   // no undo in a match: the two boards must stay the same game
+  // a stone still waiting to go down is the first thing undo takes back
+  if(pick&&!over&&!busy){unpick();tipTxt=TXT.tip;PAD.sfx('miss');draw();return;}
+  // white is still thinking: undo takes back black's stone and white never moves (the button is never dead)
+  if(busy&&!over){
+    clearTimeout(aiT);busy=false;
+    var s=hist.pop();b[s[1]][s[0]]=0;
+    unpick();turnTxt=TXT.yours;tipTxt=TXT.tip;
+    last=hist.length?hist[hist.length-1]:null;
+    PAD.sfx('miss');draw();return;
+  }
+  // nothing to take back, or the game is over: say so with the error sound rather than doing nothing
+  if(over||hist.length<2){PAD.sfx('err');return;}
+  for(var k=0;k<2;k++){var m=hist.pop();b[m[1]][m[0]]=0;}
+  unpick();tipTxt=TXT.tip;
+  last=hist.length?hist[hist.length-1]:null;
+  PAD.sfx('miss');draw();
+}
+/* -------------------------------------------------------------------------------------------------
+   The link match (PAD.link: SPEC.md 6.8, docs/design/radio.md 8.7).
+
+   Which calls, and why:
+   - PAD.link.open({proto:"gomoku1"}) starts the runtime's own pairing screen. "gomoku1" is this app's
+     agreement string: a peer running another app, or another rules version, is refused by the runtime
+     ("other-app"), so both sides always speak the messages below. The result is "open", "cancelled",
+     "denied", "none" or "busy"; only "open" starts or resumes a match.
+   - PAD.link.send(data) is the only way to talk: a string of at most 200 bytes, and the runtime keeps
+     at most 4 waiting. This app therefore has ONE sender queue (sendQ/pumpSend) and never has a second
+     message unsettled while one is in flight. "sent" means the peer acknowledged it; "lost" means the
+     retries ran out; "closed", "busy" and "big" are failures too.
+   - PAD.on("link") hands over {type:"message", data} and {type:"close", reason}.
+   - PAD.link.close() leaves the match; PAD.link.state and PAD.link.initiator are read-only.
+
+   Why every move carries a move number ("m,x,y,n", n is 1-based): the link is slow and lossy, so "the
+   stone I placed" and "the stone the other side has" can disagree. Without n a retried message would
+   put a second stone down, and a lost one would be invisible. n makes both visible: n <= my count is
+   a duplicate (ignore it), n > my count + 1 is a gap (ask for the whole game, never guess the stones).
+
+   Why "sync" and "all,...": a sender cannot know that a message arrived -- the last acknowledgement
+   can be the one that is lost (SPEC.md 6.8, "exchange is copy, not move"). After a gap the receiver
+   sends "sync"; the sender answers with the whole game as "all,x.y;x.y;..." in order. That reply is
+   one message while it fits 200 bytes (about 33 moves). On a longer game it is the same list in
+   chunks "all,<start n>,<x.y;...>", where start is the 1-based number of the chunk's first move, sent
+   one after another through the queue. The receiver collects the chunks in order (allBuf) and only
+   replaces its board when the rebuilt list is longer than its own, so a full board never shrinks.
+
+   Why the colour is fixed at the first open: reconnecting is a new pairing, and the runtime may make
+   the other handheld the initiator this time. The stones of this game keep their colours, so only the
+   FIRST "open" of a match reads PAD.link.initiator (true = black, and black moves first); every later
+   open keeps linkColour. Undo is off in a match for the same reason: one game, two identical boards.
+
+   Why "c,<colour>": the other side may have left and started a NEW match (HOME, then 对战 again), so its
+   first open read initiator afresh and can match the colour this side kept. A side with stones therefore
+   says its colour after "n,<count>"; a side that then takes over that game (applyMoves) takes the other
+   colour. Older versions ignore the message, as they ignore any message they do not know.
+   ------------------------------------------------------------------------------------------------- */
+
+/* small DOM helper: show/hide by class (toggle with a second argument is not on every old browser) */
+function show(el,on){if(on)el.classList.remove('hide');else el.classList.add('hide');}
+function colourToMove(){return moves.length%2===0?1:2;}   // black moves on even counts (0, 2, 4...)
+/* only the player whose colour is to move may place; solo keeps its old over/busy rule */
+function canMoveNow(){
+  if(mode!=='link')return !over&&!busy;
+  return linkOpen&&!over&&!sendingMove&&colourToMove()===linkColour;
+}
+function reasonText(r){return (TXT.why&&TXT.why[r])||TXT.why.other;}
+/* the tip line under a lost link: the reason, then what to do. The header already says "Disconnected" / "No link",
+   so the line does not repeat it; the full stop is each language's own */
+function whyLine(r){
+  var w=reasonText(r);
+  return LANG==='en'?w.charAt(0).toUpperCase()+w.slice(1)+'. '+TXT.offlineTip:w+'。'+TXT.offlineTip;
+}
+function updateButtons(){
+  var lkOn=!!LINK&&panelMode==='menu'&&mode!=='link';
+  show(document.getElementById('lk'),lkOn);     // the radio row only on the menu, and only where PAD.link exists
+  if(L&&b)draw();                               // the bar's own buttons come from the state, so a repaint is the update
+}
+function updateLinkUI(){
+  if(mode!=='link')return;
+  updateButtons();
+  if(over)return;                                  // endLinkGame owns the texts once a game is decided
+  if(openingLink){turnTxt=TXT.linking;tipTxt=TXT.linking;recTxt=TXT.linking;resize();return;}
+  if(!linkOpen){
+    turnTxt=moves.length?TXT.offline:TXT.notYet;
+    recTxt=turnTxt;
+    tipTxt=whyLine(linkWhy);
+    resize();return;
+  }
+  recTxt=TXT.linked;
+  if(sendingMove){turnTxt=TXT.sending;tipTxt=TXT.sending;}
+  else if(colourToMove()===linkColour){turnTxt=TXT.myTurn;tipTxt=TXT.linkTip;}
+  else{turnTxt=TXT.peerTurn;tipTxt=TXT.waiting;}
+  resize();
+}
+/* one message at a time: the runtime queues 4 at most, and the game wants to know each result */
+function queueSend(data,done){sendQ.push({data:data,done:done});pumpSend();}
+function pumpSend(){
+  if(sendBusy||!sendQ.length)return;
+  if(!LINK||!linkOpen){var q=sendQ;sendQ=[];for(var i=0;i<q.length;i++){if(q[i].done)q[i].done('closed');}return;}
+  sendBusy=true;
+  var item=sendQ.shift();
+  LINK.send(item.data).then(function(r){sendBusy=false;if(item.done)item.done(r);pumpSend();},
+    function(){sendBusy=false;if(item.done)item.done('closed');pumpSend();});
+}
+/* the link is over (a "lost" send, or the runtime's close event): keep the stones, say why, offer a reconnect */
+function lostLink(v){
+  if(mode!=='link')return;
+  sendingMove=false;linkOpen=false;linkWhy=v||'lost';unpick();
+  try{if(LINK&&LINK.state==='open')LINK.close();}catch(e){}  // after "lost" the runtime may still hold the link
+  updateLinkUI();
+}
+function startLinkGame(){
+  if(!LINK)return;
+  mode='link';panelMode='link';linkColour=0;moves=[];allBuf=[];syncAsked=false;syncs=0;
+  sendingMove=false;openingLink=false;linkOpen=false;linkWhy='';sendQ=[];sendBusy=false;
+  over=false;busy=false;last=null;winLine=null;hover=null;hist=[];b=emptyBoard();unpick();
+  hideResult();
+  ov.classList.add('hide');
+  updateLinkUI();
+  openLink();
+}
+function openLink(){
+  if(!LINK||mode!=='link'||openingLink||linkOpen)return;
+  openingLink=true;linkWhy='';updateLinkUI();
+  LINK.open({proto:'gomoku1'}).then(function(r){
+    openingLink=false;
+    if(mode!=='link'){if(r==='open'){try{LINK.close();}catch(e){}}return;}   // left while the runtime paired
+    if(r==='open'){
+      linkOpen=true;
+      if(!linkColour)linkColour=LINK.initiator?1:2;   // only the first open of the match decides
+      allBuf=[];syncAsked=false;peerColour=0;updateLinkUI();
+      /* after a reconnect both sides say how many moves they have, and their colour. The side with fewer
+         sends "sync". On a fresh game both are 0 and there is nothing to compare, so both are skipped. */
+      if(moves.length){
+        queueSend('n,'+moves.length,function(v){if(v!=='sent')lostLink(v);});
+        queueSend('c,'+linkColour,function(v){if(v!=='sent')lostLink(v);});
+      }
+    }else{
+      linkOpen=false;linkWhy=r;
+      if(r==='cancelled'&&!moves.length)leaveMatch();   // nothing to keep: back to the start menu
+      else updateLinkUI();
+    }
+  },function(){openingLink=false;linkOpen=false;linkWhy='none';updateLinkUI();});
+}
+function leaveMatch(){
+  if(mode!=='link')return;
+  try{if(LINK&&LINK.state==='open')LINK.close();}catch(e){}
+  mode='solo';panelMode='menu';
+  linkColour=0;moves=[];allBuf=[];syncAsked=false;syncs=0;
+  linkOpen=false;openingLink=false;sendingMove=false;linkWhy='';sendQ=[];sendBusy=false;
+  showMenu();
+}
+function showMenu(){
+  mode='solo';panelMode='menu';linkOpen=false;linkColour=0;moves=[];allBuf=[];sendQ=[];
+  reset();                                            // a clean solo board behind the menu
+  hideResult();
+  ot.textContent=TXT.title;op.textContent=TXT.intro;
+  document.getElementById('st').textContent=TXT.start;
+  updateButtons();
+  ov.classList.remove('hide');
+  drawArt();
+}
+/* the receiver of "sync" answers with the whole game (one message, or chunks of whole moves) */
+function sendAll(){
+  if(!linkOpen)return;
+  function sent(v){if(v!=='sent')lostLink(v);}
+  var pairs=[],i;
+  for(i=0;i<moves.length;i++)pairs.push(moves[i][0]+'.'+moves[i][1]);
+  var one='all,'+pairs.join(';');
+  if(one.length<=200){queueSend(one,sent);return;}   // ASCII only, so length is the byte count
+  i=0;
+  while(i<pairs.length){
+    var start=i+1,pre='all,'+start+',',chunk=[];
+    while(i<pairs.length){
+      var next=chunk.concat(pairs[i]);
+      if(pre.length+next.join(';').length>200)break;
+      chunk=next;i++;
+    }
+    if(!chunk.length){chunk=[pairs[i]];i++;}          // cannot happen with x,y < 15, but never loop forever
+    queueSend(pre+chunk.join(';'),sent);
+  }
+}
+function askSync(){                                  // I am missing stones: ask for the whole game once
+  if(!linkOpen||syncAsked)return;
+  syncAsked=true;syncs++;
+  queueSend('sync',function(v){if(v!=='sent')lostLink(v);});
+}
+function onCount(k){                                 // "n,<count>" arrives after every open
+  if(!linkOpen||over)return;
+  if(k>moves.length)askSync();                       // the peer has more: the side with fewer asks
+}
+function applyMoves(list){                           // rebuild the board from a whole game
+  var nb=emptyBoard(),i,m;
+  for(i=0;i<list.length;i++){
+    m=list[i];
+    if(!inb(m[0],m[1])||nb[m[1]][m[0]])return;       // malformed: keep the board we have
+    nb[m[1]][m[0]]=(i%2===0)?1:2;                    // move 1 is black, move 2 white, ...
+  }
+  b=nb;moves=list.slice();last=moves.length?moves[moves.length-1]:null;winLine=null;
+  if(peerColour)linkColour=3-peerColour;             // the game is the peer's: I am the other colour
+  /* the list may end on a winning stone this side never saw (its message was the one that was lost):
+     check the last move so both boards show the same result. checkWin() is the single-player one. */
+  if(!over&&moves.length){
+    var v=(moves.length-1)%2===0?1:2,lm=moves[moves.length-1];
+    if(checkWin(lm[0],lm[1],v)){endLinkGame(v===linkColour?'win':'lose');return;}
+  }
+  if(!over&&full()){endLinkGame('draw');return;}
+  updateLinkUI();
+}
+function onAll(text){                                // "all,..." or "all,<start>,..." (chunks)
+  if(!linkOpen||over)return;
+  var rest=text.slice(4),start=1,body=rest,comma=rest.indexOf(',');
+  if(comma>0&&/^\d+$/.test(rest.slice(0,comma))){start=+rest.slice(0,comma);body=rest.slice(comma+1);}
+  var raw=body?body.split(';'):[],list=[],i,mm;
+  for(i=0;i<raw.length;i++){
+    mm=/^(\d+)\.(\d+)$/.exec(raw[i]);
+    if(!mm||!inb(+mm[1],+mm[2]))return;              // one bad pair: keep what we have
+    list.push([+mm[1],+mm[2]]);
+  }
+  if(start===1)allBuf=[];                            // a fresh full game starts at move 1
+  if(start!==allBuf.length+1)return;                 // a chunk from elsewhere: wait for the next full one
+  allBuf=allBuf.concat(list);
+  syncAsked=false;
+  if(allBuf.length>moves.length)applyMoves(allBuf);   // replace only by a longer game; never shrink
+}
+function onMove(x,y,n){
+  if(!linkOpen||over)return;
+  if(n<=moves.length)return;                         // duplicate or already had it: ignore
+  if(n>moves.length+1){askSync();return;}            // a gap: ask for the whole game, do not guess
+  if(colourToMove()===linkColour)return;             // not the peer's turn (both moved at once): ignore
+  if(!inb(x,y)||b[y][x])return;                      // off the board or occupied: ignore
+  var v=colourToMove();
+  b[y][x]=v;last=[x,y];moves.push([x,y]);PAD.sfx('tick');  // the clock is the peer's; sound matches solo
+  if(checkWin(x,y,v)){endLinkGame(v===linkColour?'win':'lose');return;}
+  if(full()){endLinkGame('draw');return;}
+  updateLinkUI();
+}
+function onLinkMessage(data){
+  if(typeof data!=='string')return;                  // this app speaks text; PAD.link also allows bytes
+  if(data==='sync'){sendAll();return;}
+  if(data.indexOf('all,')===0){onAll(data);return;}
+  var m=/^n,(\d+)$/.exec(data);
+  if(m){onCount(+m[1]);return;}
+  m=/^c,([12])$/.exec(data);
+  if(m){peerColour=+m[1];return;}
+  m=/^m,(\d+),(\d+),(\d+)$/.exec(data);
+  if(m){onMove(+m[1],+m[2],+m[3]);return;}
+  /* anything else belongs to another version of this app: ignore it instead of breaking the game */
+}
+function endLinkGame(result){                        // result: 'win', 'lose' or 'draw', from this side
+  over=true;sendingMove=false;
+  turnTxt=result==='win'?TXT.linkWin:result==='lose'?TXT.linkLose:TXT.draw;
+  tipTxt=TXT.menuTip;
+  if(linkOpen)recTxt=TXT.linked;
+  resize();
+  PAD.sfx(result==='win'?'win':(result==='draw'?'ok':'lose'));
+  clearTimeout(resultT);
+  resultT=setTimeout(function(){
+    panelMode='link';
+    updateButtons();
+    showResult(turnTxt,result==='win'?TXT.linkWinnote:result==='lose'?TXT.linkLosenote:TXT.linkDrawnote,TXT.menu,'link');
+  },900);
+}
+function linkPlace(x,y){                             // a stone of mine in a match
+  if(!canMoveNow()||!inb(x,y)||b[y][x]||colourToMove()!==linkColour)return;
+  unpick();                                          // as in solo: the ring stops, the stone is down
+  var v=linkColour;
+  b[y][x]=v;last=[x,y];moves.push([x,y]);PAD.sfx('tap');
+  var n=moves.length;
+  if(checkWin(x,y,v))endLinkGame('win');
+  else if(full())endLinkGame('draw');
+  /* send whether or not the game just ended: the other side needs the last stone to see the same win */
+  sendingMove=true;updateLinkUI();
+  queueSend('m,'+x+','+y+','+n,function(r){
+    if(mode!=='link')return;
+    sendingMove=false;
+    if(r!=='sent')lostLink(r);
+    else if(!over)updateLinkUI();
+  });
+}
+function tap(x,y){if(mode==='link')linkPlace(x,y);else place(x,y);}
+/* PAD.on("link"): messages and the runtime's close reasons ("bye", "lost", "other-app", "timeout", "home") */
+if(typeof PAD!=='undefined'&&PAD.on)PAD.on('link',function(ev){
+  if(mode!=='link')return;
+  if(ev.type==='message'){onLinkMessage(ev.data);return;}
+  if(ev.type==='close'){
+    if(linkOpen)linkWhy=ev.reason||'lost';   // a close we started ("lost" already set) keeps its reason
+    linkOpen=false;sendingMove=false;sendQ=[];unpick();
+    updateLinkUI();                                  // the board stays; the bar offers 重新连接
+  }
+});
+/* a tiny hook for the Playwright tests: the board and match state as the page shows them, plus a way
+   to put a designed position on the board so a test reaches a result without playing the AI. The game
+   itself never reads or calls it. */
+window.__gomoku=function(){
+  var bs={},id;
+  for(id in BTNS)bs[id]={x:BTNS[id].x,y:BTNS[id].y,w:BTNS[id].w,h:BTNS[id].h};
+  return {board:b.map(function(r){return r.slice();}),moves:moves.length,colour:linkColour,mode:mode,
+    open:linkOpen,over:over,sending:sendingMove,syncs:syncs,initiator:LINK?!!LINK.initiator:false,
+    winLine:winLine?winLine.slice():null,wins:wins,size:L?L.S:0,pad:L?L.pad:0,cell:L?L.cell:0,
+    bx:L?L.bx:0,by:L?L.by:0,W:L?L.W:0,H:L?L.H:0,top:L?L.topH:0,bottom:L?L.botH:0,dpr:lastDpr,
+    buttons:bs,result:resultOn?{title:resultTitle,note:resultNote,label:resultLabel}:null};
+};
+window.__gomoku.layout=layoutFor;
+window.__gomoku.missingGlyphs=function(){
+  var miss={},list=[];
+  function walk(v){
+    if(typeof v==='string'){
+      Array.from(v).forEach(function(ch){if(!UIFONT.glyphs[ch]&&!miss[ch]){miss[ch]=1;list.push(ch);}});
+    }else if(v&&typeof v==='object'){for(var k in v)walk(v[k]);}
+  }
+  walk(TXT);
+  return list;
+};
+window.__gomoku.set=function(stones){
+  if(!Array.isArray(stones))return;
+  b=emptyBoard();over=false;busy=false;last=null;winLine=null;hover=null;hist=[];unpick();
+  for(var i=0;i<stones.length;i++){
+    var s=stones[i];
+    if(s&&inb(s[0],s[1]))b[s[1]][s[0]]=s[2]||0;
+  }
+  hideResult();
+  turnTxt=TXT.yours;tipTxt=TXT.tip;draw();
+};
+/* paint the title picture at the largest whole scale that leaves room for the line and the buttons below it */
+var artTone=[[163,173,126],[125,138,88],[74,90,50],[31,42,20]],artPx=null;
+function drawArt(){
+  if(ov.classList.contains('hide'))return;
+  var cvA=document.getElementById('art'),W=ART.W,H=ART.H;
+  var r=ov.getBoundingClientRect(),w=r.width||331,h=r.height||359;
+  var opH=document.getElementById('op').offsetHeight||21;
+  var nbtns=document.getElementById('lk').classList.contains('hide')?1:2;
+  var reserved=16+12+opH+nbtns*44+(nbtns>1?6:0);
+  var room=Math.max(H,h-reserved);
+  var s=Math.max(1,Math.min(Math.floor((w-16)/W),Math.floor(room/H)));
+  var d=window.devicePixelRatio||1,k=Math.max(1,Math.round(s*d));
+  cvA.style.width=(W*s)+'px';cvA.style.height=(H*s)+'px';
+  document.getElementById('op').style.maxWidth=Math.min(320,w-16)+'px';
+  if(cvA.width===W*k&&cvA.height===H*k&&artPx)return;
+  if(!artPx)artPx=ART.draw(LANG);
+  cvA.width=W*k;cvA.height=H*k;
+  var cx=cvA.getContext('2d'),img=cx.createImageData(W*k,H*k),o=img.data;
+  for(var y=0;y<H*k;y++)for(var x=0;x<W*k;x++){
+    var t=artTone[artPx[((y/k)|0)*W+((x/k)|0)]],i=(y*W*k+x)*4;
+    o[i]=t[0];o[i+1]=t[1];o[i+2]=t[2];o[i+3]=255;
+  }
+  cx.putImageData(img,0,0);
+}
+window.addEventListener('resize',drawArt);
+function resize(){
+  fit();
+  if(b)draw();
+  if(!ov.classList.contains('hide'))drawArt();
+}
+/* the stage can be sized after the app starts with no resize event (UI.md 13); two reads a frame */
+function watch(){
+  if(fit()){if(b)draw();if(!ov.classList.contains('hide'))drawArt();}
+  if(window.requestAnimationFrame)window.requestAnimationFrame(watch);else setTimeout(watch,120);
+}
+fit();reset();updateButtons();drawArt();
+watch();
+(async function(){
+  try{
+    var v=await PAD.load('gomoku_wins');
+    if(v!==null&&!isNaN(+v)){wins=+v;recTxt=TXT.wins+wins;draw();}
+  }catch(e){}
+})();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>打地鼠</title>
+<!-- Lo-PDA example app (lopda/1): pixel sprites on a canvas, touch input, sounds through PAD.sfx,
+     zh/en text through PAD.lang. MIT License. -->
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #a3ad7e; color: #1f2a14; font-family: monospace; }
+  /* the play screen is one canvas over the whole stage (UI.md 13); the overlay is the stage too, not a box in it */
+  #w { position: fixed; inset: 0; overflow: hidden; background: #a3ad7e; }
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #a3ad7e; }
+  canvas { display: block; position: absolute; left: 0; top: 0; image-rendering: pixelated; image-rendering: crisp-edges; touch-action: none; }
+  #ov { position: absolute; inset: 0; display: flex; flex-direction: column; background: #a3ad7e; text-align: center; overflow: hidden; }
+  #ovbody { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; justify-content: safe center; gap: 8px; padding: 10px; box-sizing: border-box; }
+  #ov.title-view #ovbody { gap: 4px; }
+  #ov h1 { margin: 0; font-size: 26px; letter-spacing: 2px; }
+  #op { margin: 0; font-size: 15px; line-height: 1.45; white-space: pre-line; }
+  #title-slot { position: relative; width: 160px; height: 160px; flex: none; }
+  #title-art { display: block; width: 160px; height: 160px; border: 0; image-rendering: pixelated; }
+  /* the name is painted on the dusk sky, paper letters with an ink rim, over the sunset */
+  #title-name { position: absolute; left: 6px; top: 7px; width: 74px; height: 30px; display: flex; align-items: center; justify-content: center;
+    color: #a3ad7e; font-size: 21px; font-weight: bold; line-height: 16px; letter-spacing: 1px; text-align: center; white-space: pre-line;
+    text-shadow: 1px 0 #1f2a14, -1px 0 #1f2a14, 0 1px #1f2a14, 0 -1px #1f2a14, 1px 1px #1f2a14, -1px 1px #1f2a14, 1px -1px #1f2a14, -1px -1px #1f2a14, 2px 2px #1f2a14; }
+  #title-name.two { font-size: 16px; }
+  #btns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; max-width: 100%; flex: none; }
+  #btns.level-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  #btns button { min-height: 44px; padding: 8px 6px; font-size: 15px; }
+  #btns button.wide { grid-column: 1 / -1; }
+  #btns button.level-cell { white-space: pre-line; line-height: 15px; padding: 4px 2px; font-size: 15px; }
+  #btns button.locked { background: #4a5a32; color: #a3ad7e; border-color: #4a5a32; }
+  @keyframes wipe { 0% { transform: translateX(-105%); } 100% { transform: translateX(105%); } }
+  #wipe { position: absolute; z-index: 4; inset: 0; pointer-events: none; background: #1f2a14; transform: translateX(-105%); visibility: hidden; }
+  #wipe.go { visibility: visible; animation: wipe 300ms linear; }
+  #bests { margin: 0; font-size: 13px; }
+  button { font: inherit; font-weight: bold; min-height: 44px; padding: 8px 20px; background: #a3ad7e; color: #1f2a14; border: 2px solid #1f2a14; box-shadow: 3px 3px 0 #4a5a32; }
+  /* the cursor is inverted, like every list in the handheld (UI.md 5); a locked level keeps a paper ring when selected */
+  #btns button.sel { background: #1f2a14; color: #a3ad7e; }
+  #btns button.locked.sel { box-shadow: inset 0 0 0 2px #a3ad7e, 3px 3px 0 #4a5a32; }
+  .hide { display: none !important; }
+</style>
+</head>
+<body>
+<div id="w">
+  <div id="stage">
+    <canvas id="c" width="120" height="194"></canvas>
+    <div id="ov">
+      <div id="ovbody">
+        <div id="title-slot"><canvas id="title-art" width="160" height="160"></canvas><div id="title-name"></div></div>
+        <h1 id="ot">打地鼠</h1>
+        <p id="op"></p>
+        <div id="btns"></div>
+        <p id="bests"></p>
+      </div>
+    </div>
+    <div id="wipe"></div>
+  </div>
+</div>
+<script>
+(function () {
+  var INK = "#1f2a14", DARK = "#4a5a32", MID = "#7d8a58", PAPER = "#a3ad7e";
+  var TONE = { "0": INK, "1": DARK, "2": MID, "3": PAPER };
+
+  /* two languages: PAD.lang from the runtime; older runtimes have none, so Chinese is the default */
+  var LANG = typeof PAD !== "undefined" && PAD.lang === "en" ? "en" : "zh";
+  var TXT = {
+    zh: { title: "打地鼠",
+      mode60: "60 秒", modeEndless: "无尽", modeLevels: "闯关", startLevel: "开始",
+      bests: "60 秒 {s} · 无尽 {t}", noRecords: "还没有记录",
+      again: "再来一局", modes: "选模式", record: "新纪录", over: "时间到", boom: "踩雷",
+      got: "砸中 {n} 分。", endlessGot: "坚持 {t}，砸中 {s} 分。",
+      result: "命中 {h}/{t} · 最高连击 {c}<br>踩雷 {m} · 评价 {r}",
+      bestline: "<br>最高 {n} 分。", bestlineEndless: "<br>最长 {t} · 最高 {s}",
+      levelTitle: "第 {n} 关", levelTarget: "目标 {n} 分",
+      levelList: "关卡", back: "返回", next: "下一关", levels: "关卡",
+      levelResult: "得分 {s} · {n} 星", newStars: "新纪录：星数增加", levelDone: "过关", levelAgain: "再来" },
+    en: { title: "MOLE BOP",
+      mode60: "60s", modeEndless: "ENDLESS", modeLevels: "LEVELS", startLevel: "START",
+      bests: "60s {s} · ENDLESS {t}", noRecords: "No records yet",
+      again: "AGAIN", modes: "MODES", record: "NEW RECORD", over: "TIME UP", boom: "BOOM",
+      got: "{n} points.", endlessGot: "Lasted {t}, {s} points.",
+      result: "{h}/{t} hits · best combo {c}<br>mines {m} · rank {r}",
+      bestline: "<br>Best: {n}.", bestlineEndless: "<br>Best: {t} · {s} pts",
+      levelTitle: "LEVEL {n}", levelTarget: "TARGET {n} PTS",
+      levelList: "LEVELS", back: "BACK", next: "NEXT", levels: "LEVELS",
+      levelResult: "SCORE {s} · {n} STARS", newStars: "NEW BEST: MORE STARS", levelDone: "CLEAR",
+      levelAgain: "AGAIN" }
+  }[LANG];
+  function tx(key, n) { return TXT[key].replace("{n}", n); }
+  function tf(key, o) { return TXT[key].replace(/\{(\w+)\}/g, function (_, k) { return o[k]; }); }
+  function $t(id, key, n) { document.getElementById(id).textContent = tx(key, n); }
+  document.documentElement.lang = LANG === "zh" ? "zh-CN" : "en"; document.title = TXT.title;
+
+  /* 16x16 pixel sprites: 0 ink, 1 dark, 2 mid, 3 paper, . clear */
+  var ART = {
+    mole: ["................", "......0000......", "....00111100....", "...0111111110...", "..011111111110..", "..013011110310..", "..010011110010..", "..011111111110..", "..011122221110..", "..011220022110..", "..012222222210..", "..011223322110..", "..011111111110..", "..011111111110..", "..011111111110..", "..011111111110.."],
+    dizzy: ["................", "......0000......", "....00111100....", "...0111111110...", "..010101101010..", "..011011110110..", "..010101101010..", "..011111111110..", "..011122221110..", "..011220022110..", "..012220022210..", "..012200002210..", "..011111111110..", "..011111111110..", "..011111111110..", "..011111111110.."],
+    helmet: ["....00000000....", "...0222222220...", "..023322222220..", ".00000000000000."],
+    mine: ["................", "............0...", "...........0.0..", "............0...", "...........01...", "..........01....", "....00000010....", "...0111111110...", "..011122111110..", ".01112221111110.", ".01112211111110.", ".01111111111110.", ".01111111111110.", "..011111111110..", "...0000000000...", "................"],
+    crown: ["0.0.0.0.", "02222220", "02333220", ".000000."],
+    minus: ["...", "000", "..."],
+    paw: ["0.0.0", "01110", ".000."],
+    strike: ["................", "................", "................", "................", "................", "................", "000000..........", "011110..........", "013310..........", "011110000000000.", "011110222222220.", "011110111111110.", "011110000000000.", "013310..........", "011110..........", "000000.........."],
+    raised: ["......0000000000", "......0111111110", "......0131111310", "......0131111310", "......0111111110", "......0000000000", ".........0210...", ".........0210...", ".........0210...", ".........0210...", ".........0210...", ".........0210...", ".........0210...", ".........0210...", ".........0000...", "................"],
+    spark: ["..0..", "..0..", "00.00", "..0..", "..0.."],
+    plus: ["...", ".0.", "000", ".0.", "..."],
+    hudMole: ["..0000..", ".022220.", "02222220", "02022020", "02222220", ".022220.", "..0000.."],
+    hudClock: ["..00000..", ".0222220.", "022222220", "022022220", "022022220", "022222220", ".0222220.", "..00000.."],
+    hudFlag: ["0.......", "02222220", "02333320", "02222220", "0.......", "0.......", "0......."]
+  };
+  var DIGIT = ["111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001", "111100111001111", "111100111101111", "111001010010010", "111101111101111", "111101111001111"];
+
+  function sprite(rows) {
+    var c = document.createElement("canvas"), x = c.getContext("2d");
+    c.width = rows[0].length; c.height = rows.length;
+    rows.forEach(function (r, y) {
+      for (var i = 0; i < r.length; i++) if (TONE[r[i]]) { x.fillStyle = TONE[r[i]]; x.fillRect(i, y, 1, 1); }
+    });
+    return c;
+  }
+  var SP = {}; Object.keys(ART).forEach(function (k) { SP[k] = sprite(ART[k]); });
+
+  var cv = document.getElementById("c"), g = cv.getContext("2d");
+  g.imageSmoothingEnabled = false;
+  var W = 120, H = 150, TOP = 18, CW = 40, CH = 44;
+
+  /* The field is always 120 x 150 canvas pixels: the nine holes, their timing and the sprites do not change with
+     the phone. The canvas around it grows instead (UI.md 13): a sky band above the field holds the score, combo,
+     clock and record; the rows below are the soil the field sits on; a short or wide stage gets side columns.
+     k CSS pixels a canvas pixel; W x k and H x k always cover the stage, with less than one canvas pixel over. */
+  var HUD_MIN = 44, HUD_SLIM = 22, DIRT_MIN = 24;
+  function frameLayout(w, h) {
+    var cols = W, rows = H + HUD_MIN, k = 1;
+    if (w > 0 && h > 0) {
+      k = w / W;
+      rows = Math.ceil(h / k - 0.01);
+      if (rows < H + HUD_SLIM) {
+        /* too short for the width: fit the height and let the field's scenery run out to the sides */
+        rows = rows >= H ? H + HUD_SLIM : H + HUD_MIN;
+        k = h / rows;
+        cols = Math.max(W, Math.ceil(w / k - 0.01));
+      }
+    }
+    var extra = rows - H, hud = extra, dirt = 0;
+    if (extra >= HUD_MIN + DIRT_MIN + 8) {
+      /* a little under half of the spare rows go to the sky, so the field sits low like a real plot */
+      hud = Math.max(HUD_MIN + 12, Math.min(88, Math.round(extra * 0.5)));
+      /* never leave a soil band thinner than its roots, even just past the gate */
+      hud = Math.min(hud, extra - DIRT_MIN);
+      dirt = extra - hud;
+    }
+    return { W: cols, H: rows, x0: Math.floor((cols - W) / 2), hud: hud, dirt: dirt, k: k, slim: hud < HUD_MIN, fw: W, fh: H };
+  }
+  var L = frameLayout(0, 0);
+  var stageEl = document.getElementById("stage");
+  var lastCW = 0, lastCH = 0;
+  var hudCv = null, backCv = null, hudKey = "", backKey = "";
+  var clockLeft = 60;
+
+  var holes = [], hammers = [], pops = [];
+  var playing = false, score = 0, combo = 0, endAt = 0, nextSpawn = 0, nextMine = 0, lastSec = -1, startAt = 0;
+  var hits = 0, taps = 0, minesHit = 0, maxCombo = 0, shakeUntil = 0;
+  var MODE = "60", dying = false, endedAt = 0, best60 = 0, bestEndless = 0, bestEndlessTime = 0;
+  var RUN_MS = 60000, ENDLESS_START_MS = 15000, LEVEL_MS = 30000;
+  var LEVELS = [
+    { target: 20, cap: 2, helmet: false, gold: false, thief: false, mines: false, p0: 0, p1: 0.10, hint: { zh: "普通地鼠，砸就对了", en: "Bonk the plain moles." } },
+    { target: 21, cap: 3, helmet: false, gold: false, thief: false, mines: false, p0: 0.10, p1: 0.25, hint: null },
+    { target: 22, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.15, p1: 0.30, hint: { zh: "戴头盔的要砸两下", en: "Helmets take two hits" } },
+    { target: 25, cap: 3, helmet: true, gold: false, thief: false, mines: false, p0: 0.30, p1: 0.45, hint: null },
+    { target: 29, cap: 3, helmet: true, gold: true, thief: false, mines: false, p0: 0.35, p1: 0.50, hint: { zh: "金地鼠：快，+3", en: "Gold moles: fast, +3" } },
+    { target: 31, cap: 4, helmet: true, gold: true, thief: false, mines: false, p0: 0.45, p1: 0.60, hint: null },
+    { target: 39, cap: 3, helmet: true, gold: true, thief: true, mines: false, p0: 0.50, p1: 0.65, hint: { zh: "小偷没砸到会换洞跑", en: "Missed thieves change holes" } },
+    { target: 41, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.55, p1: 0.75, hint: { zh: "冒火花的雷别碰", en: "Avoid the sparking mines" } },
+    { target: 48, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.70, p1: 0.90, hint: null },
+    { target: 55, cap: 4, helmet: true, gold: true, thief: true, mines: true, p0: 0.85, p1: 1.00, hint: { zh: "全部来了，更快", en: "Everything, faster" } }
+  ];
+  var levelNo = 0, stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0], levelSaveProtected = false;
+  var screen = "title", transitionBusy = false, thiefRuns = 0;
+  /* the dirt at a hole twitches this long before the mole rises; the spawn is decided this much
+     earlier, so the rise itself still happens at the moment it always did */
+  var TELL_MS = 300;
+  /* custom sound effects arrived with PAD.music in runtime 0.11.0; older runtimes keep the named sounds */
+  var CAN_SFX = typeof PAD !== "undefined" && !!PAD.music;
+
+  /* fixed tufts of grass, same every game */
+  var tufts = []; (function () { var s = 7; for (var i = 0; i < 26; i++) { s = (s * 73 + 41) % 997; tufts.push([s % 116 + 2, TOP + (s * 7) % (H - TOP - 4)]); } })();
+
+  for (var i = 0; i < 9; i++) holes.push({ x: (i % 3) * CW, y: TOP + Math.floor(i / 3) * CH, s: "down", t: 0, riseAt: 0, stay: 0, helmet: false, gold: false, kind: "mole", lastTap: 0, scorch: false });
+
+  function blit(img, x, y, k) { g.drawImage(img, Math.round(x), Math.round(y), img.width * (k || 2), img.height * (k || 2)); }
+  function oval(cx, cy, rx, ry, color) {
+    g.fillStyle = color;
+    for (var dy = -ry; dy <= ry; dy++) {
+      var w = Math.round(rx * Math.sqrt(1 - (dy * dy) / ((ry + 0.5) * (ry + 0.5))));
+      g.fillRect(cx - w, cy + dy, w * 2, 1);
+    }
+  }
+  /* ---------- the scoreboard, painted into the sky over the field ---------- */
+  var EXTRA_GLYPH = { x: "101010101", ":": "000010000", "-": "000111000", "/": "001010100" };
+  function glyphOf(ch) {
+    if (ch >= "0" && ch <= "9") return DIGIT[+ch];
+    return EXTRA_GLYPH[ch] || EXTRA_GLYPH["-"];
+  }
+  function digitsWidth(s, k) { s = String(s); return s.length ? s.length * 4 * k - k : 0; }
+  function drawDigits(ctx, s, x, y, k, color) {
+    s = String(s); ctx.fillStyle = color;
+    for (var i = 0; i < s.length; i++) {
+      var rows = glyphOf(s.charAt(i));
+      for (var p = 0; p < 15; p++) if (rows.charAt(p) === "1") ctx.fillRect(x + i * 4 * k + (p % 3) * k, y + Math.floor(p / 3) * k, k, k);
+    }
+  }
+  function number(n, x, y) { drawDigits(g, n, x, y, 1, INK); }
+  function rank60(n) { return n >= 115 ? "S" : n >= 100 ? "A" : n >= 85 ? "B" : n >= 70 ? "C" : "D"; }
+  function rankEndless(sec) { return sec >= 120 ? "S" : sec >= 90 ? "A" : sec >= 60 ? "B" : sec >= 30 ? "C" : "D"; }
+  function fmtTime(sec) {
+    sec = Math.max(0, Math.round(sec));
+    var m = Math.floor(sec / 60), s = sec % 60;
+    return m + ":" + (s < 10 ? "0" : "") + s;
+  }
+  function hudTimeText() {
+    var s = Math.max(0, Math.ceil(clockLeft));
+    return s > 599 ? fmtTime(s) : String(s);
+  }
+  function hudBestText() {
+    if (MODE === "level") return String(LEVELS[levelNo - 1] ? LEVELS[levelNo - 1].target : 0);
+    if (MODE === "endless") return bestEndlessTime ? fmtTime(bestEndlessTime) : "--";
+    return String(best60 || 0);
+  }
+  function setClock(left) { clockLeft = Math.max(0, left); }
+
+  function makeBand(w, h) {
+    var c = document.createElement("canvas");
+    c.width = Math.max(1, w); c.height = Math.max(1, h);
+    var x = c.getContext("2d"); x.imageSmoothingEnabled = false;
+    return c;
+  }
+  function cloud(ctx, x, y, w) {
+    ctx.fillStyle = MID;
+    ctx.fillRect(x, y, w, 1);
+    ctx.fillRect(x + 2, y - 1, Math.max(2, w - 4), 1);
+  }
+  function paintSky(ctx, w, h) {
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, w, h);
+    /* a low hedge along the horizon; text sits above it, on flat paper */
+    for (var x = 0; x < w; x++) {
+      var d = 2 + ((x * 7 + ((x * 13) % 11)) % 5);
+      ctx.fillStyle = MID; ctx.fillRect(x, h - d, 1, d);
+    }
+    if (h >= 60) { cloud(ctx, 6, 6, 12); cloud(ctx, w - 34, 9, 18); }
+  }
+  function paintHudFull(ctx, w, h) {
+    var y1 = Math.max(4, Math.round((h - 26) / 2)), y2 = y1 + 16, x = 6;
+    ctx.drawImage(SP.hudMole, x, y1 + 1);
+    x += SP.hudMole.width + 3;
+    drawDigits(ctx, score, x, y1, 2, INK);
+    var comboText = "x" + combo, cw = digitsWidth(comboText, 1);
+    ctx.drawImage(SP.paw, w - 6 - cw - 2 - SP.paw.width * 2, y1 + 3, SP.paw.width * 2, SP.paw.height * 2);
+    drawDigits(ctx, comboText, w - 6 - cw, y1 + 5, 1, INK);
+    /* bottom left: the record to beat, or the level's target */
+    var best = hudBestText(), icon = MODE === "level" ? SP.hudFlag : SP.crown;
+    ctx.drawImage(icon, 6, y2 + 2);
+    drawDigits(ctx, best, 6 + icon.width + 3, y2 + 3, 1, INK);
+    /* bottom right: the clock; its last ten seconds turn over */
+    var time = hudTimeText(), tk = time.length > 3 ? 1 : 2, tw = digitsWidth(time, tk);
+    var tx = w - 6 - tw, low = playing && Math.ceil(clockLeft) <= 10;
+    ctx.drawImage(SP.hudClock, tx - SP.hudClock.width - 2, y2 + (tk === 2 ? 1 : 3));
+    if (low) { ctx.fillStyle = INK; ctx.fillRect(tx - 2, y2 - 1, tw + 4, 14); }
+    drawDigits(ctx, time, tx, y2, tk, low ? PAPER : INK);
+  }
+  function paintHudSlim(ctx, w, h) {
+    var y = Math.max(3, Math.round((h - 10) / 2)), x = 4;
+    ctx.drawImage(SP.hudMole, x, y + 1);
+    x += SP.hudMole.width + 3;
+    drawDigits(ctx, score, x, y, 2, INK);
+    x += digitsWidth(score, 2) + 6;
+    var comboText = "x" + combo, comboW = SP.paw.width * 2 + 2 + digitsWidth(comboText, 1);
+    var time = hudTimeText(), tk = time.length > 3 ? 1 : 2, tw = digitsWidth(time, tk);
+    var tx = w - 4 - tw, iconX = tx - SP.hudClock.width - 2;
+    var best = hudBestText(), bestIcon = MODE === "level" ? SP.hudFlag : SP.crown;
+    var bestW = bestIcon.width + 2 + digitsWidth(best, 1), room = iconX - x - 4;
+    /* the record outranks the combo when the one line is tight */
+    if (comboW + 6 + bestW <= room) {
+      ctx.drawImage(SP.paw, x, y + 2, SP.paw.width * 2, SP.paw.height * 2);
+      drawDigits(ctx, comboText, x + SP.paw.width * 2 + 2, y + 5, 1, INK);
+      x += comboW + 6;
+      ctx.drawImage(bestIcon, x, y + 2);
+      drawDigits(ctx, best, x + bestIcon.width + 2, y + 5, 1, INK);
+    } else if (bestW <= room) {
+      ctx.drawImage(bestIcon, x, y + 2);
+      drawDigits(ctx, best, x + bestIcon.width + 2, y + 5, 1, INK);
+    } else if (comboW <= room) {
+      ctx.drawImage(SP.paw, x, y + 2, SP.paw.width * 2, SP.paw.height * 2);
+      drawDigits(ctx, comboText, x + SP.paw.width * 2 + 2, y + 5, 1, INK);
+    }
+    var low = playing && Math.ceil(clockLeft) <= 10;
+    ctx.drawImage(SP.hudClock, iconX, y + 1);
+    if (low) { ctx.fillStyle = INK; ctx.fillRect(tx - 2, y - 1, tw + 4, 14); }
+    drawDigits(ctx, time, tx, y, tk, low ? PAPER : INK);
+  }
+  function paintHudCanvas() {
+    var key = [L.W, L.hud, L.slim, score, combo, hudTimeText(), hudBestText(), MODE, playing && Math.ceil(clockLeft) <= 10].join("|");
+    if (key === hudKey && hudCv) return;
+    hudKey = key;
+    if (!hudCv || hudCv.width !== L.W || hudCv.height !== L.hud) hudCv = makeBand(L.W, L.hud);
+    var ctx = hudCv.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    paintSky(ctx, L.W, L.hud);
+    if (L.slim) paintHudSlim(ctx, L.W, L.hud); else paintHudFull(ctx, L.W, L.hud);
+  }
+  /* the rows under the sky: grass at the sides (the field repaints its own), soil and roots below the field */
+  function paintSoil(ctx, w, top, hgt) {
+    ctx.fillStyle = MID; ctx.fillRect(0, top, w, hgt);
+    ctx.fillStyle = INK; ctx.fillRect(0, top, w, 1);
+    ctx.fillStyle = DARK; ctx.fillRect(0, top + 1, w, 1);
+    var s = 11, i, x, y;
+    for (i = 0; i < Math.round(w * hgt / 90); i++) {
+      s = (s * 89 + 37) % 997;
+      x = s % w; y = top + 3 + (s * 5) % Math.max(1, hgt - 4);
+      ctx.fillStyle = i % 4 ? DARK : INK;
+      ctx.fillRect(x, y, 1 + (s % 2), 1);
+    }
+    for (i = 0; i < Math.max(3, Math.round(w / 34)); i++) {
+      s = (s * 61 + 29) % 997;
+      x = (s * 3) % w;
+      var drift = s % 3 - 1;
+      for (y = top + 2; y < top + hgt; y++) {
+        ctx.fillStyle = PAPER; ctx.fillRect(x, y, 1, 1);
+        if (y % 4 === 0) x = Math.max(0, Math.min(w - 1, x + drift));
+        if (y % 7 === 3) ctx.fillRect(x + 2, y, 2, 1);
+        if (y % 9 === 5) ctx.fillRect(x - 2, y, 2, 1);
+      }
+    }
+  }
+  function paintBack() {
+    var key = [L.W, L.H, L.hud, L.dirt, L.x0].join("|");
+    if (key === backKey && backCv) return;
+    backKey = key;
+    var h = L.H - L.hud;
+    backCv = makeBand(L.W, h);
+    var ctx = backCv.getContext("2d");
+    ctx.imageSmoothingEnabled = false;
+    ctx.fillStyle = PAPER; ctx.fillRect(0, 0, L.W, h);
+    var s = 7, i, tuftX, tuftY;
+    for (i = 0; i < Math.round(L.W * H / 70); i++) {
+      s = (s * 73 + 41) % 997;
+      tuftX = s % L.W; tuftY = (s * 7) % H;
+      ctx.fillStyle = MID;
+      ctx.fillRect(tuftX, tuftY, 1, 2);
+      ctx.fillRect(tuftX + 2, tuftY - 1, 1, 3);
+    }
+    if (L.dirt > 0) paintSoil(ctx, L.W, H, L.dirt);
+  }
+
+  var curItems = [], sel = 0;
+  function paintSel() {
+    var box = document.getElementById("btns"), i;
+    for (i = 0; i < box.children.length; i++) box.children[i].classList.toggle("sel", i === sel);
+    if (box.children[sel] && box.children[sel].scrollIntoView) box.children[sel].scrollIntoView({ block: "nearest" });
+  }
+  function choose(i) {
+    if (transitionBusy) return;
+    var it = curItems[i];
+    if (!it) return;
+    sel = i; paintSel();
+    if (it.locked) { PAD.sfx("err"); return; }
+    PAD.sfx("tap"); it.fn();
+  }
+  function setButtons(items) {
+    var box = document.getElementById("btns");
+    curItems = items; sel = 0;
+    box.innerHTML = "";
+    box.classList.remove("level-grid");
+    if (items.length && items[0].levelCell) box.classList.add("level-grid");
+    items.forEach(function (it, idx) {
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = it.label;
+      if (it.wide) b.className = "wide";
+      if (it.levelCell) b.className += (b.className ? " " : "") + "level-cell";
+      if (it.locked) b.className += (b.className ? " " : "") + "locked";
+      b.addEventListener("click", function () { choose(idx); });
+      box.appendChild(b);
+    });
+    paintSel();
+  }
+  function showBests() {
+    /* nothing played yet: two dashes read as a broken screen, so say it in words */
+    if (!best60 && !bestEndlessTime) { document.getElementById("bests").textContent = TXT.noRecords; return; }
+    document.getElementById("bests").innerHTML = tf("bests", {
+      s: best60 || "--",
+      t: bestEndlessTime ? fmtTime(bestEndlessTime) : "--"
+    });
+  }
+  function starsFor(n, target) { return n >= Math.ceil(target * 1.4) ? 3 : n >= Math.ceil(target * 1.2) ? 2 : n >= target ? 1 : 0; }
+  function transition(fn) {
+    if (transitionBusy) return;
+    try { fn(); }
+    finally {
+      transitionBusy = true;
+      var wipe = document.getElementById("wipe");
+      wipe.classList.remove("go");
+      void wipe.offsetWidth;
+      wipe.classList.add("go");
+      setTimeout(function () { wipe.classList.remove("go"); transitionBusy = false; }, 300);
+    }
+  }
+  function labelStars(n) {
+    var s = "";
+    for (var i = 0; i < 3; i++) s += i < n ? "*" : "-";
+    return s;
+  }
+  /* the title picture: the owner's garden at dusk, reduced to the four tones (its empty title corner painted over as sky, a setting sun and birds), 160 x 160, packed 2 bits a pixel
+     (0 ink, 1 dark, 2 mid, 3 paper); written with putImageData only */
+  var TITLE_PIC = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/////////////////////////////////////////////////wAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq8AAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqamqqqqqqqqqqqqqqqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqpmqqqqqqqqqqqqqqqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqmqqqqqqqqqqqqqqqqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqpqaqqqqqqqqqqqqqqqqqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqmaqqqqqqqqqqqqqqqqqqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqaqqqqqqqqqqqqqqqqqqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqAKqqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqP8qqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqpqaqqqqqqqqqqqL/KqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqmaqqqqqqqqqqoEAAKqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqaqqqqqqqqqqqoKoIqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgP/wKqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqi/IqqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqosOKqqqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqivKqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgAAACAAqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqoAv8AAD/IqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqKL/8m//RiqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqsCv/wv/4AqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq4Jn8vqWKqqwAACqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgAf/wAKqqsAAAqqqqqqqqqqqqqqqqqquqqqqqqqqqqqqgqqiqqqKqqqL/8KqqqrAAAKqqqqqqqqqqqqqqqqv//6qqqqqqqqqqriqjyqo4qqqC//SqqqqwAACqqqqqqqqqqqqqqqq////6qqqqqqqqqi6qj/Ko+yqqiv/0qqqqsAAAqqqqqqqqqqqqqqqq/////qqqqqqqqqo+qo7yqPsqqoq/+KqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgLsAO8AC7CqqKuniqqqqwAACqqqqqqqqqqqqqqqv/////qqqqqqqqiy7XzvP4uwqqiqo4qqqqsAAAqqqqqqqqqqqqqqqv/////+qqqqqqqoY61o7hVPsKqoiCAKqqqrAAAKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqgPoAO0AD7Cqqrgi6qqqqwAACqqqqqqqqqqqqqqq//////6qqqqqqqqi3qjtKo+iqqqoiqqqqqsAAAqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqovwA7wAPsKqqqIqqqqqrAAAKqqqqmpWpWpWpWpf//////5WpWqqqqqP+vO8vj7CqqqiKqqqqqwAADu+677/////////////////////////y7BTvFQ7gaq64ACqrqqsAAA+67rr/////////////////////////0+wA7yCO4uqqoH8Cu6qqAAAP6rqqv////////////////////////3L7dO41yuO67oF/oOrvugAAD6qqqr////////////////////////7S6ejqLorx2roFbqjqeuoAAA+66rr/////////////////////////tAWqAHrQCnroFq6uOqq6AAAO77ruv/////////////////////////u6quq66ruC4Fumr5P+7gAADu+677r/////////////////////////////////AIFpqq6j//4AAA+67rrv/////////////////////////////////CgJqam6qP/+AAAP6rqqv/////////////////////////////////ygF+qqqrg//gAAD6qqqr/////////////////////////////////8QFpaqpa+D/4AAA+66rr//////////////////////////////////AJpqqql+k/+AAAO77ruv/////////////////////////////////wF6qqqlVpP/gAAD6qqqv/////////////////////////////////8FqaqqVlVT/4AAA+qrqq/////////////////////////////////8FpaqqWlVT/+AAAO77rq/////////////////////////////////8FqaqqWlVT//gAAD7rquv/////////////////////////////////FqaqqWlVQ//4AAA7qqur/////////////////////////////////BaqqqWlVU//+AAAPqrqq///////////////////////f/////////CaaqqWpVU///gAAD7rquv//////////////////////1/////////6qaqqWpUUP//4AAA7quuv////////////////////////////////yWaqqWpQAP//+AAAPqqqq///////////////////////f/////A/f8qWqqWpQoP///gAAD6qqqv///////////////////8P/3/8///yP//KqaqmlUqg///4AAA7ruuv///////////////1///wM///8T//+j//yqpqWlUKqD//+AAAPuuq6///////////////5f//Auj//og///Ev/8qqmWlVBqoP//gAADuq6q/////qq///////+qV//DK4PqqA/6fgP//SqqWlVQGmg//4AAA7quq7///7///////+///P//KiuI+v///r//q/8KqllVUAaaD/+AAAPuu+u///+////////v//E9/yoKAP////+//7//wqqVVUMBpoP/gAADu+6uv///////////7//wf/8AgAD/X///v/////CqpVUPwGWg/4AAA+6qqr///////////6///P/8v//4P9///+/////4KqlUP/AaaD+AAAPqqqq///7/Wqqpf/+v////8AFVVA////////+vqgqpUP/8BpoPgAADu6quv//79apVWqP/v/////BVaqqD////+//qvXqAqkP//wGmg4AAA+6uuv//+9aVVVVp/7//P//BVqqoA/P///v+qfHFaDoP///AaaCAAAO6qq7//+/ZVAAFWn7//I//BgCqq8DP///7+lcDAVUAP///8BqogAAD7ruq///vaUAAAFZ9//9j/xo/KqPw8////un8MAAFq+////8GqoAAA7vuu///v6lAAAAKff//AP8q8yqj8f////3p8MAABWvv////gaqAAAKuuq///7/qgAAAq/r/////Wv9oCfL////++wAAAAV/6////+BqgAACuq6r/////qoABqv7/////Fq9oMEKP////6qQIAAC//v////8FoAAAqqqr/////+6qqq/6/////yqqvw+qT//x/++oAoGSAP+/////wWAAAKuuq///v///////+////z8qqr//6pP/yr/v6iI/8Cj/v/////BgAACu66///7////////v/1/8/Kqq/j6qT/8K/6//AP/wj///////8IAAAqqq///7////////b/9f//CqqvAOqk//9//f/wj/8A//v/////yAAAKqq///7////////3/////waqqPwqpP/f//2/wCA8gD/7//////gAACuu7//+////////+/////8VqqgAKqT////+v8/iA+s//v/////4AAAq67///v////////v////AFqqqqqqkA//+v7/PAoK6P/7/////+AAAK6rv//v///////////1/wBqqqqqqpAP/qv+vywCCuAP/v/////gAACuq///7/yqqqp///////FGqqqv/+qUaP6v/roKIggAAI7/////4AAAq6///+/qpVVqm/+////FRqqq///6VCo///+6pSIkpKKPv////+AAAK7///+/alVVVaX/v///6gaoq////VQKv////6qKArwiD7/////gAACqr///v6VUABVZ/n///z6Fqiv///5UCoP//+//yI//Aj//////4AAAqr///v2VAAAAVn6///yugGov///6kBaj///v/8KP/wg/7////+AAAK7///7+lAAAABp+//P1qUAKiv//qkBpZf//7/8vw/wAP+/////gAACr///7/qQAAAAqfv/19aQqAAqqplAAWlXAP+v/L+Px6o/7////4AAArv//+/+pAAAAqvb/8PWkqqAJAAUAqVVVxf/3/yqj8v+P+////+AAAK///+v/6qqqqqv3////Vr+qgGqgKqqlX///9/8qo/K+j/7////gAACn///v//+qqqq/5////1a6qoGqqiqqmV////r/L6P8/r//////4AAAr///v///6qq//+v////WqqpWqqoKqpV////+/yqToCoL/7///+AAAL///7/////////r///f/VqqX6qqWqpV9f///rVKgCoFqD/v///gAAC///+/////////7/////9VVWqqqqVVf/////52qAimqqJP7///4AAAv///v////////+///////9VqqqpVf//////+f6iAj/ACf+///+AAAL///v/////////////////9VVWpX////////3/8IJ/ygoD7///gAAC///7/////////r/////////9VVf////////+//wg/8Ioo+///4AAAv//7//+qqv///7/////////////////////////AD/ygI/v//+AAAL//7//qqqqr//+/////////////////////////6UP/II/+///gAAC//+/+qlVWqr//v//////////////////////f/yrj/+I//v//4AAAv//v+pVVVVqv/r//////////////////////3/8qo/8CP/+//+AAAL//7+lVQAFVa/7/wA///8kAI////////8pAP/v/7aP/II//v//gAAC//7+lUAAAFWv1/AAHz/8oPyj///////8YAgP69Bui/H/D////4AAAv/+/ZUAAAAFq9fKKoXP/IuqJP//////wgKgE/ugJgXz/o//v/+AAAL///2kAAAABavvPK+go/AP6ls//////AgP6hD76kApcv+P////gAAC//v9pAAAAAKnrDP7WCPIMMKrD/////w2o/8IOf/aqnKfj//v/4AAAv/v/qoAAAAqr7zS2LogPL8Kog/////8sqy/DD3////8/4//+/+AAAL/7/+qqQAKqv984sK6Iz9vK6IP/////PLuOjz+/////P4P//v/gAAC/7///qqqqqv/fyBKviPLGiqiP/////8p7ogz/v////y+D//+/4AAAv+//////////3+Kg/SL8tCvGP//////DiqLw/9//8CUqigv/v+AAAL///////////6/gqACi+K6pLy//////4eAK4r/f//qmQCmp///gAAC///////////+/6CoKieoOgqBf/////6CqLoq/3/+qqqKlqv//4AAAvr//////////f/qAACv6iYKCf//////qCigq/9//qqqlqv//7+AAAL7//////////X/6qq///6qlqv//////+qqqr//n/////////+/gAAC+//////////1/////////////////////////9//////////v4AAAu//////////+v/////////////////////////v/////////++AAAKv/////////9v/////////////////////////+//////////rgAACv//////////b//////////9VVVX///////////v/////////+4AAAr///6qr////1//////////VqqqqV//////////6////2qr///qAAAK//9aqqX///1/////////9aqqqqql//////////v///WqqVv/+gAAC//1qqqqVf/+f////////1aqlVVqqm/////////7//1aqqql//4AAAv+alVVVal//v/wA/////WpVVVVVVal////ygA////mpVVVWqf+AAAL/alVVVVaX/7/wqgP///WpVVVVVVWqX///CgAg/7/mlVVVVWr/gAAC/alVVVVVpf+/wQAoP//WpVVVVVVVap///CD/Ev+/2lVVVVVaf4AAAv2lVAAFVWn9/wB/oj//1pVVQAAFVVqX//OC/4I/v9lVUAAVVp+AAAL+lQAAAAVp/fMI+6BD/xpVUAAAAAFWpf/P6Dvyj69pUAAAAFWfgAAC9lQAAAAAWv3LGj7oLP8qVQAAAAAAVan/zStLsI+tqUAAAAAFp4AAAvZAAAAAAGr9yxqLqPT9ppAAAAAAABpaf88qoLCP3akAAAAAAaeAAAL2gAAAAACq9csaoIDn/aakAAAAAAAamn/CK+gCD9eqAAAAAAKngAAC/qgAAAACqvn+iug+j/1alqQAAAAapqW//JKqpT/r6oAAAAAqr4AAAv6qAAAAKqvr/KPouk/9WpqlQAABqqlZ//S4UqC/9/qoAAAAqr+AAAL/qqgABqq/6/AoAukP/1paqlalVWqlVf/lPwKgv/r+qoAAKqr/gAACv+qqqqqr/+vqKoqoK//VapWqpqpaqF//6oKKin/7/+qqqqqr/oAAAq//qqqqr//r6qqiCqv//VVWqlqqVZf///6qgKr//v/+qqqq//qAAAK7////////3/6oAKqv///9RqlWqlX/////qqqv//7////////ugAACrv///////1//qqqqv/////VVValP////////////f///////u4AAAqq////////f/+qqr//////9VVVV/////////////7///////66AAAK6q+//7//7q//v++vv/+/7u+/7u++7++/7/+/7/+6vu++/7/quQAAC7rq77ru77q6uu+66u+677u6776677u67ru677u67q+677rvuu0AAArqurruu7ruru+677q67rrq6rrq67rq77ru77ru77p66rrvuuq5AAAKqqquuqrqtbu6qrrqrrqqurquqqrquqrqqqrqqrrqWrqquqqqqQAACqrqqrqq6qWuuqq66qq6qru6qrqq6rqq6qqq6qq6qmq6qrqquu0AAArqurrqurrpuuq677u66rrq7rrq6rrq7rrp6rru6rqa6rrquu65AAALuurvutrvtuu677ru77rvu7rvv7rvu7rvu7ruurrvl7rvuu+67QAAACC4iCBAuASCILDguLggsNLguCoguAIguODgsCAggNIgiiAA4IkAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==";
+  function drawTitleArt() {
+    var c = document.getElementById("title-art"), x = c.getContext("2d"), img = x.createImageData(160, 160);
+    var raw = atob(TITLE_PIC), rgb = [[0x1f, 0x2a, 0x14], [0x4a, 0x5a, 0x32], [0x7d, 0x8a, 0x58], [0xa3, 0xad, 0x7e]];
+    for (var i = 0; i < 160 * 160; i++) {
+      var t = (raw.charCodeAt(i >> 2) >> (6 - 2 * (i & 3))) & 3, o = i * 4;
+      img.data[o] = rgb[t][0]; img.data[o + 1] = rgb[t][1]; img.data[o + 2] = rgb[t][2]; img.data[o + 3] = 255;
+    }
+    x.putImageData(img, 0, 0);
+  }
+  function showTitle() {
+    playing = false; dying = false; MODE = "60"; screen = "title";
+    document.getElementById("ot").classList.add("hide");
+    document.getElementById("op").classList.add("hide");
+    document.getElementById("ov").classList.add("title-view");
+    document.getElementById("title-slot").classList.remove("hide");
+    document.getElementById("bests").classList.remove("hide");
+    showBests();
+    setButtons([
+      { label: TXT.modeLevels, fn: function () { transition(showLevels); } },
+      { label: TXT.mode60, fn: function () { transition(function () { start("60"); }); } },
+      { label: TXT.modeEndless, fn: function () { transition(function () { start("endless"); }); }, wide: true }
+    ]);
+    document.getElementById("ov").classList.remove("hide");
+    score = 0; combo = 0; setClock(60);
+  }
+  function showLevels() {
+    playing = false; dying = false; screen = "levels";
+    document.getElementById("ov").classList.remove("title-view");
+    document.getElementById("ot").classList.remove("hide");
+    document.getElementById("op").classList.add("hide");
+    document.getElementById("title-slot").classList.add("hide");
+    $t("ot", "levelList"); document.getElementById("op").textContent = "";
+    document.getElementById("bests").classList.add("hide");
+    resetOverlayHud();
+    var items = LEVELS.map(function (_, i) {
+      var open = i === 0 || stars[i - 1] > 0;
+      return { label: (i + 1) + "\n" + labelStars(stars[i]), levelCell: true, locked: !open,
+        fn: function () { levelNo = i + 1; transition(showLevelCard); } };
+    });
+    items.push({ label: TXT.back, fn: function () { transition(showTitle); }, wide: true });
+    setButtons(items);
+    document.getElementById("ov").classList.remove("hide");
+  }
+  function refreshLevelList() { if (screen === "levels") showLevels(); }
+  function showLevelCard() {
+    playing = false; dying = false; screen = "card";
+    document.getElementById("ov").classList.remove("title-view");
+    document.getElementById("ot").classList.remove("hide");
+    document.getElementById("op").classList.remove("hide");
+    var data = LEVELS[levelNo - 1];
+    document.getElementById("title-slot").classList.add("hide");
+    document.getElementById("ot").textContent = tf("levelTitle", { n: levelNo });
+    document.getElementById("op").textContent = tf("levelTarget", { n: data.target }) +
+      (data.hint ? "\n" + data.hint[LANG] : "");
+    document.getElementById("bests").classList.add("hide");
+    resetOverlayHud();
+    setButtons([
+      { label: TXT.startLevel, fn: function () { transition(function () { start("level"); }); }, wide: true },
+      { label: TXT.back, fn: function () { transition(showLevels); }, wide: true }
+    ]);
+    document.getElementById("ov").classList.remove("hide");
+  }
+  function showMenu() { transition(showTitle); }
+  function resetOverlayHud() { score = 0; combo = 0; setClock(0); }
+
+  /* the triangle blip climbs with the combo; older runtimes get the named sounds */
+  function hitSound(add) {
+    if (CAN_SFX) PAD.sfx({ wave: "triangle", from: 170 + Math.min(combo, 15) * 18, to: 80, ms: 70, vol: 0.55 });
+    else PAD.sfx(add > 1 ? "coin" : "hit");
+    if (add > 1) PAD.sfx("coin");
+  }
+  function fuseSound() {
+    if (CAN_SFX) PAD.sfx({ wave: "noise", from: 1600, to: 500, ms: 200, attack: 5, vol: 0.3 });
+    else PAD.sfx("tick");
+  }
+  function boomSound() {
+    if (CAN_SFX) PAD.sfx({ wave: "noise", from: 900, to: 60, ms: 260, attack: 2, decay: 258, vol: 0.85 });
+    else PAD.sfx("err");
+  }
+
+  function rise(h, now) {
+    /* 0 = hidden, 1 = fully up; a mine comes up a little slower so it can be read */
+    var k = (now - h.t) / (h.kind === "mine" ? 200 : 120);
+    if (h.s === "rise") return Math.min(1, k);
+    if (h.s === "up") return 1;
+    if (h.s === "sink") return Math.max(0, 1 - k);
+    if (h.s === "hit") return 1;
+    return 0;
+  }
+
+  function boom(cx, cy, age) {
+    var k = Math.min(1, age / 260), r = 3 + 11 * k;
+    for (var i = 0; i < 8; i++) {
+      var a = i * Math.PI / 4 + age / 150;
+      g.fillStyle = i % 2 ? MID : INK;
+      g.fillRect(Math.round(cx + Math.cos(a) * r) - 1, Math.round(cy + Math.sin(a) * r * 0.7) - 1, 2, 2);
+    }
+    oval(cx, cy, Math.round(6 + 7 * k), Math.round(4 + 5 * k), MID);
+    oval(cx, cy, Math.round(4 + 5 * k), Math.round(3 + 3 * k), DARK);
+    oval(cx, cy, Math.round(2 + 3 * k), Math.round(1 + 2 * k), INK);
+    if (age < 120) { g.fillStyle = PAPER; g.fillRect(cx - 1, cy - 1, 2, 2); }
+  }
+
+  /* the tell: the rim of the hole swells and a few crumbs twitch, four tones, no sprite yet.
+     It says "something is coming out here", never what: a mine and a crowned mole twitch alike. */
+  function tellMark(h, now, cx, cy) {
+    var k = Math.min(1, (now - h.t) / TELL_MS);
+    var side = Math.floor(now / 60) % 2;
+    oval(cx, cy - 1, Math.round(3 + 7 * k), Math.round(1 + 2 * k), MID);
+    oval(cx, cy - 2, Math.round(2 + 4 * k), Math.round(1 + k), DARK);
+    g.fillStyle = INK;
+    g.fillRect(cx - 10 + side, cy - 3 - side, 2, 1);
+    g.fillRect(cx + 8 - side, cy - 2 - (1 - side), 2, 1);
+    g.fillStyle = DARK;
+    g.fillRect(cx - 4 + side, cy - 4 - side, 1, 1);
+    g.fillRect(cx + 3 - side, cy - 5 + side, 1, 1);
+    /* near the end one clod lifts off, so the rise reads as its landing */
+    if (k > 0.55) {
+      var u = (k - 0.55) / 0.45;
+      g.fillStyle = side ? MID : DARK;
+      g.fillRect(cx - 1, cy - 5 - Math.round(7 * u), 2, 2);
+    }
+  }
+
+  function draw(now) {
+    if (!L) return;
+    paintHudCanvas();
+    paintBack();
+    g.imageSmoothingEnabled = false;
+    g.drawImage(hudCv, 0, 0);
+    g.drawImage(backCv, 0, L.hud);
+    /* the field keeps its 120 x 150 pixels; the sky and soil around it are scenery, out of the moles' reach */
+    g.save();
+    g.beginPath(); g.rect(L.x0, L.hud, W, H); g.clip();
+    g.translate(L.x0, L.hud);
+    if (now < shakeUntil) g.translate(Math.round(Math.sin(now / 18) * 2), Math.round(Math.cos(now / 15) * 2));
+    g.fillStyle = PAPER; g.fillRect(-4, -4, W + 8, H + 8);
+    g.fillStyle = MID; tufts.forEach(function (t) { g.fillRect(t[0], t[1], 1, 2); g.fillRect(t[0] + 2, t[1] - 1, 1, 3); });
+    holes.forEach(function (h, i) {
+      var cx = h.x + 20, cy = h.y + 34;
+      if (h.scorch) {
+        g.save(); g.beginPath(); g.rect(h.x, h.y, CW, CH); g.clip();
+        oval(cx, cy, 18, 7, DARK);
+        g.fillStyle = INK;
+        g.fillRect(cx - 15, cy - 2, 4, 1); g.fillRect(cx + 10, cy + 2, 5, 1); g.fillRect(cx + 1, cy + 5, 3, 1);
+        g.restore();
+      }
+      oval(cx, cy, 16, 6, MID);
+      oval(cx, cy, 14, 4, INK);
+      if (h.s === "tell") tellMark(h, now, cx, cy);
+      var r = rise(h, now);
+      if (r > 0) {
+        var top = cy - 28 * r + 2 - (h.s === "hit" && h.kind === "mole" ? -6 : 0);
+        g.save(); g.beginPath(); g.rect(h.x, h.y - 20, CW, cy - h.y + 20); g.clip();
+        if (h.kind === "mine") {
+          if (h.s !== "hit") {
+            blit(SP.mine, cx - 16, top - 2);
+            /* the fuse tip blinks while the mine is up */
+            g.fillStyle = Math.floor(now / 110) % 2 ? MID : INK;
+            g.fillRect(cx + 7, top - 2, 2, 2);
+          }
+        } else {
+          blit(h.s === "hit" ? SP.dizzy : SP.mole, cx - 16, top - 2);
+          if (h.helmet && h.s !== "hit") blit(SP.helmet, cx - 16, top - 2);
+          if (h.thief && h.s !== "hit") { g.fillStyle = DARK; g.fillRect(cx - 8, top + 9, 16, 2); }
+          if (h.gold && h.s !== "hit") {
+            blit(SP.crown, cx - 8, top - 8);
+            if (Math.floor(now / 150) % 2) blit(SP.spark, cx + 8, top - 6, 1);
+          }
+        }
+        g.restore();
+        if (h.kind === "mole") {
+          if (r === 1 && h.s !== "hit") { blit(SP.paw, cx - 13, cy - 4, 2); blit(SP.paw, cx + 3, cy - 4, 2); }
+          if (h.s === "hit") {
+            var a = (now - h.t) / 90;
+            blit(SP.spark, cx - 3 + Math.round(Math.cos(a) * 12), top - 4 + Math.round(Math.sin(a) * 3), 1);
+            blit(SP.spark, cx - 3 - Math.round(Math.cos(a) * 12), top - 4 - Math.round(Math.sin(a) * 3), 1);
+          }
+        }
+      }
+    });
+    holes.forEach(function (h) {
+      if (h.s !== "run") return;
+      var from = holes[h.runFrom], to = holes[h.runTo], q = Math.min(1, (now - h.t) / 250);
+      var x1 = from.x + 20, y1 = from.y + 20, x2 = to.x + 20, y2 = to.y + 20;
+      g.fillStyle = DARK;
+      for (var d = 0; d < 5; d++) {
+        var u = Math.min(1, q + (d - 2) * 0.07);
+        g.fillRect(Math.round(x1 + (x2 - x1) * u), Math.round(y1 + (y2 - y1) * u), 3, 2);
+      }
+      blit(SP.mole, x1 + (x2 - x1) * q - 16, y1 + (y2 - y1) * q - 16);
+      g.fillStyle = DARK; g.fillRect(Math.round(x1 + (x2 - x1) * q - 8), Math.round(y1 + (y2 - y1) * q - 7), 16, 2);
+    });
+    hammers = hammers.filter(function (m) { return now - m.t < 260; });
+    hammers.forEach(function (m) {
+      var h = holes[m.i], cx = h.x + 20, cy = h.y + 34;
+      /* head lands on the mole's head, on the mine, or on the ground for a miss */
+      var land = m.mine ? cy - 8 : m.helm ? cy - 22 : m.hit ? cy - 16 : cy + 2;
+      if (now - m.t < 70) blit(SP.raised, cx - 14, land - 46);
+      else blit(SP.strike, cx - 6, land - 32);
+    });
+    /* the blast goes over the hammer, so a mine hit reads at a glance */
+    holes.forEach(function (h) {
+      if (h.kind === "mine" && h.s === "hit") {
+        var cx = h.x + 20, cy = h.y + 34;
+        g.save(); g.beginPath(); g.rect(h.x, h.y - 20, CW, cy - h.y + 20); g.clip();
+        boom(cx, cy - 10, now - h.t);
+        g.restore();
+      }
+    });
+    pops = pops.filter(function (p) { return now - p.t < 600; });
+    pops.forEach(function (p) {
+      var y = Math.round(p.y - (now - p.t) / 30);
+      if (p.n < 0) { blit(SP.minus, p.x - 4, y, 1); number(-p.n, p.x, y); }
+      else { blit(SP.plus, p.x - 4, y, 1); number(p.n, p.x, y); }
+    });
+    g.restore();
+  }
+
+  /* now: when the dirt starts to twitch; at: when the mole would have risen without the tell */
+  function profileAt(at) {
+    if (MODE !== "level") return Math.min(1, (at - startAt) / RUN_MS);
+    var data = LEVELS[levelNo - 1], progress = Math.max(0, Math.min(1, (at - startAt) / LEVEL_MS));
+    return data.p0 + (data.p1 - data.p0) * progress;
+  }
+  function spawn(now, at, p) {
+    var data = MODE === "level" ? LEVELS[levelNo - 1] : null;
+    var cap = data ? data.cap : (p < 0.33 ? 3 : 4);
+    var up = holes.filter(function (h) { return h.kind === "mole" && h.s !== "down" && h.s !== "runTarget"; }).length;
+    if (up >= cap) return;
+    var free = holes.filter(function (h) { return h.s === "down"; });
+    if (!free.length) return;
+    var h = free[Math.floor(Math.random() * free.length)];
+    h.kind = "mole"; h.helmet = false; h.gold = false; h.thief = false; h.escaped = false; h.runStay = 0;
+    h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at;
+    h.stay = 520 + 420 * (1 - p) + Math.random() * 140; /* slower late game (owner, 11-27) */
+    var goldChance = data ? (data.gold ? 0.06 + 0.04 * p : 0) : (at - startAt > 15000 ? 0.06 + 0.04 * p : 0);
+    if (Math.random() < goldChance) { h.gold = true; h.stay *= 0.65; }
+    else h.helmet = data ? (data.helmet && Math.random() < 0.22) : (at - startAt > 8000 && Math.random() < 0.22);
+    /* a helmet takes two hits, so it stays long enough for two even at full speed (owner, 11-27) */
+    if (h.helmet) h.stay = Math.max(h.stay, 850 + Math.random() * 150);
+    if (data && data.thief && Math.random() < 0.18) {
+      h.thief = true; h.runStay = h.stay; h.stay *= 0.7;
+    }
+  }
+
+  function spawnMine(now, at) {
+    if (MODE === "level" && !LEVELS[levelNo - 1].mines) return;
+    if (holes.some(function (h) { return h.kind === "mine" && h.s !== "down"; })) return;
+    var free = holes.filter(function (h) { return h.s === "down" && now - h.lastTap > 300; });
+    if (!free.length) return;
+    var h = free[Math.floor(Math.random() * free.length)];
+    h.kind = "mine"; h.helmet = false; h.gold = false; h.thief = false; h.escaped = false; h.runStay = 0;
+    h.s = at > now ? "tell" : "rise"; h.t = now; h.riseAt = at; h.stay = 900;
+    if (h.s === "rise") fuseSound();
+  }
+
+  function beginThiefRun(h, fromIndex, now) {
+    var free = holes.map(function (hole, i) { return hole.s === "down" && i !== fromIndex ? i : -1; }).filter(function (i) { return i >= 0; });
+    if (!free.length) { h.s = "down"; return; }
+    h.runTarget = free[Math.floor(Math.random() * free.length)];
+    holes[h.runTarget].s = "runTarget";
+    h.runFrom = fromIndex; h.runTo = h.runTarget; h.s = "run"; h.t = now;
+    thiefRuns++;
+  }
+  function step(now, p) {
+    holes.forEach(function (h) {
+      var upMs = h.kind === "mine" ? 200 : 120;
+      if (h.s === "run" && now - h.t >= 250) {
+        var dest = holes[h.runTarget], source = h;
+        dest.kind = "mole"; dest.helmet = source.helmet; dest.gold = source.gold; dest.thief = true;
+        dest.escaped = true; dest.runStay = source.runStay; dest.stay = source.runStay;
+        dest.s = "rise"; dest.t = now; dest.riseAt = now; dest.lastTap = source.lastTap;
+        source.s = "down"; source.thief = false;
+      } else if (h.s === "tell" && now >= h.riseAt) {
+        h.s = "rise"; h.t = h.riseAt;
+        if (h.kind === "mine") fuseSound();
+      }
+      else if (h.s === "rise" && now - h.t >= upMs) { h.s = "up"; h.t = now; }
+      else if (h.s === "up" && now - h.t >= h.stay) {
+        h.s = "sink"; h.t = now;
+        if (h.kind === "mole") combo = 0;
+      }
+      else if (h.s === "sink" && now - h.t >= upMs) {
+        if (h.kind === "mole" && h.thief && !h.escaped) beginThiefRun(h, holes.indexOf(h), now);
+        else h.s = "down";
+      }
+      else if (h.s === "hit" && now - h.t >= 420) { h.s = "down"; }
+    });
+    if (dying) {
+      if (now >= endAt) finish("mine");
+      return;
+    }
+    /* each spawn is decided TELL_MS early, so the dirt can twitch first; the rise keeps the old
+       moment, and the next one is counted from that same moment as before */
+    if (now >= nextSpawn - TELL_MS) {
+      var at = Math.max(nextSpawn, now), ps = at === now ? p : profileAt(at);
+      spawn(now, at, ps);
+      nextSpawn = at + 380 + 560 * (1 - ps) + Math.random() * 140;
+    }
+    if (now >= nextMine - TELL_MS) {
+      var atMine = Math.max(nextMine, now), pm = atMine === now ? p : profileAt(atMine);
+      spawnMine(now, atMine);
+      nextMine = atMine + 2600 + 1400 * (1 - pm) + Math.random() * 600;
+    }
+    var sec = Math.ceil((endAt - now) / 1000);
+    if (sec !== lastSec) {
+      lastSec = sec; setClock(Math.max(0, sec));
+      if (sec <= 5 && sec > 0) PAD.sfx("tick");
+    }
+    if (now >= endAt) finish("time");
+  }
+
+  function whack(i) {
+    if (!playing || dying) return;
+    var now = performance.now(), h = holes[i];
+    taps++; h.lastTap = now;
+    var m = { i: i, t: now, hit: false }; hammers.push(m);
+    if ((h.s === "rise" || h.s === "up") && rise(h, now) > 0.4) {
+      m.hit = true;
+      if (h.kind === "mine") {
+        m.mine = true;
+        minesHit++; score = Math.max(0, score - 2); combo = 0;
+        h.s = "hit"; h.t = now; h.scorch = true;
+        shakeUntil = now + 180;
+        pops.push({ x: h.x + 18, y: h.y + 2, n: -2, t: now });
+        boomSound();
+        if (MODE === "endless") {
+          dying = true; endedAt = now; endAt = now + 650; lastSec = -1; setClock(1);
+        }
+        return;
+      }
+      hits++;
+      if (MODE === "endless") endAt += h.gold ? 3000 : 1000;
+      if (h.helmet) { h.helmet = false; h.stay = Math.max(h.stay + 300, now - h.t + 600); PAD.sfx("hit"); m.hit = false; m.helm = true; return; }
+      combo++; if (combo > maxCombo) maxCombo = combo;
+      var add = h.thief && h.escaped ? 3 : (h.gold ? 3 : (combo % 5 === 0 ? 2 : 1));
+      score += add; h.s = "hit"; h.t = now;
+      pops.push({ x: h.x + 18, y: h.y + 2, n: add, t: now });
+      hitSound(add);
+    } else { combo = 0; PAD.sfx("miss"); }
+  }
+
+  function start(mode) {
+    MODE = mode === "endless" ? "endless" : (mode === "level" ? "level" : "60");
+    screen = "play";
+    var now = performance.now();
+    score = 0; combo = 0; hits = 0; taps = 0; minesHit = 0; maxCombo = 0; shakeUntil = 0; dying = false; endedAt = 0;
+    startAt = now;
+    endAt = now + (MODE === "60" ? RUN_MS : MODE === "level" ? LEVEL_MS : ENDLESS_START_MS);
+    nextSpawn = now + 400; nextMine = now + (MODE === "level" ? 2500 : 8000); lastSec = -1; thiefRuns = 0;
+    holes.forEach(function (h) {
+      h.s = "down"; h.riseAt = 0; h.helmet = false; h.gold = false; h.kind = "mole";
+      h.lastTap = 0; h.scorch = false; h.thief = false; h.escaped = false; h.runStay = 0;
+    });
+    hammers = []; pops = [];
+    setClock((endAt - now) / 1000);
+    document.getElementById("bests").classList.add("hide");
+    document.getElementById("title-slot").classList.add("hide");
+    document.getElementById("ov").classList.remove("title-view");
+    document.getElementById("ot").classList.remove("hide");
+    document.getElementById("op").classList.remove("hide");
+    document.getElementById("ov").classList.add("hide");
+    playing = true; PAD.sfx("ok");
+  }
+  function finish(reason) { transition(function () { finishScreen(reason); }); }
+  function finishScreen(reason) {
+    if (!playing) return;
+    playing = false; dying = false;
+    var endNow = endedAt || performance.now();
+    var elapsed = Math.max(0, Math.round((endNow - startAt) / 1000));
+    var record;
+    if (MODE === "level") {
+      screen = "tally";
+      var data = LEVELS[levelNo - 1], earned = starsFor(score, data.target), old = stars[levelNo - 1];
+      record = !levelSaveProtected && earned > old;
+      if (!levelSaveProtected && record) {
+        stars[levelNo - 1] = earned;
+        PAD.save("levels", { v: 1, stars: stars.slice() });
+      }
+      document.getElementById("op").textContent = tf("levelResult", { s: score, n: earned }) +
+        (record ? "\n" + TXT.newStars : "");
+      document.getElementById("ot").textContent = earned ? TXT.levelDone : TXT.over;
+      var results = [];
+      if (stars[levelNo - 1] >= 1 && levelNo < 10) results.push({ label: TXT.next, fn: function () { levelNo++; transition(showLevelCard); } });
+      results.push({ label: TXT.levelAgain, fn: function () { transition(function () { start("level"); }); }, wide: results.length === 0 });
+      results.push({ label: TXT.levels, fn: function () { transition(showLevels); }, wide: true });
+      setButtons(results);
+    } else if (MODE === "60") {
+      screen = "tally";
+      record = score > best60;
+      if (record) { best60 = score; PAD.save("best60", best60); }
+      document.getElementById("op").innerHTML = tx("got", score) + "<br>" +
+        tf("result", { h: hits, t: taps, c: maxCombo, m: minesHit, r: rank60(score) }) +
+        (record || !best60 ? "" : tx("bestline", best60));
+      $t("ot", record ? "record" : "over");
+    } else {
+      screen = "tally";
+      var recScore = score > bestEndless, recTime = elapsed > bestEndlessTime && score > 0;
+      record = recScore || recTime;
+      if (recScore) { bestEndless = score; PAD.save("bestEndless", bestEndless); }
+      if (recTime) { bestEndlessTime = elapsed; PAD.save("bestEndlessTime", bestEndlessTime); }
+      document.getElementById("op").innerHTML = tf("endlessGot", { t: fmtTime(elapsed), s: score }) + "<br>" +
+        tf("result", { h: hits, t: taps, c: maxCombo, m: minesHit, r: rankEndless(elapsed) }) +
+        (record || (!bestEndlessTime && !bestEndless) ? "" : tf("bestlineEndless", { t: fmtTime(bestEndlessTime), s: bestEndless }));
+      $t("ot", record ? "record" : (reason === "mine" ? "boom" : "over"));
+    }
+    setClock(0);
+    document.getElementById("bests").classList.add("hide");
+    if (MODE !== "level") setButtons([
+      { label: TXT.again, fn: function () { transition(function () { start(MODE); }); } },
+      { label: TXT.modes, fn: showMenu }
+    ]);
+    document.getElementById("ov").classList.remove("hide");
+    PAD.sfx(record ? "win" : "lose");
+  }
+
+  function loop(now) {
+    /* the iPhone can size the page after the app starts, with no resize event: fit again on any frame that sees a new box */
+    if (stageEl.clientWidth !== lastCW || stageEl.clientHeight !== lastCH) fit();
+    if (playing) step(now, profileAt(now));
+    draw(now);
+    requestAnimationFrame(loop);
+  }
+
+  function fit() {
+    var r = stageEl.getBoundingClientRect(), w = r.width, h = r.height;
+    L = frameLayout(w, h);
+    cv.width = L.W; cv.height = L.H;
+    /* no rounding: a rounded width leaves a hairline of paper down each side on an iPhone; rows are rounded up */
+    cv.style.width = (L.W * L.k) + "px";
+    cv.style.height = (L.H * L.k) + "px";
+    cv.style.left = (-(L.W * L.k - w) / 2) + "px";
+    cv.style.top = (-(L.H * L.k - h) / 2) + "px";
+    g.imageSmoothingEnabled = false;
+    lastCW = stageEl.clientWidth; lastCH = stageEl.clientHeight;
+    hudKey = ""; backKey = "";
+    /* the title picture grows to 1.5x when the stage leaves room for it, and shrinks a little on Safari-short ones */
+    document.getElementById("title-slot").style.zoom = h >= 430 ? 1.5 : h < 360 ? 0.85 : 1;
+  }
+
+  cv.addEventListener("pointerdown", function (e) {
+    e.preventDefault();
+    var r = cv.getBoundingClientRect();
+    var x = (e.clientX - r.left) * L.W / r.width - L.x0;
+    var y = (e.clientY - r.top) * L.H / r.height - L.hud;
+    /* the sky and soil bands are scenery: a tap there never whacks a mole */
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    y -= TOP; if (y < 0) y = 0;
+    var col = Math.min(2, Math.floor(x / CW)), row = Math.min(2, Math.floor(y / CH));
+    whack(row * 3 + col);
+  });
+
+  /* tests only: a read-only snapshot of the nine holes (state, kind, and how long a tell has left);
+     the game never reads it, and the copy it returns cannot change anything */
+  window.__mole = function () {
+    return {
+      playing: playing, mode: MODE, level: levelNo, screen: screen, score: score, combo: combo,
+      stars: stars.slice(), starsFor: starsFor, thiefRuns: thiefRuns, taps: taps,
+      sel: sel, hud: { score: score, combo: combo, clock: Math.max(0, Math.ceil(clockLeft)), best: hudBestText() },
+      buttons: curItems.map(function (it) { return { label: it.label, locked: !!it.locked, wide: !!it.wide }; }),
+      holes: holes.map(function (h) {
+        return { s: h.s, kind: h.kind, helmet: h.helmet, gold: h.gold, thief: !!h.thief, escaped: !!h.escaped, runTarget: h.runTarget,
+          tellLeft: h.s === "tell" ? Math.max(0, h.riseAt - performance.now()) : 0 };
+      })
+    };
+  };
+  /* tests only: the pure layout, so a test can check coverage without a browser */
+  window.__moleLayout = frameLayout;
+
+  $t("ot", "title");
+  drawTitleArt();
+  var tn = document.getElementById("title-name");
+  tn.textContent = TXT.title.replace(" ", "\n"); if (TXT.title.indexOf(" ") >= 0) tn.className = "two";
+  PAD.load("best60").then(function (v) { best60 = +v || 0; showBests(); });
+  PAD.load("bestEndless").then(function (v) { bestEndless = +v || 0; });
+  PAD.load("bestEndlessTime").then(function (v) { bestEndlessTime = +v || 0; showBests(); });
+  PAD.load("levels").then(function (v) {
+    if (v && typeof v === "object" && +v.v > 1) {
+      levelSaveProtected = true; stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; refreshLevelList(); return;
+    }
+    var valid = v && v.v === 1 && Array.isArray(v.stars) && v.stars.length === 10 &&
+      v.stars.every(function (n) { return typeof n === "number" && n % 1 === 0 && n >= 0 && n <= 3; });
+    stars = valid ? v.stars.slice() : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    refreshLevelList();
+  }, function () { stars = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]; refreshLevelList(); });
+  showTitle();
+  addEventListener("resize", fit); fit();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
