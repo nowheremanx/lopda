@@ -875,9 +875,9 @@
         "..2..........2..",
         "................"
       ],
-      "version": "3.0.3",
+      "version": "3.1.0",
       "released": "2026-10-08",
-      "updated": "2026-11-26",
+      "updated": "2026-11-28",
       "description": "短篇视觉小说。雨夜的小站，车晚点五十分钟，爸送你去上大学。十分钟读完。",
       "i18n": {
         "zh": {
@@ -892,8 +892,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/rain-station/index.html",
-      "sha256": "51d8ef7d1be573eec2a1b7b32792b2ba50d26c338d0802904db6a73541749070",
-      "bytes": 107335
+      "sha256": "a3d811f811bf487772b155e68d90a8a1d0f2c3b5ddd6545973acf6602f889f9f",
+      "bytes": 121172
     },
     {
       "spec": "lopda/1",

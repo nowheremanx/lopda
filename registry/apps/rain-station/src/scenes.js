@@ -336,6 +336,147 @@ function drawEndPicture(g) { drawPlatform(g, { rain: 0 }, { train: -200, dad: nu
 /* the title: the platform at night in the rain, nobody on it yet */
 function drawTitlePicture(g) { drawPlatform(g, { rain: 2 }, { train: -200, dad: null }, false); }
 
+/* ---------------- the station around the frame ----------------
+   The story keeps its 160 x 144 world: the picture in rows 0-88, the text box below it. On a phone
+   lo-game 1.5.0 grows the canvas around that world, and these rows are the station the story waits
+   in, not a second picture: the wet night above the shelter's roof, the platform's edge and its
+   puddles under the box. The title keeps the rain falling into the bands; the log, a chapter card
+   and a choice get a still frame so the words keep the eye; the end card gets first light, because
+   its picture is dawn. */
+function bandRain(s, x, y, w, h, n) {
+  var t = game.time;
+  for (var i = 0; i < n; i++) {
+    var rx = x + ((i * 53 + Math.floor(t * 40)) % (w + 10)) - 5;
+    var ry = y + ((i * 29 + Math.floor(t * 150)) % h);
+    var len = Math.min(6, y + h - ry);
+    if (len > 1) s.line(rx, ry, rx - 1, ry + len - 1, i % 8 ? s.DARK : s.MID);
+  }
+}
+function bandPuddles(s, w, y, h, tone, glint) {
+  var n = h >= 40 ? 3 : h >= 16 ? 2 : 1;
+  for (var i = 0; i < n; i++) {
+    var pw = Math.min(w - 16, 26 + (i * 17) % 34), px = (i * 47 + 11) % (w - pw);
+    var py = Math.min(y + h - 4, y + 3 + Math.round(h * (0.2 + 0.26 * (i % 2))));
+    if (pw < 8 || py < y) continue;
+    /* a shallow reflection: a narrow top, a wide middle, a narrow bottom, and the light lying in it */
+    s.dither(px + 4, py, pw - 8, 1, tone, 2);
+    s.dither(px, py + 1, pw, 2, tone, 2);
+    s.dither(px + 3, py + 3, pw - 6, 1, tone, 2);
+    s.rect(px + 3, py + 1, pw - 6, 1, glint);
+    s.pixel(px + Math.round(pw * 0.68), py + 2, glint);
+  }
+}
+function paintBands(s, stage) {
+  var w = s.width, h = s.height, top = stage.y, floorY = stage.y + stage.worldH, floorH = h - floorY;
+  var dawn = !titleOn && cur && cur.kind === "end";
+  var calm = !dawn && !titleOn && (view === "log" || (cur && (cur.kind === "chapter" || cur.kind === "choice")));
+  var x, y;
+  s.clear(dawn ? s.MID : s.INK);
+  if (top > 0) {
+    if (calm) {
+      /* nothing moves but the words: a flat seam against the frame */
+      if (top > 2) s.rect(0, top - 2, w, 2, s.DARK);
+    } else if (dawn) {
+      /* first light: a pale sky, the colour of the end picture, no rain */
+      if (top > 8) s.dither(0, top - 8, w, 8, s.PAPER, 2);
+      if (top > 40) { s.dither(4, 6, w - 8, 5, s.PAPER, 1); s.dither(20, 18, w - 40, 3, s.PAPER, 1); }
+    } else {
+      /* wet night over the shelter; the streaks carry on into the picture's own rain */
+      bandRain(s, 0, 0, w, top + 2, Math.min(120, Math.max(4, Math.round(w * top / 230))));
+      if (top > 6) s.dither(0, top - 4, w, 4, s.DARK, 1);
+      s.rect(0, top - 1, w, 1, s.DARK);
+      /* a platform lamp over the roof, when the night has room for it */
+      if (top >= 22) {
+        var lx = Math.round(w * 0.84), ly = Math.max(2, Math.round(top * 0.34));
+        s.rect(lx, ly, 1, top - ly, s.DARK);
+        s.rect(lx - 3, ly, 7, 1, s.DARK);
+        s.rect(lx - 1, ly + 1, 3, 3, s.MID);
+        s.pixel(lx, ly + 2, s.PAPER);
+        if (top - ly > 8) s.dither(lx - 4, ly + 4, 9, 3, s.DARK, 1);
+      }
+    }
+  }
+  if (floorH > 0) {
+    if (calm) {
+      s.rect(0, floorY, w, Math.min(2, floorH), s.DARK);
+      if (floorH > 6) s.dither(0, floorY + 2, w, floorH - 2, s.DARK, 1);
+    } else if (dawn) {
+      /* the platform in the first light: its pale edge, a wet shine, quiet puddles */
+      s.rect(0, floorY, w, floorH, s.DARK);
+      s.rect(0, floorY, w, 1, s.INK);
+      if (floorH > 1) {
+        s.rect(0, floorY + 1, w, 1, s.MID);
+        for (x = 3; x + 6 < w; x += 10) s.rect(x, floorY + 1, 6, 1, s.PAPER);
+      }
+      if (floorH > 2) s.dither(0, floorY + 2, w, floorH - 2, s.MID, 1);
+      if (floorH > 5) bandPuddles(s, w, floorY + 2, floorH - 2, s.MID, s.PAPER);
+    } else {
+      /* the wet platform under the box: its edge catches the light, puddles hold it */
+      s.rect(0, floorY, w, floorH, s.INK);
+      s.rect(0, floorY, w, 1, s.DARK);
+      if (floorH > 1) {
+        s.rect(0, floorY + 1, w, 1, s.MID);
+        for (x = 3; x + 6 < w; x += 10) s.rect(x, floorY + 1, 6, 1, s.PAPER);
+      }
+      if (floorH > 3) {
+        s.dither(0, floorY + 2, w, floorH - 2, s.DARK, 1);
+        bandPuddles(s, w, floorY + 2, floorH - 2, s.MID, s.PAPER);
+      }
+      /* a drop lands somewhere on the stone, on its own beat */
+      if (floorH > 8) for (y = 0; y < 2; y++) {
+        var q = (game.time * 0.6 + y * 0.43) % 1;
+        if (q < 0.16) s.pixel(Math.round(w * (0.18 + y * 0.55)), floorY + 3 + Math.round((floorH - 5) * ((y + 1) / 3)), s.MID);
+      }
+    }
+  }
+  /* a stage too short for the world's width grows wider than it: the columns beside the story are the
+     same station, never paper (348 x 323 still fits by width; this is the desktop/landscape case) */
+  if (stage.x > 0 || stage.x + stage.worldW < w) paintSides(s, stage, calm, dawn);
+}
+
+/* the columns beside the world on a wide stage: rain down to the picture's bottom, the platform
+   beside the text box, and a one-pixel seam where the station meets the story (lost-deck does the
+   same with its hull). Sides are rare on phones, so this stays inside the world's rows. */
+function paintSides(s, stage, calm, dawn) {
+  var top = stage.y, pic = stage.y + PIC_H, base = stage.y + stage.worldH;
+  var left = stage.x, right = stage.x + stage.worldW;
+  if (base <= top) return;
+  function column(x, cw, seamX) {
+    if (cw <= 0) return;
+    if (calm) {
+      s.rect(x, top, cw, base - top, s.INK);
+      s.rect(x, pic, cw, Math.min(2, base - pic), s.DARK);
+      if (base - pic > 6) s.dither(x, pic + 2, cw, base - pic - 2, s.DARK, 1);
+    } else if (dawn) {
+      s.rect(x, top, cw, pic - top, s.MID);
+      if (pic - top > 8) s.dither(x, pic - 8, cw, 8, s.PAPER, 2);
+      s.rect(x, pic, cw, base - pic, s.DARK);
+      s.rect(x, pic, cw, 1, s.INK);
+      if (base - pic > 1) {
+        s.rect(x, pic + 1, cw, 1, s.MID);
+        for (var dx2 = x + 3; dx2 + 6 < x + cw; dx2 += 10) s.rect(dx2, pic + 1, 6, 1, s.PAPER);
+      }
+      if (base - pic > 2) s.dither(x, pic + 2, cw, base - pic - 2, s.MID, 1);
+    } else {
+      s.rect(x, top, cw, pic - top, s.INK);
+      bandRain(s, x, top, cw, pic - top + 2, Math.max(2, Math.round(cw * (pic - top) / 230)));
+      if (pic - top > 6) s.dither(x, pic - 4, cw, 4, s.DARK, 1);
+      s.rect(x, pic, cw, base - pic, s.INK);
+      s.rect(x, pic, cw, 1, s.DARK);
+      if (base - pic > 1) {
+        s.rect(x, pic + 1, cw, 1, s.MID);
+        for (var dx = x + 3; dx + 6 < x + cw; dx += 10) s.rect(dx, pic + 1, 6, 1, s.PAPER);
+      }
+      if (base - pic > 3) s.dither(x, pic + 2, cw, base - pic - 2, s.DARK, 1);
+    }
+    s.rect(seamX, top, 1, base - top, dawn ? s.INK : s.DARK);
+  }
+  column(0, left, left - 1);
+  column(right, s.width - right, right);
+  if (left > 3) s.dither(0, top, 2, base - top, s.DARK, 1);
+  if (s.width - right > 3) s.dither(s.width - 2, top, 2, base - top, s.DARK, 1);
+}
+
 /* what you hear: rain, by scene, softer with the headphones on; none once the rain stops */
 var RAIN_LEVEL = { title: 0.4, outside: 0.7, waiting: 0.45, platform: 0.8, window: 0.6, berth: 0.25 };
 function hearing(scene, st) {
