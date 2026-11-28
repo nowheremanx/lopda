@@ -323,36 +323,58 @@ var Chords = (function () {
      strings only at the low side plus one in the middle, at most 4 fingers. */
   function generate(c) {
     var Q = qual(c.q), bass = c.bass === null || c.bass === undefined ? c.root : c.bass;
-    var allowed = [], need = [], i;
+    var allowed = [], needMask = 0, i;
     for (i = 0; i < 12; i++) allowed.push(false);
-    Q.iv.forEach(function (v) { allowed[mod12(c.root + v)] = true; if (Q.opt.indexOf(v) < 0) need.push(mod12(c.root + v)); });
+    Q.iv.forEach(function (v) {
+      var pc = mod12(c.root + v);
+      allowed[pc] = true;
+      if (Q.opt.indexOf(v) < 0) needMask |= 1 << pc;
+    });
     allowed[bass] = true;
-    if (need.indexOf(bass) < 0) need.push(bass);
+    needMask |= 1 << bass;
     var minStrings = Q.id === "5" ? 2 : Math.min(4, Q.iv.length + 1);
-    var seen = {}, out = [], frets = [0, 0, 0, 0, 0, 0];
-    function finish() {
-      var notes = midiOf(frets);
-      if (notes.length < minStrings) return;
-      var lowest = Math.min.apply(null, notes);
+    var seen = {}, out = [], frets = [0, 0, 0, 0, 0, 0], reach = [0, 0, 0, 0, 0, 0, 0];
+    /* a pitch-class bitmask and the running low note keep the hot path free of arrays and objects; reach[s] is every
+       pitch class still playable on strings s..5 at this hand position, so a branch that can no longer supply a
+       required tone is cut before it descends */
+    function setReach(lo, hi) {
+      reach[6] = 0;
+      for (var s = 5; s >= 0; s--) {
+        var m = allowed[mod12(OPEN[s])] ? 1 << mod12(OPEN[s]) : 0;
+        for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) m |= 1 << mod12(OPEN[s] + f);
+        reach[s] = m | reach[s + 1];
+      }
+    }
+    function finish(mask, sounding, lowest) {
+      if (sounding < minStrings) return;
       if (mod12(lowest) !== bass) return;
-      var have = {};
-      notes.forEach(function (n) { have[mod12(n)] = true; });
-      for (var k = 0; k < need.length; k++) if (!have[need[k]]) return;
+      if ((mask & needMask) !== needMask) return;
       if (fingerCount(frets).n > 4) return;
       var id = frets.join(",");
       if (seen[id]) return;
       seen[id] = true;
       out.push(frets.slice());
     }
-    function walk(s, lo, hi, started, gaps) {
-      if (s === 6) { finish(); return; }
+    function walk(s, lo, hi, started, gaps, mask, sounding, lowest) {
+      if (sounding + (6 - s) < minStrings) return;
+      if (((mask | reach[s]) & needMask) !== needMask) return;
+      if (s === 6) { finish(mask, sounding, lowest); return; }
       /* muted */
-      if (!started || gaps === 0) { frets[s] = -1; walk(s + 1, lo, hi, started, started ? gaps + 1 : 0); }
+      if (!started || gaps === 0) { frets[s] = -1; walk(s + 1, lo, hi, started, started ? gaps + 1 : 0, mask, sounding, lowest); }
       /* open */
-      if (allowed[mod12(OPEN[s])]) { frets[s] = 0; walk(s + 1, lo, hi, true, gaps); }
-      for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) { frets[s] = f; walk(s + 1, lo, hi, true, gaps); }
+      if (allowed[mod12(OPEN[s])]) {
+        frets[s] = 0;
+        walk(s + 1, lo, hi, true, gaps, mask | (1 << mod12(OPEN[s])), sounding + 1, Math.min(lowest, OPEN[s]));
+      }
+      for (var f = lo; f <= hi; f++) if (allowed[mod12(OPEN[s] + f)]) {
+        frets[s] = f;
+        walk(s + 1, lo, hi, true, gaps, mask | (1 << mod12(OPEN[s] + f)), sounding + 1, Math.min(lowest, OPEN[s] + f));
+      }
     }
-    for (var start = 1; start + SPAN <= MAX_FRET; start++) walk(0, start, start + SPAN, false, 0);
+    for (var start = 1; start + SPAN <= MAX_FRET; start++) {
+      setReach(start, start + SPAN);
+      walk(0, start, start + SPAN, false, 0, 0, 0, Infinity);
+    }
     return out;
   }
 
@@ -375,11 +397,12 @@ var Chords = (function () {
       var id = f.join(",");
       if (seen[id]) return;
       seen[id] = true;
-      list.push({ frets: f, fingers: assignFingers(f), tier: 0, rank: score(f) });
+      list.push({ frets: f, fingers: null, tier: 0, rank: score(f) });
     });
     list.sort(function (a, b) { return b.rank - a.rank; });
     list = list.slice(0, LIMIT);
     list.forEach(function (v) {
+      if (!v.fingers) v.fingers = assignFingers(v.frets);   /* only the 24 shown, not every candidate */
       v.pos = position(v.frets);
       v.barre = v.tier > 0 ? barreFromFingers(v.frets, v.fingers) : fingerCount(v.frets).barre;
     });
