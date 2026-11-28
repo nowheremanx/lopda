@@ -146,6 +146,12 @@ function keycap(g, label, x, y, s) {
   return w;
 }
 function inBox(p, b) { return p.x >= b.x && p.x < b.x + b.w && p.y >= b.y && p.y < b.y + b.h; }
+/* a tap on the world, not on the scenery lo-game's fill canvas adds around it.
+   game.pointer.x/y clamp a band tap to the near edge; stageX/stageY keep the truth. */
+function stageTap(p) {
+  var s = game.stage;
+  return p.stageX >= s.x && p.stageX < s.x + game.width && p.stageY >= s.y && p.stageY < s.y + game.height;
+}
 
 /* ---------- the court around the world ----------
    lo-game 1.5.0's fill canvas grows past the 160 x 144 world on a phone. bands paints the
@@ -166,7 +172,7 @@ function paintBands(s, i) {
     s.frame(px, py, pw, ph, INK);
     s.text(word, px + 7, py + 4, { color: INK });
   }
-  /* one quiet line on the boards: the endings seen, or where the performance is */
+  /* one quiet line on the boards: where the performance is */
   if (botH >= 36 && bandView.status) s.text(bandView.status(), i.w >> 1, i.h - 15, { align: "center", color: PAPER });
 }
 /* the venue's own room, carried out past the world */
@@ -241,7 +247,6 @@ game.scene("title", {
     game.musicStop();
     game.ambience(null);
     bandVenue("hall");
-    bandView.status = function () { return T(TX.endingCount, { e: endingsCount() }); };
   },
   update: function () {
     var items = titleItems(), n = items.length;
@@ -250,7 +255,7 @@ game.scene("title", {
     var canGo = game.time >= titleLock;
     var go = canGo && (game.pressed("a") || game.pressed("start"));
     var rowH = n === 4 ? 14 : 16, startY = n === 4 ? 89 : 92, boxY = n === 4 ? 84 : 86, boxH = n === 4 ? 59 : 57;
-    if (canGo && game.pointer.pressed && game.pointer.y >= boxY && game.pointer.y < boxY + boxH) {
+    if (canGo && game.pointer.pressed && stageTap(game.pointer) && game.pointer.y >= boxY && game.pointer.y < boxY + boxH) {
       var i = Math.floor((game.pointer.y - startY) / rowH);
       if (i >= 0) { titleSel = Math.min(n - 1, i); go = true; }
     }
@@ -463,7 +468,7 @@ game.scene("select", {
     if (selectSel >= selectTop + VIEW_ROWS) selectTop = selectSel - VIEW_ROWS + 1;
     selectTop = Math.max(0, Math.min(SONGS.length - VIEW_ROWS, selectTop));
     var go = canGo && (game.pressed("a") || game.pressed("start"));
-    if (canGo && game.pointer.pressed) {
+    if (canGo && game.pointer.pressed && stageTap(game.pointer)) {
       var row = Math.floor((game.pointer.y - LIST_Y) / ROW_H);
       if (row >= 0 && row < VIEW_ROWS && game.pointer.y >= LIST_Y && game.pointer.y < LIST_Y + VIEW_ROWS * ROW_H) {
         selectSel = selectTop + row; go = true;
@@ -525,7 +530,7 @@ game.scene("howto", {
   update: function () {
     var canGo = game.time >= howLock;
     if (game.pressed("b")) { game.sfx("miss"); game.go("title"); return; }
-    if (canGo && (game.pressed("a") || game.pressed("start") || game.pointer.pressed)) {
+    if (canGo && (game.pressed("a") || game.pressed("start") || (game.pointer.pressed && stageTap(game.pointer)))) {
       game.sfx("tap");
       if (howPage < 3) howPage++;
       else game.go("title");
@@ -992,17 +997,18 @@ game.scene("play", {
         }
       }
 
-      /* touch: the screen is A, except the chime button */
-      var p = game.pointer;
+      /* touch: the world is A, except the chime button; a tap on the scenery around
+         the world (the fill canvas) is not a press, so a mistimed thumb can't blow it */
+      var p = game.pointer, onStage = stageTap(p);
       var tB = false;
       var touchUp = p.released && P.touchA;
-      if (p.pressed) {
+      if (p.pressed && onStage) {
         if (P.hasB && inBox(p, touchBHit())) tB = true;
         else P.touchA = true;
       }
       if (p.released) P.touchA = false;
 
-      var down = game.pressed("a") || (p.pressed && !inBox(p, touchBHit()));
+      var down = game.pressed("a") || (p.pressed && onStage && !inBox(p, touchBHit()));
       var bdown = game.pressed("b") || tB;
       var up = game.released("a") || touchUp;
 

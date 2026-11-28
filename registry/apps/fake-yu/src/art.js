@@ -800,6 +800,15 @@ var ART = (function () {
     if (th <= 0) return;
     g.dither(0, Math.max(0, th - (dawn ? 14 : 20)), w, Math.min(dawn ? 14 : 20, th), MID, 1);
     g.rect(0, th - 1, w, 1, MID);
+    /* the garden's tall sky gets a few faint cloud banks, or it is a blank paper field */
+    if (!dawn && th >= 26) {
+      for (k = 0; k < 3; k++) {
+        bx = Math.round(((k * 67 + 16 + t * 1.6) % (w + 58)) - 29);
+        by = Math.round(th * (0.2 + 0.17 * k));
+        g.dither(bx, by, 42 + k * 9, 3, MID, 1);
+        g.dither(bx + 7, by - 2, 30 + k * 7, 2, MID, 1);
+      }
+    }
     for (k = 0; k < 2; k++) {
       bx = (k ? w - 30 : 22) + Math.round(Math.sin(t * 0.6 + k * 2) * 3);
       by = Math.max(4, Math.floor(th / 2) - k * 4);

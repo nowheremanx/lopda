@@ -63,6 +63,11 @@ function harness(sw, sh) {
   const release = (b) => { if (!down.has(b)) return; down.delete(b); on.release.forEach((f) => f(b)); };
   return { app, game: app.ctx.get("game"), frame, press, release, image: () => image };
 }
+/* a tap at stage-canvas pixel (sx, sy) through the app-vm's pointer, in CSS pixels of the stage */
+function stageTapEvent(h, type, sx, sy) {
+  const k = h.game.stage.k;
+  h.app.pointer(type, (sx + 0.5) * k - 0.5, (sy + 0.5) * k - 0.5);
+}
 
 /* every pixel outside the world, per canvas row: how many are there, how many are paper */
 function bandRows(img, st) {
@@ -132,4 +137,70 @@ test("fake-yu app: the fitted stage covers all five sizes, with no paper in the 
     rows = bandRows(img, st);
     noPaper(rows, `${sw}x${sh} pause`);
   }
+});
+
+test("fake-yu app: a tap on the scenery is inert in play, and on the how-to page", async () => {
+  const h = harness(346, 518);
+  await h.frame(12);                                     /* boot -> title */
+  h.game.go("play", { i: 0, story: false }, { fade: false });
+  const note = h.app.ctx.get("P").chart[0].t;
+  for (let i = 0; i < 600 && h.app.ctx.get("P").t < note - 0.01; i++) await h.frame(1);
+  const P = h.app.ctx.get("P"), st = h.game.stage;
+  assert.ok(P.t >= note - 0.03 && P.t < note, `the run should sit on the first note, t=${P.t}`);
+  const before = { score: P.score, noise: P.noise, judged: Object.keys(P.judged).join(","), touchA: P.touchA };
+  /* the top band, at the x a world tap would play at */
+  stageTapEvent(h, "pointerdown", 80, 4);
+  await h.frame(1);
+  assert.equal(P.touchA, false, "a band tap held A");
+  assert.equal(P.score, before.score, "a band tap scored");
+  assert.equal(P.noise, before.noise, "a band tap added noise");
+  assert.equal(Object.keys(P.judged).join(","), before.judged, "a band tap judged a note");
+  stageTapEvent(h, "pointerup", 80, 4);
+  await h.frame(1);
+  /* the same tap on the world is still the flute */
+  stageTapEvent(h, "pointerdown", 80, st.y + 80);
+  await h.frame(1);
+  const after = h.app.ctx.get("P");
+  assert.ok(after.score > before.score, `a world tap did not play (score ${before.score} -> ${after.score})`);
+  stageTapEvent(h, "pointerup", 80, st.y + 80);
+  await h.frame(1);
+
+  /* the how-to page turns on a world tap only */
+  h.game.go("howto", null, { fade: false });
+  await h.frame(15);                                     /* howLock is 0.2 s */
+  assert.equal(h.app.ctx.get("howPage"), 0);
+  stageTapEvent(h, "pointerdown", 80, 3);
+  await h.frame(1);
+  stageTapEvent(h, "pointerup", 80, 3);
+  await h.frame(1);
+  assert.equal(h.app.ctx.get("howPage"), 0, "a band tap turned the how-to page");
+  stageTapEvent(h, "pointerdown", 80, st.y + 80);
+  await h.frame(1);
+  stageTapEvent(h, "pointerup", 80, st.y + 80);
+  await h.frame(1);
+  assert.equal(h.app.ctx.get("howPage"), 1, "a world tap no longer turns the how-to page");
+});
+
+test("fake-yu app: a tap in the side bands does nothing on the title and the song list", async () => {
+  const h = harness(600, 300);                           /* shorter than 160:144: the canvas grows side bands */
+  await h.frame(12);
+  const st = h.game.stage;
+  assert.ok(st.x >= 40, `the wide stage should grow side bands, x=${st.x}`);
+  const title = h.game.top();
+  stageTapEvent(h, "pointerdown", 10, st.y + 127);        /* the 怎么玩 row, out in the left band */
+  await h.frame(1);
+  stageTapEvent(h, "pointerup", 10, st.y + 127);
+  await h.frame(20);                                     /* a go() fade would have swapped the scene by now */
+  assert.equal(h.app.ctx.get("titleSel"), 0, "a side-band tap moved the title's selection");
+  assert.equal(h.game.top(), title, "a side-band tap left the title");
+
+  h.game.go("select", null, { fade: false });
+  await h.frame(15);                                     /* selectLock is 0.18 s */
+  const selTop = h.game.top();
+  stageTapEvent(h, "pointerdown", 10, st.y + 69);        /* the third row, out in the left band */
+  await h.frame(1);
+  stageTapEvent(h, "pointerup", 10, st.y + 69);
+  await h.frame(20);
+  assert.equal(h.app.ctx.get("selectSel"), 0, "a side-band tap changed the song");
+  assert.equal(h.game.top(), selTop, "a side-band tap started a song");
 });
