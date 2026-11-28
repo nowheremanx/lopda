@@ -80,7 +80,10 @@ var Scales = (function () {
     "7#9": [["altered"], ["hwdim"], ["mixolydian"]],
     "6/9": [["ionian", [5]], ["lydian"], ["majpent"]],
     "m11": [["dorian"], ["aeolian", [8]], ["minpent"]],
-    "add11": [["ionian"], ["mixolydian"]]
+    "add11": [["ionian"], ["mixolydian"]],
+    "7b9": [["altered"], ["hwdim"], ["phrygdom", [5]]],
+    "7b5": [["lyddom", [7]], ["wholetone"], ["altered"]],
+    "7#5": [["wholetone"], ["altered"]]
   };
   var MAJOR = [0, 2, 4, 5, 7, 9, 11], MINOR = [0, 2, 3, 5, 7, 8, 10];
   /* the labs the line reads after the chord's run: a natural 9 always (1.4.2). A b9, #9, 13 or b13 joins it only when

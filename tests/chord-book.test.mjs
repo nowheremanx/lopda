@@ -68,6 +68,7 @@ test("golden list: the shape a guitarist expects comes first under Common", () =
     Cmaj7: "x32000", Dmaj7: "xx0222", Fmaj7: "xx3210", Gmaj7: "320002", Amaj7: "x02120",
     Asus2: "x02200", Asus4: "x02230", Dsus2: "xx0230", Dsus4: "xx0233", Esus4: "022200", Cadd9: "x32030",
     Cmaj9: "x3243x", C13: "x30355", "E7#9": "076780", "C6/9": "x32233", Cm11: "x31311", Cadd11: "x32011",
+    "E7b9": "07676x", C7b5: "x34310", "C7#5": "x36350",
     "D/F#": "2x0232", "G/B": "x20003", "C/G": "332010"
   };
   for (const [name, want] of Object.entries(golden)) {
@@ -146,7 +147,7 @@ test("barres: a guessed finder shape is fingered by fingerCount, so x12222 has n
   assert.ok(C.barreFromFingers(frets, fingers), "the clamped guess is not a barre");
 });
 
-test("every one of the 12 x 25 chords has at least 3 voicings, and every voicing keeps the rules", () => {
+test("every one of the 12 x 28 chords has at least 3 voicings, and every voicing keeps the rules", () => {
   for (const c of every()) {
     const list = C.voicings(c);
     assert.ok(list.length >= 3, `${C.name(c)} has ${list.length}`);
@@ -190,12 +191,21 @@ test("names: every chord's name reads back as the same chord; aliases and enharm
     assert.equal(C.parse(name).q, q, `${name} reads as ${q}`);
     assert.equal(C.name(C.parse(name)), name, `${name} is written back the same way`);
   }
+  /* 1.4.8's three altered dominants, and aug7 as another name for 7#5 (not a second quality) */
+  for (const [name, q] of [["C7b9", "7b9"], ["C7b5", "7b5"], ["C7#5", "7#5"]]) {
+    assert.equal(C.parse(name).q, q, `${name} reads as ${q}`);
+    assert.equal(C.name(C.parse(name)), name, `${name} is written back the same way`);
+  }
+  for (const [a, b] of [["C7(b9)", "C7b9"], ["C7-9", "C7b9"], ["C7(b5)", "C7b5"], ["C7-5", "C7b5"],
+    ["C7(#5)", "C7#5"], ["C7+5", "C7#5"], ["C7+", "C7#5"], ["Caug7", "C7#5"], ["C+7", "C7#5"]]) same(a, b);
+  assert.equal(C.QUALS.filter((x) => x.id === "aug7").length, 0, "aug7 is an alias, not a quality of its own");
+  assert.equal(C.QUALS.filter((x) => x.id === "7#5").length, 1);
   assert.equal(C.parse("Cm").q, "m");
   assert.equal(C.parse("CM").q, "");
   assert.equal(C.parse("Bb").root, 10);
   assert.equal(C.parse("Bbm").q, "m");
   assert.equal(C.parse("Bb5").q, "5");
-  for (const bad of ["", "H", "Cxyz", "C/H", "CM11", "Cm6/9", "Cmaj13", "Cm13", "C7b9", "Cmaj13#11", "C9sus4", "Cmadd9", "12", null, 7]) assert.equal(C.parse(bad), null, String(bad));
+  for (const bad of ["", "H", "Cxyz", "C/H", "CM11", "Cm6/9", "Cmaj13", "Cm13", "Cmaj13#11", "C9sus4", "Cmadd9", "12", null, 7]) assert.equal(C.parse(bad), null, String(bad));
 });
 
 test("the picker's labels: the fixed names with the common enharmonic beside them (1.4.5)", () => {
@@ -210,21 +220,22 @@ test("the picker's labels: the fixed names with the common enharmonic beside the
   assert.equal(C.name({ root: 3, q: "", bass: 1 }), "Eb/C#", "the fixed names, even for a bass written enharmonically");
 });
 
-test("the picker's six groups: the new qualities sit where the design says (1.4.7)", () => {
+test("the picker's six groups: the new qualities sit where the design says (1.4.7, 1.4.8)", () => {
   assert.equal(C.GROUPS.length, 6);
   assert.deepEqual([...C.GROUPS.map((g) => g.zh)], ["三和弦", "七和弦", "挂留", "加音、六", "九、十一、十三", "变化属七"]);
   assert.deepEqual([...C.GROUPS.map((g) => g.en)], ["Triads", "Sevenths", "Suspended", "Added, sixths", "Ninths, elevenths, thirteenths", "Altered dominants"]);
   const group = (id) => C.qual(id).group;
   for (const id of ["6/9", "add11", "add9", "6", "m6"]) assert.equal(group(id), 3, id);
   for (const id of ["9", "m9", "maj9", "13", "m11"]) assert.equal(group(id), 4, id);
-  assert.equal(group("7#9"), 5);
-  assert.equal(C.QUALS.filter((q) => q.group === 5).length, 1, "7#9 is the only altered dominant in this batch");
+  for (const id of ["7#9", "7b9", "7b5", "7#5"]) assert.equal(group(id), 5, id);
+  assert.equal(C.QUALS.filter((q) => q.group === 5).length, 4, "7#9 plus the three altered dominants of 1.4.8");
+  assert.equal(C.QUALS.length, 28);
   C.QUALS.forEach((q) => assert.ok(q.group >= 0 && q.group < C.GROUPS.length, q.id));
 });
 
 /* ---------------- the qualities with no voicing (1.4.4, 1.4.7) ---------------- */
 
-test("exactly sixteen root / quality / bass combinations have no voicing, the eight of 1.4.4 and the eight of 1.4.7", () => {
+test("exactly seventeen root / quality / bass combinations have no voicing: the 1.4.4 eight, 1.4.7's eight and C7b9/B (1.4.8)", () => {
   const empty = [];
   for (let root = 0; root < 12; root++) for (const Q of C.QUALS) for (let bass = 0; bass < 12; bass++) {
     if (bass === root) continue;
@@ -232,9 +243,10 @@ test("exactly sixteen root / quality / bass combinations have no voicing, the ei
   }
   const want = [
     "Ab9/B", "Ebm9/G", "Ebm9/Bb", "Ebm9/B", "Bbm9/D", "Bbm9/F", "Bbm9/F#", "Bbm9/B",
-    "D7#9/Eb", "F7#9/C", "F7#9/C#", "F7#9/Bb", "A7#9/Bb", "Bb7#9/Eb", "Ab6/9/B", "Bbmaj9/C#"
+    "D7#9/Eb", "F7#9/C", "F7#9/C#", "F7#9/Bb", "A7#9/Bb", "Bb7#9/Eb", "Ab6/9/B", "Bbmaj9/C#",
+    "C7b9/B"
   ];
-  assert.equal(empty.length, 16);
+  assert.equal(empty.length, 17);
   assert.deepEqual(empty.slice().sort(), want.slice().sort());
 });
 
@@ -253,11 +265,12 @@ test("identify: each hand-written shape is named as itself first (an equivalent 
   assert.equal(C.name(C.identify(C.fr("x32010"))[0]), "C");
   assert.equal(C.name(C.identify(C.fr("x02010"))[0]), "Am7");
   assert.equal(C.name(C.identify(C.fr("2x0232"))[0]), "D/F#");
-  /* the six shapes of 1.4.7 name themselves first */
-  for (const [name, frets] of [["Cmaj9", "x3243x"], ["C13", "x30355"], ["E7#9", "076780"], ["C6/9", "x32233"], ["Cm11", "x31311"], ["Cadd11", "x32011"]])
+  /* the six shapes of 1.4.7 and the three of 1.4.8 name themselves first */
+  for (const [name, frets] of [["Cmaj9", "x3243x"], ["C13", "x30355"], ["E7#9", "076780"], ["C6/9", "x32233"], ["Cm11", "x31311"], ["Cadd11", "x32011"],
+    ["E7b9", "07676x"], ["C7b5", "x34310"], ["C7#5", "x36350"]])
     assert.equal(C.name(C.identify(C.fr(frets))[0]), name, `${name} ${frets}`);
   assert.equal(C.identify(C.fr("xxxxx0")).length, 0, "one note is no chord");
-  assert.equal(C.identify(C.fr("x01230")).length, 0, "a cluster is no chord of the 25");
+  assert.equal(C.identify(C.fr("x01230")).length, 0, "a cluster is no chord of the 28");
   assert.equal(C.identify(C.fr("xxxxxx")).length, 0);
 });
 
@@ -300,6 +313,12 @@ test("tones: each chord tone carries its interval above the root, in stacking or
   assert.deepEqual(iv("C6/9"), [0, 4, 7, 9, 14], "the 6 stays a sixth");
   assert.deepEqual(iv("Cm11"), [0, 3, 7, 10, 14, 17]);
   assert.deepEqual(iv("Cadd11"), [0, 4, 7, 17], "an add11 is an eleventh, not a fourth");
+  /* 1.4.8: the altered b9 is a ninth, the altered fifth stays at 6 or 8 */
+  assert.deepEqual(iv("C7b9"), [0, 4, 7, 10, 13], "the b9 of a dominant is a flat ninth at 13, above the b7");
+  assert.deepEqual([...C.tones(C.parse("C7b9")).map((x) => x.pc)], [0, 4, 7, 10, 1]);
+  assert.equal(C.tones(C.parse("C7b9")).find((x) => x.lab === "b9").iv, 13);
+  assert.deepEqual(iv("C7b5"), [0, 4, 6, 10]);
+  assert.deepEqual(iv("C7#5"), [0, 4, 8, 10]);
 });
 
 test("strings: each string of a voicing names its pitch and its degree, low E first, a muted string null", () => {
@@ -419,14 +438,19 @@ test("progressions: the numerals name the inversions, and the blues counts its b
   assert.ok(blues.every((b) => b >= 1 && b <= 4), `${blues} bars a chord`);
 });
 
-test("progressions: the six new qualities have their cards, the last three of the 26 (1.4.7)", () => {
-  assert.equal(P.LIST.length, 26);
-  assert.deepEqual([...P.LIST.slice(-3).map((p) => p.id)], ["colours", "add11", "altered9"]);
+test("progressions: the 1.4.7 six qualities and the 1.4.8 three have their cards, the last five of the 28", () => {
+  assert.equal(P.LIST.length, 28);
+  assert.deepEqual([...P.LIST.slice(-5).map((p) => p.id)], ["colours", "add11", "altered9", "altered-b9", "altered-fifth"]);
   const colours = P.LIST.find((p) => p.id === "colours");
   assert.deepEqual([...colours.ch].map((s) => [...s]), [[0, "maj9"], [9, "m11"], [5, "6/9"], [7, "13"]]);
   assert.deepEqual([...colours.rn], ["Imaj9", "vim11", "IV6/9", "V13"]);
   assert.deepEqual([...P.LIST.find((p) => p.id === "add11").rn], ["Iadd11", "IVadd11"]);
   assert.deepEqual([...P.LIST.find((p) => p.id === "altered9").rn], ["I7#9", "IV7#9"]);
+  /* the two cards of 1.4.8 */
+  assert.deepEqual([...P.LIST.find((p) => p.id === "altered-b9").ch].map((s) => [...s]), [[0, "7b9"], [5, "7b9"]]);
+  assert.deepEqual([...P.LIST.find((p) => p.id === "altered-b9").rn], ["I7b9", "IV7b9"]);
+  assert.deepEqual([...P.LIST.find((p) => p.id === "altered-fifth").ch].map((s) => [...s]), [[0, "7b5"], [5, "7#5"]]);
+  assert.deepEqual([...P.LIST.find((p) => p.id === "altered-fifth").rn], ["I7b5", "IV7#5"]);
   /* the colours in C: the V13's 13 is the I's 3rd */
   const c = P.forChord(C.parse("Cmaj9")).find((x) => x.p.id === "colours");
   assert.ok(c, "Cmaj9 is in the colours");
@@ -434,8 +458,8 @@ test("progressions: the six new qualities have their cards, the last three of th
   assert.equal(c.at, 0);
   assert.deepEqual([...c.names], ["Cmaj9", "Am11", "F6/9", "G13"]);
   /* every new quality at every root is in a card, and every chord of each card has a shape (the general test above
-     runs every quality; this one names the six so a gap reads clearly) */
-  for (const q of ["maj9", "13", "7#9", "6/9", "m11", "add11"]) for (let root = 0; root < 12; root++) {
+     runs every quality; this one names the nine so a gap reads clearly) */
+  for (const q of ["maj9", "13", "7#9", "6/9", "m11", "add11", "7b9", "7b5", "7#5"]) for (let root = 0; root < 12; root++) {
     const r = P.forChord({ root, q, bass: null });
     assert.ok(r.length > 0, `${C.name({ root, q, bass: null })} has a progression`);
     for (const x of r) for (const ch of x.chords) assert.ok(C.voicings(ch).length > 0, `${x.p.id}: ${C.name(ch)}`);
@@ -513,6 +537,15 @@ test("the common defaults: maj7 Ionian with 11 to avoid, m7 Dorian, 7 Mixolydian
   assert.deepEqual([...first("13").list.map((o) => o.id)], ["mixolydian", "lyddom", "blues"]);
   assert.deepEqual([...first("m11").list.map((o) => o.id)], ["dorian", "aeolian", "minpent"]);
   assert.deepEqual([...first("add11").list.map((o) => o.id)], ["ionian", "mixolydian"]);
+  /* 1.4.8's three altered dominants */
+  assert.deepEqual([first("7b9").list[0].id, first("7b9").list[0].zh], ["altered", "Altered（变化音阶）"]);
+  assert.deepEqual([first("7b5").list[0].id, first("7b5").list[0].zh], ["lyddom", "Lydian dominant"]);
+  assert.deepEqual([first("7#5").list[0].id, first("7#5").list[0].zh], ["wholetone", "全音音阶"]);
+  assert.deepEqual([...first("7b9").list.map((o) => o.id)], ["altered", "hwdim", "phrygdom"]);
+  assert.deepEqual([...first("7b5").list.map((o) => o.id)], ["lyddom", "wholetone", "altered"]);
+  assert.deepEqual([...first("7#5").list.map((o) => o.id)], ["wholetone", "altered"]);
+  assert.match(first("7b9").list.find((o) => o.id === "phrygdom").why.zh, /11 比 3 高半音/);
+  assert.match(first("7b5").list[0].why.en, /5 is a half step over b5/);
   assert.equal(C7.why.zh, "大调本身，最稳的选择。11 比 3 高半音，经过就好，别停在上面。");
   assert.match(first("sus4").list[0].why.en, /3 would undo the sus/);
   assert.equal(first("maj7").list.find((o) => o.id === "lydian").why.zh, "大调把 11 升成 #11，听着更亮、更飘。");
@@ -535,6 +568,10 @@ test("the degree line keeps the 9 last, and reads a 13 chord's 13 after it; the 
   /* a 13 chord carries its own 13: it is read after the 9 */
   assert.deepEqual(labs("13"), ["R", "3", "11", "5", "b7", "9", "13"]);
   assert.deepEqual(labs("7#9"), ["R", "3", "#11", "5", "b7", "b9", "#9", "b13"]);
+  /* 1.4.8: 7b9 owns the b9, so its altered group reads after the run; the altered fifth stays at its pitch */
+  assert.deepEqual(labs("7b9"), ["R", "3", "#11", "5", "b7", "b9", "#9", "b13"]);
+  assert.deepEqual(labs("7b5"), ["R", "3", "b5", "5", "13", "b7", "9"]);
+  assert.deepEqual(labs("7#5"), ["R", "3", "#11", "#5", "b7", "9"]);
   /* the existing 19 keep exactly their old lines, including the altered 7 and Aeolian minor */
   assert.deepEqual(labs("m"), ["R", "b3", "11", "5", "b13", "b7", "9"]);
   assert.deepEqual(labs("add9"), ["R", "3", "11", "5", "13", "7", "9"]);
