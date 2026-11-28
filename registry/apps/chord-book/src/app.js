@@ -5,7 +5,8 @@
   "use strict";
   var EN = PAD.lang === "en";
   var T = EN ? {
-    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
+    strum: "Strum", arp: "Arpeggio", prev: "Prev", next: "Next", prevScale: "Prev scale", nextScale: "Next scale",
+    mute: "Mute", unmute: "Sound on", whyTitle: "About the scale", common: "Common", pos: "Position", box: "Box", neck: "Neck", degrees: "Degrees", improv: "Improv",
     open: "open", fret: "fret {n}", of: "{i} / {n}", back: "Back", ok: "OK", pick: "Pick a chord", find: "Find",
     search: "C#m7b5, D/F#, Bbmaj7", unknown: "This book has 19 qualities ({q} is not one)", unknownEmpty: "Type a chord name", root: "Root", bass: "Bass", none: "none", recent: "Recent",
     byFrets: "Find by frets", sound: "Sound", vol: ["Off", "Low", "Mid"], see: "Show chord",
@@ -15,7 +16,8 @@
     role: "{c} is {rn} here", spelled: "{c} is written {s} in this key: {rn}", loose: "{c} without its bass: {rn}",
     legend: "■ root ● chord ○ tension × avoid", inKey: "Picked for {k} plus this chord's notes. "
   } : {
-    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
+    strum: "扫弦", arp: "分解", prev: "上一个", next: "下一个", prevScale: "上一种音阶", nextScale: "下一种音阶",
+    mute: "静音", unmute: "开声", whyTitle: "音阶说明", common: "常用", pos: "把位", box: "框图", neck: "指板", degrees: "度数", improv: "即兴",
     open: "开放", fret: "第 {n} 把位", of: "{i} / {n}", back: "返回", ok: "好", pick: "选和弦", find: "找",
     search: "C#m7b5、D/F#、Bbmaj7", unknown: "这个版本只收 19 种和弦（认不出 {q}）", unknownEmpty: "先输入一个和弦名", root: "根音", bass: "低音（斜线和弦）", none: "无", recent: "最近看过",
     byFrets: "在指板上点出和弦", sound: "声音", vol: ["关", "小", "中"], see: "看这个和弦",
@@ -32,6 +34,7 @@
 
   /* ---------------- state and save (section 5) ---------------- */
   var set = { v: 1, cur: { root: 0, q: "", bass: null, i: 0 }, sort: "common", view: "box", vol: 2, recent: [] };
+  var lastVol = 2;          /* the level the mute button comes back to; set.vol may be 0 (1.4.3) */
   var temp = null;          /* a voicing from the finder that is not in the chord's list: shown first until the chord changes */
   var saveTimer = 0, VIEWS = ["box", "neck", "map", "scale"];
   function store() { clearTimeout(saveTimer); saveTimer = setTimeout(function () { PAD.save("set", set); }, 300); }
@@ -45,6 +48,7 @@
     if (VIEWS.indexOf(s.view) >= 0) set.view = s.view;
     if (s.map === true) set.view = "map";   /* 1.2.0 kept the degree map as its own switch */
     if (s.vol === 0 || s.vol === 1 || s.vol === 2) set.vol = s.vol;
+    if (s.lastVol === 1 || s.lastVol === 2) set.lastVol = s.lastVol;
     /* a save from before 1.4.2 may hold Ammaj7: show it as Am(maj7), once */
     if (Array.isArray(s.recent)) {
       var seen = {};
@@ -90,7 +94,7 @@
   }
   function stepMode(d) {
     var m = modes(), n = m.sc.list.length;
-    if (n < 2) { sfx("err"); return false; }
+    if (n < 2) return false;
     m.i = (m.i + d + n) % n;
     sfx("move"); show();
     return true;
@@ -105,7 +109,16 @@
     return { list: l, v: l[set.cur.i] };
   }
   function show() {
-    var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v;
+    var c = chord(), Q = Chords.qual(c.q), cur = current(), v = cur.v, sv = set.view === "scale";
+    /* in the improv view the footer steps through scales, and a chord with a single scale leaves both off (1.4.3) */
+    var one = sv && modes().sc.list.length < 2;
+    $("prev").textContent = t(sv ? "prevScale" : "prev");
+    $("next").textContent = t(sv ? "nextScale" : "next");
+    $("prev").classList.toggle("sc", sv);
+    $("next").classList.toggle("sc", sv);
+    $("prev").disabled = one;
+    $("next").disabled = one;
+    showSound();
     $("cname").textContent = Chords.name(c);
     $("qname").textContent = EN ? Q.en : Q.zh;
     $("view").textContent = t(set.view === "map" ? "degrees" : set.view === "scale" ? "improv" : set.view);
@@ -144,11 +157,26 @@
     });
     if (line.scrollWidth > line.clientWidth) line.classList.add("tight");
     row.innerHTML = "";
+    var text = (m.sc.inKey && m.i === m.sc.def ? t("inKey", { k: m.ctx.label }) : "") + (EN ? o.why.en : o.why.zh);
     var why = el("div", "why2");
-    why.appendChild(el("p", "", (m.sc.inKey && m.i === m.sc.def ? t("inKey", { k: m.ctx.label }) : "") + (EN ? o.why.en : o.why.zh)));
+    why.appendChild(el("p", "", text));
     why.appendChild(el("p", "legend", t("legend")));
+    why.title = t("whyTitle");
+    why.addEventListener("click", function () { openWhy(text); });
     row.appendChild(why);
   }
+  /* the why line is clamped to two lines beside the picture; a tap opens all of it, the legend under it (1.4.3) */
+  var whyOpen = false;
+  function openWhy(text) {
+    $("wtitle").textContent = t("whyTitle");
+    $("wtext").textContent = text;
+    $("wlegend").textContent = t("legend");
+    $("whyfull").classList.add("open");
+    $("whyfull").querySelector(".body").scrollTop = 0;
+    whyOpen = true;
+    sfx("tap");
+  }
+  function closeWhy() { whyOpen = false; $("whyfull").classList.remove("open"); sfx("tap"); }
   function paint() {
     var cur = current(), c = chord();
     if (!cur.v) return;
@@ -255,6 +283,19 @@
   })();
   $("prev").addEventListener("click", function () { step(-1); });
   $("next").addEventListener("click", function () { step(1); });
+  /* the mute button: off, or back to the last level that made a sound; the picker's 声音 row changes the same state */
+  function showSound() { $("mute").textContent = t(Guitar.level() ? "mute" : "unmute"); }
+  function toggleMute() {
+    if (Guitar.level()) { set.vol = 0; Guitar.setLevel(0); sfx("tick"); }
+    else {
+      set.vol = lastVol || 2;
+      set.lastVol = set.vol;
+      Guitar.setLevel(set.vol);
+      if (!Guitar.play([52, 59, 64], 0.012)) sfx("tick");
+    }
+    store(); show();
+  }
+  $("mute").addEventListener("click", toggleMute);
   function setSort(to) {
     var v = current().v;
     set.sort = to;
@@ -323,7 +364,8 @@
     var vol = $("vol"); vol.innerHTML = "";
     T.vol.forEach(function (label, i) {
       vol.appendChild(choice(label, set.vol === i, function () {
-        set.vol = i; Guitar.setLevel(i); store(); buildPicker();
+        set.vol = i; if (i) { lastVol = i; set.lastVol = i; }
+        Guitar.setLevel(i); store(); buildPicker(); showSound();
         if (i) Guitar.play([52, 59, 64], 0.012); else sfx("tick");
       }));
     });
@@ -339,7 +381,13 @@
   $("pok").addEventListener("click", applyPick);
   $("qgo").addEventListener("click", search);
   $("q").addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); search(); } });
-  $("tofind").addEventListener("click", function () { picker.classList.remove("open"); pick = null; openFinder(); });
+  /* the pending pick is applied first, so the finder starts from that chord's first voicing (1.4.3) */
+  $("tofind").addEventListener("click", function () {
+    var c = pick;
+    picker.classList.remove("open"); pick = null;
+    go(c, 0);
+    openFinder(true);
+  });
 
   /* ---------------- the progressions (和弦连接, version 1.2) ---------------- */
   var progs = $("progs"), gl = null, gfocus = 0, gkeyed = false, seq = { timer: 0, card: -1, i: -1 };
@@ -435,15 +483,21 @@
 
   /* ---------------- the finder (section 3.4) ---------------- */
   var fs = null;     /* {frets, base} */
+  var finderFromPicker = false;   /* back from a finder opened by the picker returns there (1.4.3) */
   var finder = $("finder");
-  function openFinder() {
+  function openFinder(fromPicker) {
+    finderFromPicker = fromPicker === true;
     var v = current().v, frets = v ? v.frets.slice() : [-1, 3, 2, 0, 1, 0];
     fs = { frets: frets, base: Math.min(12, Draw.baseFret(frets)) };
     finder.classList.add("open");
     buildFinder();
     sfx("tap");
   }
-  function closeFinder() { finder.classList.remove("open"); fs = null; show(); }
+  function closeFinder() {
+    finder.classList.remove("open"); fs = null;
+    if (finderFromPicker) { finderFromPicker = false; openPicker(); return; }
+    sfx("tap"); show();
+  }
   function buildFinder() {
     var xo = $("xo"); xo.innerHTML = "";
     fs.frets.forEach(function (f, s) {
@@ -504,10 +558,12 @@
     }
     sfx("ok");
     finder.classList.remove("open"); fs = null;
+    finderFromPicker = false;
     set.cur = { root: c.root, q: c.q, bass: c.bass, i: i };
     remember(); store(); show();
   }
-  $("fback").addEventListener("click", function () { sfx("tap"); closeFinder(); });
+  $("fback").addEventListener("click", function () { closeFinder(); });
+  $("wback").addEventListener("click", closeWhy);
   $("fdown").addEventListener("click", function () { moveBase(-1); });
   $("fup").addEventListener("click", function () { moveBase(1); });
   $("fplay").addEventListener("click", function () {
@@ -519,6 +575,7 @@
 
   /* ---------------- keys (section 7) ---------------- */
   PAD.on("press", function (k) {
+    if (whyOpen) { if (k === "b") closeWhy(); return; }
     if (gl) {
       if (k === "b") { sfx("tap"); closeProgs(); }
       else if (k === "up" || k === "left") focusProg(-1);
@@ -527,7 +584,7 @@
       return;
     }
     if (fs) {
-      if (k === "b") { sfx("tap"); closeFinder(); }
+      if (k === "b") closeFinder();
       else if (k === "a" || k === "start") seeFound();
       else if (k === "left") moveBase(-1);
       else if (k === "right") moveBase(1);
@@ -564,12 +621,14 @@
   $("recentH").textContent = t("recent"); $("tofind").textContent = t("byFrets"); $("volH").textContent = t("sound");
   $("sortH").textContent = t("order");
   $("prog").textContent = t("progs"); $("gback").textContent = t("back");
-  $("fback").textContent = t("back");
+  $("fback").textContent = t("back"); $("wback").textContent = t("back");
   $("fplay").textContent = t("listen"); $("fsee").textContent = t("see");
   document.documentElement.lang = EN ? "en" : "zh";
 
   function begin(s) {
     adopt(s);
+    lastVol = set.lastVol || set.vol || 2;
+    set.lastVol = lastVol;
     Guitar.setLevel(set.vol);
     show();
     /* the first paint can come before the layout settles */
