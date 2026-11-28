@@ -2,7 +2,8 @@
    walk, open doors, take stones, fight with arithmetic, buy from four shops, find the folds.
    Everything visible is drawn on lo-game's 160x144 four-tone screen. MIT License. */
 /* the 160 x 144 page is the whole game; on a phone lo-game's fill canvas grows around it (sdk/UI.md 13)
-   and paintBands fills the extra stage with the tower's page walls and floor, never paper */
+   and paintBands surrounds it with the book's paper page frame (PT.FRAME): a mat, sewn lines, folded
+   corners, the head ornament and the twelve page tabs, never brick scenery or a fake floor */
 var game = LoGame.create({ width: 160, height: 144, lang: "zh", fill: true, bands: paintBands });
 var T = game.t;
 document.documentElement.lang = game.lang === "zh" ? "zh-CN" : "en";
@@ -169,75 +170,28 @@ game.scene("title", {
   draw: function (g) { g.clear(g.PAPER); },
   exit: function () { titleUnmount(); }
 });
-/* ---------- the bands around the world ----------
-   The page, its hit tests and its HUD keep the 160 x 144 screen. The rows above it are the tower's paper wall,
-   the rows below are its ledge and floor; a very short stage makes the canvas wider instead, and those columns
-   carry the same wall (sdk/UI.md 13). While a menu, a dialogue, a battle, a fade or the title is up the bands
-   go flat, so the words are read on a calm screen. */
+/* ---------- the page frame around the world ----------
+   The page, its hit tests and its HUD keep the 160 x 144 screen. The extra stage is the book's mat:
+   PT.FRAME draws the paper leaf, its folded corners, the sewn rules around the opening, the head
+   ornament and the twelve page tabs (only where the margin is tall enough). The world itself is
+   never redrawn: no wall above the status bar and no floor below it. While a menu, a dialogue, a
+   battle, a fade or the title is up the frame goes calm, so the words are read on a quiet page. */
 function bandsCalm() {
   return !S || busy || fading || game.top() !== playScene;
 }
-/* lo-game's own fade busy is private: mark the app's fades so the bands stay flat until the screen settles */
+/* lo-game's own fade busy is private: mark the app's fades so the frame stays calm until the screen settles */
 function goFade(name, args, o) {
   fading = true;
   o = o || {};
   o.fade = true;
   return game.go(name, args, o).then(function () { fading = false; });
 }
-function bandWall(s, x, y, w, h) {
-  if (w <= 0 || h <= 0) return;
-  s.rect(x, y, w, h, s.DARK);
-  for (var c = 0, row = y + h - 7; row > y - 7; row -= 7, c++) {
-    var top = Math.max(y, row), bot = Math.min(y + h, row + 7), off = (c & 1) ? 0 : 8;
-    if (bot <= top) continue;
-    /* one brick in five is a lighter sheet, so the wall reads as folded paper, not a flat strip */
-    for (var bx = x - off; bx < x + w; bx += 16) {
-      var x0 = Math.max(x, bx), x1 = Math.min(x + w, bx + 16);
-      if (x1 <= x0) continue;
-      if ((c * 3 + Math.floor(bx / 16)) % 5 === 0) s.rect(x0, top, x1 - x0, bot - top, s.MID);
-      if (bx >= x) s.rect(bx, top, 1, bot - top, s.INK);
-    }
-    if (row >= y) s.rect(x, row, w, 1, s.INK);
-  }
-  s.rect(x, y + h - 1, w, 1, s.INK);
-  s.rect(x, y, w, 1, s.MID);
-}
-function bandFloor(s, x, y, w, h) {
-  if (w <= 0 || h <= 0) return;
-  s.rect(x, y, w, h, s.INK);
-  s.rect(x, y, w, 1, s.PAPER);
-  if (h > 1) s.rect(x, y + 1, w, 1, s.MID);
-  for (var row = y + 10; row < y + h; row += 10) s.rect(x, row, w, 1, s.DARK);
-  for (var gx = x + 9; gx < x + w; gx += 31) s.pixel(gx, y + 5 + (Math.floor(gx / 31) % 4) * 9, s.DARK);
-  /* the climb so far: the twelve pages as tabs, the page you stand on lit. The HUD never shows this. */
-  if (h >= 26 && S) {
-    var n = D.FLOORS.length, tw = 4, gap = 2, total = n * tw + (n - 1) * gap;
-    var tx = Math.round(x + (w - total) / 2), ty = y + h - 9;
-    for (var i = 0; i < n; i++) {
-      var tone = i < S.floor - 1 ? s.MID : i === S.floor - 1 ? s.PAPER : s.DARK;
-      s.rect(tx + i * (tw + gap), ty, tw, 6, tone);
-    }
-    s.rect(tx + (S.floor - 1) * (tw + gap), ty - 1, tw, 1, s.PAPER);
-  }
-}
 function paintBands(s, i) {
-  var calm = bandsCalm(), h = i.h;
-  s.clear(s.PAPER);
-  if (i.y > 0) {
-    if (calm) { s.rect(0, 0, i.w, i.y, s.DARK); s.rect(0, i.y - 1, i.w, 1, s.INK); }
-    else bandWall(s, 0, 0, i.w, i.y);
-  }
-  if (i.y + i.worldH < h) {
-    var fy = i.y + i.worldH, fh = h - fy;
-    if (calm) { s.rect(0, fy, i.w, fh, s.INK); s.rect(0, fy, i.w, 1, s.DARK); }
-    else bandFloor(s, 0, fy, i.w, fh);
-  }
-  /* a stage too short for the world's width: the extra columns are the page's cut edge, never paper */
-  if (i.x > 0) { if (calm) { s.rect(0, 0, i.x, h, s.DARK); s.rect(i.x - 1, 0, 1, h, s.INK); } else bandWall(s, 0, 0, i.x, h); }
-  if (i.x + i.worldW < i.w) {
-    var rx = i.x + i.worldW, rw = i.w - rx;
-    if (calm) { s.rect(rx, 0, rw, h, s.DARK); s.rect(rx, 0, 1, h, s.INK); } else bandWall(s, rx, 0, rw, h);
-  }
+  PT.FRAME.draw(s, i, {
+    calm: bandsCalm(),
+    floor: S ? S.floor : 0,
+    pages: D.FLOORS.length
+  });
 }
 /* with fill on, a press that starts in the bands around the world is not a world tap (LO-GAME.md 2.1):
    the clamped pointer would otherwise walk, open a door or choose a menu row from the scenery */

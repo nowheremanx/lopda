@@ -254,7 +254,7 @@
         "...000000000....",
         "................"
       ],
-      "version": "2.1.0",
+      "version": "2.1.1",
       "released": "2026-10-21",
       "updated": "2026-11-28",
       "description": "十二页纸塔，十分钟一轮：钥匙、墨铺、怪物特技、炸弹与圣水，每一步都要取舍。",
@@ -267,8 +267,8 @@
       "author": "Haowei Wu",
       "license": "MIT",
       "path": "apps/paper-tower/index.html",
-      "sha256": "83f10881f5f36befad38d22831145325d626b133f08c27f6968b129e22b3b19a",
-      "bytes": 210244
+      "sha256": "fbbbfbf8dd05e321cbbed6cef63ad75489f707299a47816fdd1ab3a9e372dbe2",
+      "bytes": 215748
     },
     {
       "spec": "lopda/1",

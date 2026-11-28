@@ -63,7 +63,7 @@ src/data.js       twelve pages, monsters, bosses, items, shops, people (pure dat
 src/rules.js      state, movement, fights, doors, shops, springs, items, poison (pure functions)
 src/art.js        16x16 sprites and tiles, the 208x156 title cover, four tones, original
 src/music.js      original MML songs and custom effects
-src/game.js       scenes, drawing, the fill bands, the shared title, menus, touch, items, save slots, battle and ending
+src/game.js       scenes, drawing, the page frame around the world, the shared title, menus, touch, items, save slots, battle and ending
 ```
 
 ## Playing and checking
