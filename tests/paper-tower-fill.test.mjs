@@ -77,13 +77,101 @@ test("paper-tower fill: fill off keeps the old contain layout, paper and all", (
   }
 });
 
-test("paper-tower app: is on 2.1.0 and asks lo-game for a fill screen with bands", () => {
-  assert.equal(readJSON("registry/apps/paper-tower/manifest.json").version, "2.1.0");
+test("paper-tower app: is on 2.1.1 and asks lo-game for a fill screen with bands", () => {
+  assert.equal(readJSON("registry/apps/paper-tower/manifest.json").version, "2.1.1");
   const src = read("registry/apps/paper-tower/src/game.js");
   assert.match(src, /LoGame\.create\(\{[^}]*width: 160, height: 144[^}]*fill: true[^}]*bands: paintBands/);
+  assert.match(src, /PT\.FRAME\.draw\(s, i, \{/, "the bands are the page frame");
+  assert.doesNotMatch(src, /bandWall|bandFloor/, "the old brick wall and floor are gone");
   const html = read("registry/apps/paper-tower/index.html");
   assert.match(html, /<script data-lo-title="0\.1\.1">/);
   assert.match(html, /<script data-lo-game="1\.5\.0">/);
+});
+
+/* a drawing surface backed by a tone buffer, enough for PT.FRAME (rect, line, frame, text, clear) */
+function frameSurface(w, h) {
+  const px = new Uint8Array(w * h).fill(3);
+  const put = (x, y, c) => { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < w && y < h) px[y * w + x] = c; };
+  const s = {
+    width: w, height: h, px,
+    clear(c) { px.fill(c == null ? 3 : c); },
+    pixel: put,
+    rect(x, y, ww, hh, c) {
+      x = Math.round(x); y = Math.round(y); ww = Math.round(ww); hh = Math.round(hh);
+      for (let j = 0; j < hh; j++) for (let i = 0; i < ww; i++) put(x + i, y + j, c);
+    },
+    line(x0, y0, x1, y1, c) {
+      const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0));
+      for (let i = 0; i <= n; i++) put(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, c);
+    },
+    frame(x, y, ww, hh, c) { s.rect(x, y, ww, 1, c); s.rect(x, y + hh - 1, ww, 1, c); s.rect(x, y, 1, hh, c); s.rect(x + ww - 1, y, 1, hh, c); },
+    text() { return 12; }
+  };
+  return s;
+}
+const frameTone = (s, x, y) => s.px[y * s.width + x];
+const countRow = (s, y, tone, x0 = 0, x1 = s.width) => {
+  let n = 0;
+  for (let x = x0; x < x1; x++) if (frameTone(s, x, y) === tone) n++;
+  return n;
+};
+
+test("paper-tower frame: tall margins are a paper page, with a running head, ornament, tabs and no wall", () => {
+  const FRAME = runScript("registry/apps/paper-tower/src/art.js", { LoGame: { sprites: (t) => t } }).PT.FRAME;
+  const [sw, sh] = [386, 606];
+  const L = LoGame.fillLayout(sw, sh, W, H);
+  const s = frameSurface(L.w, L.h);
+  FRAME.draw(s, { w: L.w, h: L.h, x: L.x, y: L.y, worldW: W, worldH: H },
+    { calm: false, floor: 3, pages: 12, head: "PAPER TOWER", folio: "page 3" });
+
+  /* the row above the world is the page's paper margin, not a brick wall or a floor (the leaf's
+     edge rules run down the sides, so check the span inside them) */
+  for (let x = 6; x < L.w - 6; x++) assert.equal(frameTone(s, x, L.y - 1), 3, `paper above the status bar at x ${x}`);
+  for (let x = 6; x < L.w - 6; x++) assert.equal(frameTone(s, x, L.y - 2), 3, `paper two rows above the status bar at x ${x}`);
+  for (let y = 0; y < L.y; y++) assert.equal(countRow(s, y, 1), 0, `the top margin has no dark scenery on row ${y}`);
+
+  /* the leaf's edge, the sewn line and the opening's rule */
+  assert.ok(countRow(s, 2, 0) > L.w * 0.9, "the outer rule runs around the page");
+  assert.ok(countRow(s, 4, 2) > L.w * 0.9, "the second rule is a lighter page edge");
+  assert.ok(countRow(s, L.y - 3, 0) > L.w * 0.9, "an ink rule closes the picture at the top");
+  const stitch = countRow(s, L.y - 6, 0);
+  assert.ok(stitch > 60 && stitch < L.w * 0.8, `the sewn line is dashed (${stitch} inked pixels)`);
+  assert.ok(countRow(s, 26, 0) > 100, "the running head is ruled");
+
+  /* a printer's ornament above the picture */
+  let ornament = 0;
+  for (let y = L.y - 24; y < L.y - 8; y++) for (let x = 140; x < 246; x++) if (frameTone(s, x, y) === 0 || frameTone(s, x, y) === 2) ornament++;
+  assert.ok(ornament > 60, `the head ornament is drawn (${ornament} pixels)`);
+
+  /* twelve page tabs at the foot, pages read solid, the open page inked, the rest waiting faintly */
+  const ty = L.y + H + 7, tw = 5, gap = 2, total = 12 * tw + 11 * gap, tx = Math.round((L.w - total) / 2);
+  assert.equal(frameTone(s, tx + 2, ty + 5), 0, "a page already read has its dark tab edge");
+  const cur = tx + 2 * (tw + gap);
+  assert.equal(frameTone(s, cur, ty + 2), 0, "the page being read is an inked tab");
+  assert.equal(frameTone(s, cur + 2, ty + 2), 3, "the open tab has its paper slit");
+  for (let i = 3; i < 12; i++) assert.equal(frameTone(s, tx + i * (tw + gap) + 2, ty + 5), 2, `page tab ${i + 1} waits`);
+
+  /* the whole frame stays paper, ink and mid: no dark fill that could pass for scenery */
+  const tones = new Set(s.px);
+  assert.deepEqual([...tones].sort(), [0, 2, 3], "the frame uses paper, mid and ink only");
+});
+
+test("paper-tower frame: a thin frame keeps its rules and corners, and still no wall above the status bar", () => {
+  const FRAME = runScript("registry/apps/paper-tower/src/art.js", { LoGame: { sprites: (t) => t } }).PT.FRAME;
+  const [sw, sh] = [331, 359];
+  const L = LoGame.fillLayout(sw, sh, W, H);
+  assert.ok(L.y >= 10 && L.y < 20, "the smallest phone has a thin margin");
+  const s = frameSurface(L.w, L.h);
+  FRAME.draw(s, { w: L.w, h: L.h, x: L.x, y: L.y, worldW: W, worldH: H }, { calm: true, floor: 1, pages: 12, head: "", folio: "" });
+
+  for (let x = 6; x < L.w - 6; x++) assert.equal(frameTone(s, x, L.y - 1), 3, "paper above the status bar");
+  for (let y = 0; y < L.y; y++) assert.equal(countRow(s, y, 1), 0, "no dark scenery in the top margin");
+  assert.ok(countRow(s, 2, 0) > L.w * 0.8, "the outer rule is there");
+  assert.ok(countRow(s, L.y - 3, 0) > L.w * 0.8, "the rule above the picture is there");
+  assert.ok(countRow(s, L.y - 6, 0) > 20, "the sewn line is there");
+  assert.ok(frameTone(s, 0, 0) === 2 && frameTone(s, L.w - 1, L.h - 1) === 2, "the corners fold");
+  /* no room for tabs on this stage: the foot below the world is only the frame's own margin */
+  assert.equal(countRow(s, L.y + H + 7, 2, 10, L.w - 10), 0, "no tabs are squeezed into a thin margin");
 });
 
 test("paper-tower app: the fitted stage covers all five phone sizes", async () => {
