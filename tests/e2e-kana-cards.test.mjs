@@ -2,6 +2,8 @@
 // home screen, the mode label and the key guide are separate in English and Chinese, a quiz counts
 // its own questions instead of the kana's table position, the kana grid says whether it goes on
 // beyond its top and bottom edges, and the daily review ends on a tally that fits.
+// It also holds the large screen, 386x738: the cover at 2x, the table as wide as the column, and the
+// quiz's Left and Right crossing between the two choices of a row.
 // Needs Playwright, which the repo does not depend on, so this test skips without it:
 //   npm i --no-save playwright && npx playwright install chromium && node --test tests/e2e-kana-cards.test.mjs
 import { test, before, after } from "node:test";
@@ -79,6 +81,17 @@ async function toTable(frame) {
   if (await frame.evaluate(() => document.body.classList.contains("list"))) return;
   await frame.click("#row-table");
   await frame.waitForFunction(() => document.body.classList.contains("list"), null, { timeout: 5000 });
+}
+
+/* the dev harness's screen is the app's stage: give the app another phone and wait for its fit */
+async function setStage(p, frame, w, h) {
+  await p.locator("#app").evaluate((el, size) => {
+    el.style.width = size[0] + "px"; el.style.height = size[1] + "px"; el.style.flex = "none";
+  }, [w, h]);
+  await frame.waitForFunction((size) => document.documentElement.clientWidth === size[0] &&
+    document.documentElement.clientHeight === size[1], [w, h], { timeout: 5000 });
+  /* the fit runs from the observer and from render; one frame is enough */
+  await frame.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
 async function guideBoxes(frame) {
@@ -424,5 +437,105 @@ test("kana-cards: a review leaves the new kana it did not answer for later", { s
   const reopened = await seed(p, "en", saved);
   assert.equal(await reopened.textContent("#review-label"), "Review 4 today", "reopening the same day keeps the remaining four");
   assert.equal(await reopened.textContent("#streak"), "0-day streak", "half a review is not a finished day");
+  assert.deepEqual(errors, []);
+});
+
+/* the large screen: the art doubles and the column widens, without stretching the picture */
+test("kana-cards: 386 x 738 gives the cover 2x and the table the width", { skip, timeout: 90000 }, async (t) => {
+  const { p, frame, errors } = await open(t, "en");
+  await setStage(p, frame, 386, 738);
+
+  const home = await frame.evaluate(() => {
+    const box = (sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { w: r.width, h: r.height }; };
+    const root = getComputedStyle(document.documentElement);
+    return {
+      cover: box("#cover"), column: box("#home"),
+      rows: [...document.querySelectorAll("#rows .row")].map((b) => b.getBoundingClientRect().height),
+      content: root.getPropertyValue("--content").trim(), coverVar: root.getPropertyValue("--cover").trim(),
+      picture: document.querySelector("#cover-art").width
+    };
+  });
+  assert.equal(home.content, "362px");
+  assert.equal(home.coverVar, "320px");
+  assert.deepEqual([home.cover.w, home.cover.h], [320, 320], "the cover is 2 x 160, whole picture pixels");
+  assert.equal(home.picture, 160, "the picture itself is still 160 pixels");
+  assert.equal(home.column.w, 362);
+  assert.ok(home.rows.every((height) => height >= 44), `home rows are touchable (${home.rows})`);
+
+  const fits = await frame.evaluate(() => {
+    const root = document.documentElement, main = document.querySelector("main");
+    return { page: Math.max(root.scrollHeight, document.body.scrollHeight), h: root.clientHeight,
+      main: [main.scrollHeight, main.clientHeight] };
+  });
+  assert.ok(fits.page <= 738, `the page does not scroll (${fits.page} of ${fits.h})`);
+  assert.ok(fits.main[0] <= fits.main[1] + 1, `the home stays inside main (${fits.main.join(" / ")})`);
+
+  await toTable(frame);
+  const table = await frame.evaluate(() => {
+    const wrap = document.querySelector("#refwrap").getBoundingClientRect();
+    const cell = document.querySelector("#reference button").getBoundingClientRect();
+    const ref = document.querySelector("#reference");
+    return { wrap: wrap.width, cell: cell.height, cellW: cell.width, grid: [ref.scrollWidth, ref.clientWidth],
+      row: getComputedStyle(document.documentElement).getPropertyValue("--row").trim() };
+  });
+  assert.equal(table.wrap, 362, "the table uses the wide column");
+  assert.ok(table.cell >= 56 && table.cellW > 56, `the cells grew with it (${table.cellW} x ${table.cell})`);
+  assert.equal(table.grid[0], table.grid[1], "no horizontal scrolling");
+  assert.equal(table.row, "48px");
+
+  await p.locator('#pad [data-b="b"]').click();
+  await frame.waitForFunction(() => document.body.classList.contains("home"));
+  /* at 386 px the frame runs under the harness's pad on this 390 px page: press the row itself */
+  await frame.evaluate(() => document.getElementById("row-quiz").click());
+  await frame.waitForFunction(() => document.body.classList.contains("quiz"));
+  const quiz = await frame.evaluate(() => {
+    const opts = [...document.querySelectorAll("#options button")].map((b) => b.getBoundingClientRect());
+    return { width: document.querySelector("#options").getBoundingClientRect().width,
+      card: document.querySelector("#card").getBoundingClientRect().height,
+      heights: opts.map((r) => r.height), cols: new Set(opts.map((r) => Math.round(r.left))).size };
+  });
+  assert.equal(quiz.width, 362);
+  assert.equal(quiz.cols, 2, "two choices a row");
+  assert.ok(quiz.heights.every((height) => height >= 48), `quiz choices grew with the screen (${quiz.heights})`);
+  assert.ok(quiz.card >= 100, `the quiz card has room (${quiz.card})`);
+
+  await p.locator('#pad [data-b="b"]').click();
+  await frame.waitForFunction(() => document.body.classList.contains("home"));
+  await setStage(p, frame, 331, 359);
+  const small = await frame.evaluate(() => {
+    const root = getComputedStyle(document.documentElement);
+    return { content: root.getPropertyValue("--content").trim(), cover: root.getPropertyValue("--cover").trim(),
+      coverW: document.querySelector("#cover").getBoundingClientRect().width };
+  });
+  assert.equal(small.cover, "160px", "the smallest screen keeps the picture at 1x");
+  assert.equal(small.coverW, 160);
+  assert.equal(small.content, "307px");
+  assert.deepEqual(errors, []);
+});
+
+test("kana-cards: Left and Right cross to the other choice in a quiz row", { skip, timeout: 90000 }, async (t) => {
+  const { p, frame, errors } = await open(t, "en");
+  await frame.click("#row-quiz");
+  await frame.waitForFunction(() => document.body.classList.contains("quiz"));
+  const selected = () => frame.evaluate(() =>
+    [...document.querySelectorAll("#options button")].findIndex((b) => b.classList.contains("selected")));
+  const press = async (button) => {
+    await p.locator(`#pad [data-b="${button}"]`).click();
+    await frame.evaluate(() => new Promise((r) => requestAnimationFrame(r)));
+  };
+
+  assert.equal(await selected(), 0);
+  await press("right");
+  assert.equal(await selected(), 1, "Right crosses to the second choice");
+  await press("right");
+  assert.equal(await selected(), 0, "Right wraps inside the row");
+  await press("left");
+  assert.equal(await selected(), 1, "Left crosses too; the old ternary always stepped right");
+  await press("left");
+  assert.equal(await selected(), 0, "Left wraps inside the row");
+  await press("down");
+  assert.equal(await selected(), 2, "Down goes to the row below");
+  await press("up");
+  assert.equal(await selected(), 0, "Up comes back");
   assert.deepEqual(errors, []);
 });
