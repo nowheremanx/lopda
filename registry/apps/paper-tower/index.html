@@ -2433,41 +2433,21 @@ PT.titleCover = (function () {
   return { W: W, H: H, draw: draw };
 })();
 
-/* The page frame around the 160 x 144 world (sdk/UI.md 13). The game is a page in a pop-up book:
-   the stage's extra room is the book's paper mat, with a double rule at the edge, a sewn line and a
-   dark inner rule around the picture, folded corners, a running head and a printer's ornament, and
-   the twelve page tabs at the foot with the page being read inked. Nothing here is scenery: no brick
-   wall, no floor, and the row just above the world stays paper. Calm (a menu, a dialogue, a fade)
-   keeps the page and its head but flattens the tabs, so the words are read on a quiet leaf. */
+/* The page frame around the 160 x 144 world (sdk/UI.md 13). The stage's extra room is a picture
+   frame, not scenery: the picture's own frame (sewn rules and the twelve page tabs) is capped at
+   20 canvas pixels, about 43-48 CSS px on a tall phone, and the rest of the leaf is a patterned
+   paper mat -- a woven grid of small diamonds, folded corners, stacked page edges and a printer's
+   ornament. No brick wall, no floor, no giant running head; the two rows above the status bar stay
+   paper. Calm (a menu, a dialogue, a fade) keeps the leaf and its ornament but flattens the tabs. */
 PT.FRAME = (function () {
   "use strict";
   var INK = 0, MID = 2, PAPER = 3;
-  var DIGITS = {
-    "0": ["111", "101", "101", "101", "111"],
-    "1": ["010", "110", "010", "010", "111"],
-    "2": ["111", "001", "111", "100", "111"],
-    "3": ["111", "001", "111", "001", "111"],
-    "4": ["101", "101", "111", "001", "001"],
-    "5": ["111", "100", "111", "001", "111"],
-    "6": ["111", "100", "111", "101", "111"],
-    "7": ["111", "001", "010", "010", "010"],
-    "8": ["111", "101", "111", "101", "111"],
-    "9": ["111", "101", "111", "001", "111"],
-    "/": ["001", "001", "010", "100", "100"]
-  };
+  var FRAME = 20;   /* canvas pixels: the picture's own frame, about 48 CSS px at 386 wide */
   function hline(s, x0, x1, y, c) { if (x1 > x0) s.rect(x0, y, x1 - x0, 1, c); }
   function vline(s, x, y0, y1, c) { if (y1 > y0) s.rect(x, y0, 1, y1 - y0, c); }
   /* dashes along a line, so the mat reads as sewn or perforated paper */
   function dashesH(s, x0, x1, y, c) { for (var x = x0; x < x1; x += 4) hline(s, x, Math.min(x + 2, x1), y, c); }
   function dashesV(s, x, y0, y1, c) { for (var y = y0; y < y1; y += 4) vline(s, x, y, Math.min(y + 2, y1), c); }
-  function tiny(s, str, x, y, c) {
-    for (var i = 0; i < str.length; i++) {
-      var gl = DIGITS[str.charAt(i)];
-      if (!gl) continue;
-      for (var j = 0; j < 5; j++) for (var k = 0; k < 3; k++) if (gl[j].charAt(k) === "1") s.pixel(x + i * 4 + k, y + j, c);
-    }
-  }
-  function tinyWidth(str) { return str.length * 4 - 1; }
 
   /* a folded page corner: the reverse of the leaf turned over, its crease inked */
   function dogear(s, cx, cy, n, sx, sy) {
@@ -2479,20 +2459,23 @@ PT.FRAME = (function () {
     s.line(x0, cy, cx, y1, INK);
   }
 
-  /* the printer's tailpiece at the foot: a line of three dots on a ruled line */
-  function tailpiece(s, cx, cy) {
-    hline(s, cx - 18, cx - 6, cy, MID);
-    hline(s, cx + 7, cx + 19, cy, MID);
-    s.pixel(cx - 3, cy, INK); s.pixel(cx, cy, INK); s.pixel(cx + 3, cy, INK);
+  /* the mat beyond the picture's frame: a woven grid of small paper diamonds */
+  function mat(s, w, h) {
+    var step = 12, row, x, y;
+    for (y = 12, row = 0; y < h - 12; y += step, row++) {
+      for (x = 6 + ((row & 1) ? 6 : 0); x < w - 5; x += step) {
+        s.pixel(x, y - 1, MID); s.pixel(x - 1, y, MID);
+        s.pixel(x + 1, y, MID); s.pixel(x, y + 1, MID);
+        s.pixel(x, y, ((row + Math.floor(x / step)) & 1) ? INK : PAPER);
+      }
+    }
   }
 
-  /* the printer's ornament at the head of the page: a paper diamond on a ruled line */
-  function ornament(s, cx, cy, w, calm) {
-    var r = 4, i, len;
-    hline(s, 14, cx - r - 6, cy, INK);
-    hline(s, cx + r + 6, w - 14, cy, INK);
-    hline(s, 14, cx - r - 10, cy + 1, MID);
-    hline(s, cx + r + 10, w - 14, cy + 1, MID);
+  /* the small printer's ornament at the head of the picture's frame; no title, no folio */
+  function ornament(s, cx, cy, w) {
+    var r = 3, i, len;
+    hline(s, 10, cx - r - 5, cy, INK);
+    hline(s, cx + r + 5, w - 10, cy, INK);
     for (i = -r; i <= r; i++) {
       len = r - (i < 0 ? -i : i);
       s.rect(cx - len, cy + i, len * 2 + 1, 1, MID);
@@ -2502,7 +2485,6 @@ PT.FRAME = (function () {
     s.line(cx, cy + r, cx - r, cy, INK);
     s.line(cx - r, cy, cx, cy - r, INK);
     s.pixel(cx, cy, PAPER);
-    if (!calm) s.pixel(cx, cy - 2, INK);
   }
 
   /* the twelve page tabs at the foot: pages read are solid, the open page is inked, the rest wait */
@@ -2530,10 +2512,25 @@ PT.FRAME = (function () {
     s.clear(PAPER);
     if (w < 16 || h < 16) return;
 
+    /* on a tall phone the frame is 20 canvas pixels; everything beyond it is the patterned mat */
+    var tall = top >= 28 && bot >= 28;
+    var tT = Math.min(FRAME, top), tB = Math.min(FRAME, bot);
+    var tL = Math.min(FRAME, left), tR = Math.min(FRAME, right);
+    if (tall) {
+      mat(s, w, h);
+      s.rect(x, y, ww, wh, PAPER);
+      s.rect(0, y - tT, w, tT, PAPER);
+      s.rect(0, y1, w, tB, PAPER);
+      if (left > 0) s.rect(x - tL, y, tL, wh, PAPER);
+      if (right > 0) s.rect(x1, y, tR, wh, PAPER);
+    }
+
     /* the leaf's edge: two rules, the outer inked and the inner a lighter page edge */
     s.frame(2, 2, w - 4, h - 4, INK);
     s.frame(4, 4, w - 8, h - 8, MID);
-    if (bot >= 30) { hline(s, 14, w - 14, h - 10, MID); hline(s, 14, w - 14, h - 8, MID); }
+    /* the stacked page edges inside the leaf's edge */
+    if (tall) { hline(s, 6, w - 6, 6, MID); hline(s, 6, w - 6, 8, MID); hline(s, 6, w - 6, h - 8, MID); hline(s, 6, w - 6, h - 6, MID); }
+    else if (bot >= 30) { hline(s, 14, w - 14, h - 10, MID); hline(s, 14, w - 14, h - 8, MID); }
 
     /* the four corners fold over, so the frame reads as a page and not a border drawn on a wall */
     if (top >= 12) { var nt = Math.max(5, Math.min(10, Math.floor(top / 2))); dogear(s, 0, 0, nt, 1, 1); dogear(s, w - 1, 0, nt, -1, 1); }
@@ -2554,26 +2551,15 @@ PT.FRAME = (function () {
     if (left >= 9) dashesV(s, x - 6, top >= 9 ? 0 : y, top >= 9 ? h : y1, INK);
     if (right >= 9) { var rx = x1 + 6; dashesV(s, rx, top >= 9 ? 0 : y, top >= 9 ? h : y1, INK); }
 
-    /* tall margins get the details: a running head, an ornament and the page tabs at the foot */
-    if (top >= 40) {
-      var head = o.head || "", folio = o.folio || "", hy = 10;
-      if (head) s.text(head, 14, hy, { color: INK });
-      if (folio) s.text(folio, w - 14, hy, { align: "right", color: INK });
-      hline(s, 14, w - 14, hy + 16, INK);
-      hline(s, 14, w - 14, hy + 17, MID);
-      ornament(s, Math.round(w / 2), y - 16, w, calm);
-    } else if (top >= 30) {
-      ornament(s, Math.round(w / 2), Math.round((6 + (y - 7)) / 2), w, calm);
+    if (tall) {
+      /* the picture's frame closes with a bold double rule, the same on every side */
+      if (tT >= 12) { hline(s, 0, w, y - tT + 3, INK); hline(s, 0, w, y - tT + 1, MID); }
+      if (tB >= 12) { hline(s, 0, w, y1 + tB - 3, INK); hline(s, 0, w, y1 + tB - 1, MID); }
+      if (left >= 12) { vline(s, x - tL + 3, y, y1, INK); vline(s, x - tL + 1, y, y1, MID); }
+      if (right >= 12) { vline(s, x1 + tR - 3, y, y1, INK); vline(s, x1 + tR - 1, y, y1, MID); }
+      ornament(s, Math.round(w / 2), y - 12, w);
+      tabs(s, w, y1 + 8, floor, pages, calm);
     }
-    if (bot >= 26) {
-      tabs(s, w, y1 + 7, floor, pages, calm);
-      /* a short page has no running head to carry the folio: put a small one under the tabs */
-      if (top < 40 && !calm && floor > 0) {
-        var label = floor + "/" + pages, lw = tinyWidth(label);
-        tiny(s, label, Math.round((w - lw) / 2), y1 + 18, INK);
-      }
-    }
-    if (bot >= 30) tailpiece(s, Math.round(w / 2), h - 26);
   }
 
   return { draw: draw };
@@ -2916,10 +2902,7 @@ function paintBands(s, i) {
   PT.FRAME.draw(s, i, {
     calm: bandsCalm(),
     floor: S ? S.floor : 0,
-    pages: D.FLOORS.length,
-    /* the running head and folio, when the margin is tall enough for them */
-    head: t("纸 塔", "PAPER TOWER"),
-    folio: S ? t("第 " + S.floor + " 页", "page " + S.floor) : ""
+    pages: D.FLOORS.length
   });
 }
 /* with fill on, a press that starts in the bands around the world is not a world tap (LO-GAME.md 2.1):

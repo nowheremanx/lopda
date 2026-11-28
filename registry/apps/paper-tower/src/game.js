@@ -190,10 +190,7 @@ function paintBands(s, i) {
   PT.FRAME.draw(s, i, {
     calm: bandsCalm(),
     floor: S ? S.floor : 0,
-    pages: D.FLOORS.length,
-    /* the running head and folio, when the margin is tall enough for them */
-    head: t("纸 塔", "PAPER TOWER"),
-    folio: S ? t("第 " + S.floor + " 页", "page " + S.floor) : ""
+    pages: D.FLOORS.length
   });
 }
 /* with fill on, a press that starts in the bands around the world is not a world tap (LO-GAME.md 2.1):

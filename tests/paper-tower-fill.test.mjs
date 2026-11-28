@@ -105,7 +105,8 @@ function frameSurface(w, h) {
       for (let i = 0; i <= n; i++) put(x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * i / n, c);
     },
     frame(x, y, ww, hh, c) { s.rect(x, y, ww, 1, c); s.rect(x, y + hh - 1, ww, 1, c); s.rect(x, y, 1, hh, c); s.rect(x + ww - 1, y, 1, hh, c); },
-    text() { return 12; }
+    textCalls: 0,
+    text() { s.textCalls++; return 12; }
   };
   return s;
 }
@@ -116,13 +117,13 @@ const countRow = (s, y, tone, x0 = 0, x1 = s.width) => {
   return n;
 };
 
-test("paper-tower frame: tall margins are a paper page, with a running head, ornament, tabs and no wall", () => {
+test("paper-tower frame: tall margins cap the frame and pattern the rest of the mat", () => {
   const FRAME = runScript("registry/apps/paper-tower/src/art.js", { LoGame: { sprites: (t) => t } }).PT.FRAME;
   const [sw, sh] = [386, 606];
   const L = LoGame.fillLayout(sw, sh, W, H);
   const s = frameSurface(L.w, L.h);
   FRAME.draw(s, { w: L.w, h: L.h, x: L.x, y: L.y, worldW: W, worldH: H },
-    { calm: false, floor: 3, pages: 12, head: "PAPER TOWER", folio: "page 3" });
+    { calm: false, floor: 3, pages: 12 });
 
   /* the row above the world is the page's paper margin, not a brick wall or a floor (the leaf's
      edge rules run down the sides, so check the span inside them) */
@@ -130,21 +131,31 @@ test("paper-tower frame: tall margins are a paper page, with a running head, orn
   for (let x = 6; x < L.w - 6; x++) assert.equal(frameTone(s, x, L.y - 2), 3, `paper two rows above the status bar at x ${x}`);
   for (let y = 0; y < L.y; y++) assert.equal(countRow(s, y, 1), 0, `the top margin has no dark scenery on row ${y}`);
 
-  /* the leaf's edge, the sewn line and the opening's rule */
+  /* the picture's own frame is 20 canvas pixels: inner rule, sewn line, bold outer edge */
   assert.ok(countRow(s, 2, 0) > L.w * 0.9, "the outer rule runs around the page");
   assert.ok(countRow(s, 4, 2) > L.w * 0.9, "the second rule is a lighter page edge");
   assert.ok(countRow(s, L.y - 3, 0) > L.w * 0.9, "an ink rule closes the picture at the top");
   const stitch = countRow(s, L.y - 6, 0);
   assert.ok(stitch > 60 && stitch < L.w * 0.8, `the sewn line is dashed (${stitch} inked pixels)`);
-  assert.ok(countRow(s, 26, 0) > 100, "the running head is ruled");
+  assert.ok(countRow(s, L.y - 17, 0) > L.w * 0.9, "the picture's frame closes at 17 px");
+  assert.ok(countRow(s, L.y - 19, 2) > L.w * 0.9, "a lighter page edge closes it at 19 px");
+  assert.ok(countRow(s, L.y + H + 17, 0) > L.w * 0.9, "the foot's frame is the same thickness");
 
-  /* a printer's ornament above the picture */
+  /* beyond the frame is a patterned mat, not blank paper: diamonds in the outer margin.
+     The fill layout centres the world, so the two mats are the same depth; both carry the grid. */
+  assert.equal(L.y, L.h - (L.y + H), "the top and bottom mats are the same depth");
+  assert.ok(countRow(s, 12, 2) > 8, "the top mat's diamond row is drawn");
+  const bottomRow = 12 + 12 * Math.ceil((L.y + H + 20 - 12) / 12);
+  assert.ok(countRow(s, bottomRow, 2) > 8, "the bottom mat's diamond row is drawn");
+
+  /* a small printer's ornament above the picture; no running head in the band at all */
   let ornament = 0;
-  for (let y = L.y - 24; y < L.y - 8; y++) for (let x = 140; x < 246; x++) if (frameTone(s, x, y) === 0 || frameTone(s, x, y) === 2) ornament++;
-  assert.ok(ornament > 60, `the head ornament is drawn (${ornament} pixels)`);
+  for (let y = L.y - 17; y < L.y - 8; y++) for (let x = 64; x < 96; x++) if (frameTone(s, x, y) === 0 || frameTone(s, x, y) === 2) ornament++;
+  assert.ok(ornament > 30, `the small ornament is drawn (${ornament} pixels)`);
+  assert.equal(s.textCalls, 0, "no engine-font running head in the bands");
 
   /* twelve page tabs at the foot, pages read solid, the open page inked, the rest waiting faintly */
-  const ty = L.y + H + 7, tw = 5, gap = 2, total = 12 * tw + 11 * gap, tx = Math.round((L.w - total) / 2);
+  const ty = L.y + H + 8, tw = 5, gap = 2, total = 12 * tw + 11 * gap, tx = Math.round((L.w - total) / 2);
   assert.equal(frameTone(s, tx + 2, ty + 5), 0, "a page already read has its dark tab edge");
   const cur = tx + 2 * (tw + gap);
   assert.equal(frameTone(s, cur, ty + 2), 0, "the page being read is an inked tab");
@@ -162,7 +173,7 @@ test("paper-tower frame: a thin frame keeps its rules and corners, and still no 
   const L = LoGame.fillLayout(sw, sh, W, H);
   assert.ok(L.y >= 10 && L.y < 20, "the smallest phone has a thin margin");
   const s = frameSurface(L.w, L.h);
-  FRAME.draw(s, { w: L.w, h: L.h, x: L.x, y: L.y, worldW: W, worldH: H }, { calm: true, floor: 1, pages: 12, head: "", folio: "" });
+  FRAME.draw(s, { w: L.w, h: L.h, x: L.x, y: L.y, worldW: W, worldH: H }, { calm: true, floor: 1, pages: 12 });
 
   for (let x = 6; x < L.w - 6; x++) assert.equal(frameTone(s, x, L.y - 1), 3, "paper above the status bar");
   for (let y = 0; y < L.y; y++) assert.equal(countRow(s, y, 1), 0, "no dark scenery in the top margin");
